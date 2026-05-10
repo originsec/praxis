@@ -11,13 +11,26 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-const CA_CERT_FILE: &str = ".praxis_bridge_ca_cert.pem";
-const CA_KEY_FILE: &str = ".praxis_bridge_ca_key.pem";
+//
+// Bridge CA material lives under ~/.praxis/bridge/.
+//
 
-fn home_path(name: &str) -> PathBuf {
+const CA_CERT_FILE: &str = "ca_cert.pem";
+const CA_KEY_FILE: &str = "ca_key.pem";
+
+fn bridge_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join(name)
+        .join(".praxis")
+        .join("bridge")
+}
+
+fn ca_cert_path() -> PathBuf {
+    bridge_dir().join(CA_CERT_FILE)
+}
+
+fn ca_key_path() -> PathBuf {
+    bridge_dir().join(CA_KEY_FILE)
 }
 
 //
@@ -51,14 +64,18 @@ fn ca_params() -> CertificateParams {
 }
 
 fn load_ca_pem() -> Option<(String, String)> {
-    let cert = std::fs::read_to_string(home_path(CA_CERT_FILE)).ok()?;
-    let key = std::fs::read_to_string(home_path(CA_KEY_FILE)).ok()?;
+    let cert = std::fs::read_to_string(ca_cert_path()).ok()?;
+    let key = std::fs::read_to_string(ca_key_path()).ok()?;
     Some((cert, key))
 }
 
 fn save_ca_pem(cert_pem: &str, key_pem: &str) -> Result<()> {
-    let cert_path = home_path(CA_CERT_FILE);
-    let key_path = home_path(CA_KEY_FILE);
+    let cert_path = ca_cert_path();
+    let key_path = ca_key_path();
+    if let Some(parent) = cert_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
     std::fs::write(&cert_path, cert_pem)
         .with_context(|| format!("Failed to write bridge CA cert to {}", cert_path.display()))?;
     std::fs::write(&key_path, key_pem)

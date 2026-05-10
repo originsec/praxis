@@ -7,7 +7,7 @@ import type { OrchestratorState, OrchestratorSessionState } from './orchestrator
 // Re-export Orchestrator types for consumers.
 //
 export type { OrchestratorMessage, OrchestratorToolExecution, OrchestratorSessionState } from './orchestratorTypes';
-import { loadPersistedOrchestratorState, loadRecentNodes, persistRecentNodes, persistOrchestratorState } from '../utils/persistence';
+import { loadRecentNodes, persistRecentNodes } from '../utils/persistence';
 import type {
   SystemState,
   NodeState,
@@ -309,7 +309,7 @@ function createInitialState(): AppState {
     config: {},
     opDefError: null,
     opDefSuccess: null,
-    orchestrator: loadPersistedOrchestratorState(initialOrchestratorState),
+    orchestrator: initialOrchestratorState,
     intercept: initialInterceptState,
     logQuery: initialLogQueryState,
     chains: initialChainState,
@@ -1554,13 +1554,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.clientId]);
 
   //
-  // Persist Orchestrator state to sessionStorage whenever it changes.
-  //
-  useEffect(() => {
-    persistOrchestratorState(state.orchestrator);
-  }, [state.orchestrator]);
-
-  //
   // Handle WebSocket messages - only set up once.
   //
   useEffect(() => {
@@ -1569,15 +1562,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'connected': {
           dispatch({ type: 'SET_CONNECTED', connected: true, clientId: message.client_id, version: message.version });
           wsClient.send({ type: 'config_get', keys: ['prompt_timeout_secs'] });
-
           //
-          // Fetch existing orchestrator sessions from the service.
+          // Service holds no orchestrator state; the web client opens
+          // its own ephemeral session on demand.
           //
-
-          const listRpc = acpRequest('session/list');
-          wsClient.send({ type: 'acp_message', json_rpc: listRpc });
-          const listParsed = JSON.parse(listRpc);
-          pendingAcpRequestsRef.current.set(listParsed.id, { method: 'session/list' });
           break;
         }
         case 'state_update':
@@ -1850,51 +1838,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
               }
 
               switch (pending.method) {
-                case 'session/list': {
-                  const rawSessions = rpc.result?.sessions as Array<{ sessionId: string; title?: string; cwd?: string }> | undefined;
-                  if (rawSessions && rawSessions.length > 0) {
-                    //
-                    // Filter to only WEB_ prefixed sessions (by session ID).
-                    //
-
-                    const webSessions = rawSessions.filter(s => s.sessionId.startsWith('WEB_'));
-                    const serverIds = webSessions.map(s => s.sessionId);
-                    const serverSet = new Set(serverIds);
-                    const currentSessions = orchestratorSessionsRef.current;
-                    const existing = currentSessions.filter(s => serverSet.has(s.sessionId));
-                    if (existing.length !== currentSessions.length) {
-                      dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
-                    }
-
-                    let loadTriggered = false;
-                    for (const sess of webSessions) {
-                      const label = `Session ${webSessionCounter.current++}`;
-                      const alreadyExists = orchestratorSessionsRef.current.some(s => s.sessionId === sess.sessionId);
-                      if (!alreadyExists) {
-                        dispatch({
-                          type: 'ORCHESTRATOR_SESSION_CREATED',
-                          sessionId: sess.sessionId,
-                          label,
-                          loaded: false,
-                        });
-
-                        //
-                        // Trigger session/load for the first new session when
-                        // no session is currently active (reconnect scenario).
-                        //
-
-                        if (!loadTriggered && !orchestratorActiveIdRef.current) {
-                          loadTriggered = true;
-                          const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId, cwd: '.', mcpServers: [] });
-                          wsClient.send({ type: 'acp_message', json_rpc: loadRpc });
-                          const loadParsed = JSON.parse(loadRpc);
-                          pendingAcpRequestsRef.current.set(loadParsed.id, { method: 'session/load', sessionId: sess.sessionId });
-                        }
-                      }
-                    }
-                  }
-                  break;
-                }
                 case 'session/new': {
                   const sessionId = rpc.result?.sessionId as string;
                   if (sessionId) {
@@ -1910,13 +1853,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   const sessionId = pending.sessionId;
                   if (sessionId) {
                     dispatch({ type: 'ORCHESTRATOR_DONE', sessionId });
-                  }
-                  break;
-                }
-                case 'session/load': {
-                  const sessionId = pending.sessionId;
-                  if (sessionId) {
-                    dispatch({ type: 'ORCHESTRATOR_SESSION_LOADED', sessionId });
                   }
                   break;
                 }
@@ -2170,20 +2106,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     wsClient.connect().catch(console.error);
 
-    //
-    // Poll session/list every 5 seconds to stay in sync.
-    //
-
-    const pollInterval = setInterval(() => {
-      const rpc = acpRequest('session/list');
-      wsClient.send({ type: 'acp_message', json_rpc: rpc });
-      const parsed = JSON.parse(rpc);
-      pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/list' });
-    }, 5000);
-
     return () => {
       unsubscribe();
-      clearInterval(pollInterval);
     };
   //
   // Empty deps - only run once.
@@ -2372,20 +2296,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
     dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });
-
-    //
-    // If the session hasn't been loaded yet, send session/load to get history.
-    //
-
-    if (sessionId) {
-      const session = orchestratorSessionsRef.current.find(s => s.sessionId === sessionId);
-      if (session && !session.loaded) {
-        const jsonRpc = acpRequest('session/load', { sessionId, cwd: '.', mcpServers: [] });
-        wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
-        const parsed = JSON.parse(jsonRpc);
-        pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/load', sessionId });
-      }
-    }
   }, []);
 
   const orchestratorClearMessages = useCallback((sessionId: string) => {

@@ -95,7 +95,7 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(
-            "CA: ~/.praxis_bridge_ca_cert.pem (trust this on the client)",
+            "CA: ~/.praxis/bridge/ca_cert.pem (trust this on the client)",
             Style::default().fg(MUTED),
         ),
     ]));

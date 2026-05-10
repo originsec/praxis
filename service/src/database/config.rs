@@ -3,7 +3,7 @@
 //!
 //! Supports SQLite (default) and PostgreSQL backends via environment variable:
 //! - PRAXIS_DATABASE_URL: Full connection URL (postgres://... or sqlite://... or file path)
-//! - Default: ~/.praxis_operations.db (SQLite)
+//! - Default: ~/.praxis/operations.db (SQLite)
 //!
 
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ impl DatabaseConfig {
     /// - sqlite:///path/to/file.db - SQLite file path
     /// - /path/to/file.db - SQLite file path (implicit)
     ///
-    /// Default: ~/.praxis_operations.db (SQLite)
+    /// Default: ~/.praxis/operations.db (SQLite)
     pub fn from_env() -> Self {
         if let Ok(url) = std::env::var("PRAXIS_DATABASE_URL") {
             if url.starts_with("postgres://") || url.starts_with("postgresql://") {
@@ -50,11 +50,14 @@ impl DatabaseConfig {
         }
 
         //
-        // Default to SQLite in home directory.
+        // Default to SQLite under ~/.praxis/. The parent directory is
+        // created by the migration runner before the connection is
+        // opened.
         //
         let path = dirs::home_dir()
             .expect("Failed to get home directory")
-            .join(".praxis_operations.db");
+            .join(".praxis")
+            .join("operations.db");
 
         DatabaseConfig::Sqlite { path }
     }

@@ -15,9 +15,19 @@ If the MCP server is not enabled when you start a session, you'll see an error m
 ## Starting a Session
 
 1. Click **Orchestrator** in the sidebar
-2. Click **New Session**
+2. Type your goal or question — the session is opened on demand
 3. The Orchestrator connects to the MCP server and fetches available tools
-4. Type your goal or question in the input box
+
+## Sessions and State
+
+The service holds **no orchestrator state**. Each client (TUI or web) keeps a single in-flight session against the service; when the client disconnects or closes the session the conversation is dropped server-side.
+
+- **Web** — One ephemeral session per page load. Closing the tab or navigating away ends the conversation; nothing is persisted.
+- **TUI (`praxis`)** — One session per CLI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
+  - `praxis --continue` resumes the most recent saved session.
+  - `praxis --resume` lists saved sessions and prompts you to pick one.
+
+  When resuming, the saved transcript is shown immediately and the prior turns are sent as conversation history with `session/new` so the model has full context for the next prompt.
 
 ## What It Can Do
 
@@ -111,3 +121,5 @@ Go to **Settings** > **MCP Server** and enable it. The Orchestrator requires the
 ### Session disconnects
 
 The MCP client connection is tied to the Orchestrator session. If the MCP server restarts, you'll need to start a new Orchestrator session.
+
+In the TUI, use `praxis --continue` (or `--resume`) to bring back the prior conversation under a fresh service session — the saved transcript is replayed locally and re-seeded as history for the next prompt.

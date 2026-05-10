@@ -13,6 +13,16 @@ pub enum ConversationEntry {
     Error(String),
 }
 
+pub(crate) fn clone_conversation_entry(e: &ConversationEntry) -> ConversationEntry {
+    match e {
+        ConversationEntry::UserPrompt(s) => ConversationEntry::UserPrompt(s.clone()),
+        ConversationEntry::AssistantText(s) => ConversationEntry::AssistantText(s.clone()),
+        ConversationEntry::ToolGroup(tools) => ConversationEntry::ToolGroup(tools.clone()),
+        ConversationEntry::Info(s) => ConversationEntry::Info(s.clone()),
+        ConversationEntry::Error(s) => ConversationEntry::Error(s.clone()),
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolCall {
     pub name: String,
@@ -82,13 +92,27 @@ impl OrchestratorSessionState {
 pub struct OrchestratorState {
     pub sessions: Vec<OrchestratorSessionState>,
     pub active_session_index: Option<usize>,
-    pub session_counter: usize,
     pub input: String,
     pub cursor_pos: usize,
     pub history: Vec<String>,
     pub history_index: Option<usize>,
     pub saved_input: String,
     pub pending_prompt: Option<String>,
+    //
+    // Conversation history to seed the next orchestrator session
+    // (populated when resuming from a local .praxis/sessions file).
+    //
+    pub pending_history: Option<Vec<(String, String)>>,
+    //
+    // Snapshot of stored messages to render immediately on resume,
+    // before the server confirms the new session.
+    //
+    pub pending_seed_messages: Option<Vec<ConversationEntry>>,
+    //
+    // Persistent record of the active session, mirrored to
+    // ~/.praxis/sessions/{session_id}.json after every turn.
+    //
+    pub stored: Option<crate::session_store::StoredSession>,
 }
 
 impl OrchestratorState {
@@ -105,11 +129,6 @@ impl OrchestratorState {
     pub fn session_by_id_mut(&mut self, id: &str) -> Option<&mut OrchestratorSessionState> {
         self.sessions.iter_mut().find(|s| s.session_id == id)
     }
-
-    pub fn next_session_number(&mut self) -> usize {
-        self.session_counter += 1;
-        self.session_counter
-    }
 }
 
 impl Default for OrchestratorState {
@@ -117,20 +136,120 @@ impl Default for OrchestratorState {
         Self {
             sessions: Vec::new(),
             active_session_index: None,
-            session_counter: 0,
             input: String::new(),
             cursor_pos: 0,
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
             pending_prompt: None,
+            pending_history: None,
+            pending_seed_messages: None,
+            stored: None,
         }
     }
 }
 
 impl App {
+    //
+    // Append a message to the on-disk session record. Best-effort:
+    // disk errors are swallowed so transient I/O failures don't
+    // disrupt the running TUI.
+    //
+
+    //
+    // Populate the TUI with a saved orchestrator session so the user
+    // sees prior turns immediately. The saved messages are also queued
+    // as pending_history so the next service-side session is seeded
+    // with the same context.
+    //
+
+    pub(crate) fn seed_orchestrator_resume(&mut self, stored: crate::session_store::StoredSession) {
+        let mut entries: Vec<ConversationEntry> = Vec::new();
+        let history: Vec<(String, String)> = stored
+            .messages
+            .iter()
+            .map(|m| (m.role.clone(), m.text.clone()))
+            .collect();
+
+        for m in &stored.messages {
+            match m.role.as_str() {
+                "user" => entries.push(ConversationEntry::UserPrompt(m.text.clone())),
+                "assistant" => entries.push(ConversationEntry::AssistantText(m.text.clone())),
+                _ => {}
+            }
+        }
+
+        //
+        // Install a placeholder session with empty session_id so the
+        // saved transcript renders immediately. The Enter handler
+        // checks for an empty session_id and creates a fresh
+        // service-side session (seeded via pending_history) on the
+        // first prompt.
+        //
+        let mut session = OrchestratorSessionState::new(String::new(), "Session".to_string());
+        session.loaded = true;
+        session.provider = stored.provider.clone();
+        session.model = stored.model.clone();
+        session.messages = entries;
+        self.orchestrator.sessions.clear();
+        self.orchestrator.sessions.push(session);
+        self.orchestrator.active_session_index = Some(0);
+
+        self.orchestrator.pending_history = Some(history);
+        self.orchestrator.stored = Some(stored);
+    }
+
+    pub(crate) fn persist_message(&mut self, role: &str, text: &str) {
+        let Some(stored) = self.orchestrator.stored.as_mut() else { return };
+        //
+        // De-dupe: ACP user-prompt notifications echo back our local
+        // input so we don't want to record the same turn twice.
+        //
+        if stored
+            .messages
+            .last()
+            .map(|m| m.role == role && m.text == text)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        stored.messages.push(crate::session_store::StoredMessage {
+            role: role.to_string(),
+            text: text.to_string(),
+        });
+        let _ = crate::session_store::save(stored);
+    }
+
+    //
+    // Start a fresh orchestrator conversation in place. Closes the
+    // live service session and clears the local transcript, but leaves
+    // the prior session's record under ~/.praxis/sessions/ so it can
+    // be brought back later with `praxis --resume`.
+    //
+
+    pub(crate) async fn clear_orchestrator_session(&mut self) {
+        let active_sid = self
+            .orchestrator
+            .active_session()
+            .map(|s| s.session_id.clone())
+            .filter(|s| !s.is_empty());
+        if let Some(sid) = active_sid {
+            let _ = self.acp.close_session(&sid).await;
+        }
+
+        self.orchestrator.stored = None;
+        self.orchestrator.sessions.clear();
+        self.orchestrator.active_session_index = None;
+        self.orchestrator.pending_history = None;
+        self.orchestrator.pending_seed_messages = None;
+        self.orchestrator.pending_prompt = None;
+
+        self.create_new_orchestrator_session().await;
+    }
+
     pub(crate) async fn create_new_orchestrator_session(&mut self) {
-        if let Err(e) = self.acp.create_session(".", None).await {
+        let history = self.orchestrator.pending_history.take().unwrap_or_default();
+        if let Err(e) = self.acp.create_session(".", None, history).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session.messages.push(ConversationEntry::Error(format!(
                     "Failed to create session: {}",
@@ -140,14 +259,9 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn switch_to_session(&mut self, index: usize) {
         self.orchestrator.active_session_index = Some(index);
-        if let Some(session) = self.orchestrator.sessions.get(index) {
-            if !session.loaded {
-                let sid = session.session_id.clone();
-                let _ = self.acp.load_session(&sid).await;
-            }
-        }
     }
 
     pub(crate) async fn close_active_orchestrator_session(&mut self) {
@@ -174,21 +288,8 @@ impl App {
     pub(crate) async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
-                KeyCode::Char('n') => {
-                    self.create_new_orchestrator_session().await;
-                    return;
-                }
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
                     self.open_save_session();
-                    return;
-                }
-                KeyCode::Char('w') => {
-                    if self.orchestrator.active_session().is_some() {
-                        self.confirm = Some(ConfirmAction {
-                            message: "Close this orchestrator session?".to_string(),
-                            action: ConfirmKind::CloseOrchestratorSession,
-                        });
-                    }
                     return;
                 }
                 KeyCode::Char('c') => {
@@ -218,34 +319,6 @@ impl App {
                 }
                 _ => {}
             }
-        }
-
-        //
-        // Tab / Shift+Tab to switch between sessions.
-        //
-
-        if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(idx) = self.orchestrator.active_session_index {
-                if self.orchestrator.sessions.len() > 1 {
-                    let next = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                        if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 }
-                    } else {
-                        if idx + 1 < self.orchestrator.sessions.len() { idx + 1 } else { 0 }
-                    };
-                    self.switch_to_session(next).await;
-                }
-            }
-            return;
-        }
-
-        if key.code == KeyCode::BackTab {
-            if let Some(idx) = self.orchestrator.active_session_index {
-                if self.orchestrator.sessions.len() > 1 {
-                    let prev = if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 };
-                    self.switch_to_session(prev).await;
-                }
-            }
-            return;
         }
 
         match key.code {
@@ -280,7 +353,12 @@ impl App {
                     // sent when SessionCreated arrives.
                     //
 
-                    if self.orchestrator.sessions.is_empty() {
+                    let needs_create = self
+                        .orchestrator
+                        .active_session()
+                        .map(|s| s.session_id.is_empty())
+                        .unwrap_or(true);
+                    if needs_create {
                         self.orchestrator.pending_prompt = Some(input.clone());
                         self.orchestrator.input.clear();
                         self.orchestrator.cursor_pos = 0;
@@ -424,8 +502,7 @@ impl App {
 
         match cmd {
             "clear" => {
-                self.close_active_orchestrator_session().await;
-                self.create_new_orchestrator_session().await;
+                self.clear_orchestrator_session().await;
             }
             "model" => {
                 self.open_model_select().await;
@@ -447,18 +524,47 @@ impl App {
         match notif {
             AcpNotification::SessionCreated { session_id, provider, model } => {
                 //
-                // A new session was created by this client. Mark loaded since
-                // we'll see all events in real time.
+                // One orchestrator session per client. Drop any prior
+                // local session state and install the new one.
                 //
 
-                let label = format!("Session {}", self.orchestrator.next_session_number());
+                let label = "Session".to_string();
                 let mut session = OrchestratorSessionState::new(session_id.clone(), label);
                 session.loaded = true;
-                session.provider = provider;
-                session.model = model;
+                session.provider = provider.clone();
+                session.model = model.clone();
+                if let Some(seed) = self.orchestrator.pending_seed_messages.take() {
+                    session.messages = seed;
+                } else if let Some(existing) = self.orchestrator.active_session() {
+                    //
+                    // Carry messages over from a resume placeholder
+                    // (empty session_id) so the prior transcript stays
+                    // visible after the service confirms creation.
+                    //
+                    if existing.session_id.is_empty() {
+                        session.messages = existing
+                            .messages
+                            .iter()
+                            .map(clone_conversation_entry)
+                            .collect();
+                    }
+                }
+                self.orchestrator.sessions.clear();
                 self.orchestrator.sessions.push(session);
-                self.orchestrator.active_session_index =
-                    Some(self.orchestrator.sessions.len() - 1);
+                self.orchestrator.active_session_index = Some(0);
+
+                //
+                // Initialise the on-disk record for this session. If we
+                // were resuming, carry the prior stored history forward
+                // under the new session_id.
+                //
+                let mut stored = self.orchestrator.stored.take()
+                    .unwrap_or_else(|| crate::session_store::StoredSession::new(session_id.clone()));
+                stored.session_id = session_id.clone();
+                stored.provider = provider;
+                stored.model = model;
+                let _ = crate::session_store::save(&stored);
+                self.orchestrator.stored = Some(stored);
 
                 //
                 // If there's a pending prompt (from typing on the welcome
@@ -502,53 +608,6 @@ impl App {
 
             AcpNotification::InitializeResult => {}
 
-            AcpNotification::SessionList { sessions } => {
-                //
-                // Sync session list with the server. Only show sessions
-                // with the CLI_ prefix in the session ID (ours).
-                //
-
-                let cli_sessions: Vec<_> = sessions.into_iter()
-                    .filter(|(id, _)| id.starts_with("CLI_"))
-                    .collect();
-
-                let server_ids: Vec<String> = cli_sessions.iter().map(|(id, _)| id.clone()).collect();
-                self.orchestrator.sessions.retain(|s| server_ids.contains(&s.session_id));
-
-                for (sid, _title) in &cli_sessions {
-                    if self.orchestrator.session_by_id_mut(sid).is_none() {
-                        let label = format!("Session {}", self.orchestrator.next_session_number());
-                        let session = OrchestratorSessionState::new(sid.clone(), label);
-                        self.orchestrator.sessions.push(session);
-                    }
-                }
-
-                //
-                // Fix active index after potential removal.
-                //
-
-                if self.orchestrator.sessions.is_empty() {
-                    self.orchestrator.active_session_index = None;
-                } else if let Some(active) = self.orchestrator.active_session_index {
-                    if active >= self.orchestrator.sessions.len() {
-                        self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
-                    }
-                } else {
-                    //
-                    // First session list received — select the first session
-                    // and trigger a load to get its history.
-                    //
-
-                    self.switch_to_session(0).await;
-                }
-
-                //
-                // Sort sessions by label for consistent tab ordering.
-                //
-
-                self.orchestrator.sessions.sort_by(|a, b| a.label.cmp(&b.label));
-            }
-
             AcpNotification::UserPrompt { session_id, text } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     //
@@ -559,9 +618,10 @@ impl App {
                         matches!(m, ConversationEntry::UserPrompt(t) if t == &text)
                     });
                     if !already {
-                        session.messages.push(ConversationEntry::UserPrompt(text));
+                        session.messages.push(ConversationEntry::UserPrompt(text.clone()));
                     }
                 }
+                self.persist_message("user", &text);
             }
 
             AcpNotification::TextContent { session_id, text } => {
@@ -656,8 +716,10 @@ impl App {
 
             AcpNotification::PromptComplete { .. } => {
                 //
-                // Find the session that was streaming and flush pending tools.
+                // Find the session that was streaming, flush pending
+                // tools, and snapshot the assistant turn to disk.
                 //
+                let mut last_assistant: Option<String> = None;
                 for session in &mut self.orchestrator.sessions {
                     if session.is_streaming {
                         if !session.pending_tools.is_empty() {
@@ -667,34 +729,18 @@ impl App {
                         session.active_tool = None;
                         session.current_plan = None;
                         session.is_streaming = false;
+                        last_assistant = session.messages.iter().rev().find_map(|m| {
+                            if let ConversationEntry::AssistantText(t) = m {
+                                Some(t.clone())
+                            } else {
+                                None
+                            }
+                        });
                         break;
                     }
                 }
-            }
-
-            AcpNotification::SessionLoaded {
-                session_id,
-                provider,
-                model,
-            } => {
-                //
-                // Resumed an existing session — apply the model state
-                // the service returned. Without this the footer stays
-                // stuck on "Connecting..." even though the session is
-                // fully usable.
-                //
-                if let Some(session) = self
-                    .orchestrator
-                    .sessions
-                    .iter_mut()
-                    .find(|s| s.session_id == session_id)
-                {
-                    if provider.is_some() {
-                        session.provider = provider;
-                    }
-                    if model.is_some() {
-                        session.model = model;
-                    }
+                if let Some(text) = last_assistant {
+                    self.persist_message("assistant", &text);
                 }
             }
 

@@ -287,7 +287,7 @@ CREATE TABLE chain_triggers (
 
 ### Connection
 
-Default: SQLite at `~/.praxis_operations.db`
+Default: SQLite at `~/.praxis/operations.db`
 
 For production: PostgreSQL via `PRAXIS_DATABASE_URL`
 

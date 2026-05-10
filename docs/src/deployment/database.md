@@ -22,8 +22,8 @@ No configuration required. The database file is created automatically at:
 
 | Platform | Path |
 |----------|------|
-| Linux/macOS | `~/.praxis_operations.db` |
-| Windows | `%USERPROFILE%\.praxis_operations.db` |
+| Linux/macOS | `~/.praxis/operations.db` |
+| Windows | `%USERPROFILE%\.praxis\operations.db` |
 
 SQLite is configured with WAL journal mode and a 5-second busy timeout.
 
@@ -141,7 +141,7 @@ Praxis doesn't include a built-in migration tool. To migrate:
 1. Export data from SQLite:
 
 ```bash
-sqlite3 ~/.praxis_operations.db .dump > praxis_dump.sql
+sqlite3 ~/.praxis/operations.db .dump > praxis_dump.sql
 ```
 
 2. Convert SQLite-specific syntax to PostgreSQL:
@@ -183,10 +183,10 @@ PostgreSQL handles:
 
 ```bash
 # Backup
-cp ~/.praxis_operations.db ~/.praxis_operations.db.backup
+cp ~/.praxis/operations.db ~/.praxis/operations.db.backup
 
 # Restore
-cp ~/.praxis_operations.db.backup ~/.praxis_operations.db
+cp ~/.praxis/operations.db.backup ~/.praxis/operations.db
 ```
 
 ### PostgreSQL
@@ -258,7 +258,7 @@ Error: database is locked
 - If using network storage (SMB, NFS, Azure Files): switch to PostgreSQL
 - Only one `praxis_service` instance can use SQLite
 - Close other connections (GUI tools, scripts)
-- Check for zombie processes: `lsof ~/.praxis_operations.db`
+- Check for zombie processes: `lsof ~/.praxis/operations.db`
 
 ## Performance Tuning
 

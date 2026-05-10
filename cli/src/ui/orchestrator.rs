@@ -782,30 +782,7 @@ fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, area);
 }
 
-fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    if state.sessions.is_empty() {
-        return;
-    }
-
-    let mut spans = vec![
-        Span::styled("  ^n", Style::default().fg(DIM)),
-        Span::styled(" new", Style::default().fg(MUTED)),
-    ];
-
-    if !state.sessions.is_empty() {
-        spans.extend([
-            Span::styled("  ^w", Style::default().fg(DIM)),
-            Span::styled(" close", Style::default().fg(MUTED)),
-        ]);
-    }
-
-    if state.sessions.len() > 1 {
-        spans.extend([
-            Span::styled("  tab/S-tab", Style::default().fg(DIM)),
-            Span::styled(" switch", Style::default().fg(MUTED)),
-        ]);
-    }
-
-    let paragraph = Paragraph::new(Line::from(spans));
+fn render_status_hints(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
+    let paragraph = Paragraph::new(Line::from(Vec::<Span>::new()));
     f.render_widget(paragraph, area);
 }

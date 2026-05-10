@@ -66,11 +66,11 @@ Changes take effect immediately -- the bridges restart in place when any of thes
 
 ### Per-SNI certificate issuance
 
-The service installs a dynamic certificate resolver. For every TLS handshake it inspects the client's SNI hostname and mints a leaf certificate for that exact name on the fly, signed by a self-signed CA. The CA is generated on first start and persisted to `~/.praxis_bridge_ca_cert.pem` and `~/.praxis_bridge_ca_key.pem`; leaves are cached in memory only. There is **no domain to configure** -- whatever hostname the client requests is what gets a cert.
+The service installs a dynamic certificate resolver. For every TLS handshake it inspects the client's SNI hostname and mints a leaf certificate for that exact name on the fly, signed by a self-signed CA. The CA is generated on first start and persisted to `~/.praxis/bridge/ca_cert.pem` and `~/.praxis/bridge/ca_key.pem`; leaves are cached in memory only. There is **no domain to configure** -- whatever hostname the client requests is what gets a cert.
 
 To make the connecting Claude Code instance trust the bridge, either:
 
-- point `NODE_EXTRA_CA_CERTS` at `~/.praxis_bridge_ca_cert.pem`, or
+- point `NODE_EXTRA_CA_CERTS` at `~/.praxis/bridge/ca_cert.pem`, or
 - launch Claude with `NODE_TLS_REJECT_UNAUTHORIZED=0` to disable verification (development only).
 
 ### Picking an `--sdk-url` hostname (Claude's allowlist)
