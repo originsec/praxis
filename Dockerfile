@@ -22,7 +22,6 @@ COPY agents ./agents
 COPY cli ./cli
 COPY common ./common
 COPY node ./node
-COPY node_tiny ./node_tiny
 COPY semantic_parser ./semantic_parser
 COPY service ./service
 RUN cargo chef prepare --recipe-path recipe.json
@@ -55,9 +54,7 @@ WORKDIR /build
 COPY --from=planner /build/recipe.json recipe.json
 RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu && \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node_tiny && \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node_tiny --target x86_64-pc-windows-gnu; \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
     fi && \
     cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service
 
@@ -69,19 +66,15 @@ COPY agents ./agents
 COPY cli ./cli
 COPY common ./common
 COPY node ./node
-COPY node_tiny ./node_tiny
 COPY semantic_parser ./semantic_parser
 COPY service ./service
 
 RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo build --profile "$CARGO_PROFILE" -p praxis_node && \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_node --target x86_64-pc-windows-gnu && \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_node_tiny && \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_node_tiny --target x86_64-pc-windows-gnu; \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_node --target x86_64-pc-windows-gnu; \
     else \
         mkdir -p "target/$CARGO_PROFILE" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE" && \
-        touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe" \
-              "target/$CARGO_PROFILE/praxis_node_tiny" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node_tiny.exe"; \
+        touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe"; \
     fi
 
 RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service
@@ -147,10 +140,8 @@ COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /usr/local/bin
 # Node binaries (for download / deployment to targets).
 #
 
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_node                                   /usr/local/share/praxis/nodes/praxis_node_linux
-COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_node.exe         /usr/local/share/praxis/nodes/praxis_node_windows.exe
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_node_tiny                              /usr/local/share/praxis/nodes/praxis_node_tiny_linux
-COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_node_tiny.exe    /usr/local/share/praxis/nodes/praxis_node_tiny_windows.exe
+COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_node                              /usr/local/share/praxis/nodes/praxis_node_linux
+COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_node.exe    /usr/local/share/praxis/nodes/praxis_node_windows.exe
 
 #
 # systemd units, env file, praxisctl.
