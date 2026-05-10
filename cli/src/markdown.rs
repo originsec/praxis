@@ -293,14 +293,16 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
                 }
                 bold_text.push(bc);
             }
-            let pfx = if first {
-                prefix.to_string()
-            } else {
-                String::new()
-            };
-            first = false;
+            if first {
+                //
+                // Emit the bullet/indent prefix as its own plain span so
+                // the bullet itself doesn't pick up bold styling.
+                //
+                spans.push(Span::styled(prefix.to_string(), Style::default().fg(TEXT)));
+                first = false;
+            }
             spans.push(Span::styled(
-                format!("{}{}", pfx, bold_text),
+                bold_text,
                 Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
             continue;
@@ -322,6 +324,13 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
                     Style::default().fg(TEXT),
                 ));
                 current.clear();
+            } else if first {
+                //
+                // Line starts with inline code — emit the bullet/indent
+                // prefix as its own plain span so the pill follows it.
+                //
+                spans.push(Span::styled(prefix.to_string(), Style::default().fg(TEXT)));
+                first = false;
             }
 
             let mut code_text = String::new();

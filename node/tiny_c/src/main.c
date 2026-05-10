@@ -174,16 +174,22 @@ static void apply_registration_ack(json *ack)
         LOG_INFO("Registration ack: no praxis_agent_config");
         return;
     }
+    //
+    // PraxisAgentConfig is serialized as camelCase (see
+    // common/src/messaging.rs `#[serde(rename_all = "camelCase")]`), so
+    // keys here must match.
+    //
+
     praxis_cfg *c = calloc(1, sizeof(*c));
     const char *s; size_t n;
-    if (json_get_str(pc, "provider",      &s, &n)) { c->provider     = strndup(s, n); }
-    if (json_get_str(pc, "api_key",       &s, &n)) { c->api_key      = strndup(s, n); }
-    if (json_get_str(pc, "endpoint_url",  &s, &n)) { c->endpoint_url = strndup(s, n); }
-    if (json_get_str(pc, "model_name",    &s, &n)) { c->model_name   = strndup(s, n); }
-    if (json_get_str(pc, "system_prompt", &s, &n)) { c->system_prompt= strndup(s, n); }
+    if (json_get_str(pc, "provider",     &s, &n)) { c->provider     = strndup(s, n); }
+    if (json_get_str(pc, "apiKey",       &s, &n)) { c->api_key      = strndup(s, n); }
+    if (json_get_str(pc, "endpointUrl",  &s, &n)) { c->endpoint_url = strndup(s, n); }
+    if (json_get_str(pc, "modelName",    &s, &n)) { c->model_name   = strndup(s, n); }
+    if (json_get_str(pc, "systemPrompt", &s, &n)) { c->system_prompt= strndup(s, n); }
     long iv;
-    if (json_get_int(pc, "max_tool_iterations", &iv))  c->max_tool_iters = (int)iv;
-    if (json_get_int(pc, "command_timeout_secs", &iv)) c->command_timeout_secs = (int)iv;
+    if (json_get_int(pc, "maxToolIterations", &iv))  c->max_tool_iters = (int)iv;
+    if (json_get_int(pc, "commandTimeoutSecs", &iv)) c->command_timeout_secs = (int)iv;
     praxis_set_config(c);
     LOG_INFO("Praxis agent enabled (model=%s, endpoint=%s)",
              c->model_name ? c->model_name : "?",
@@ -331,14 +337,14 @@ static void handle_node_broadcast(json *root)
         /* reuse apply_registration_ack-like logic */
         praxis_cfg *c = calloc(1, sizeof(*c));
         const char *s; size_t n;
-        if (json_get_str(cfg, "provider",      &s, &n)) c->provider     = strndup(s, n);
-        if (json_get_str(cfg, "api_key",       &s, &n)) c->api_key      = strndup(s, n);
-        if (json_get_str(cfg, "endpoint_url",  &s, &n)) c->endpoint_url = strndup(s, n);
-        if (json_get_str(cfg, "model_name",    &s, &n)) c->model_name   = strndup(s, n);
-        if (json_get_str(cfg, "system_prompt", &s, &n)) c->system_prompt= strndup(s, n);
+        if (json_get_str(cfg, "provider",     &s, &n)) c->provider     = strndup(s, n);
+        if (json_get_str(cfg, "apiKey",       &s, &n)) c->api_key      = strndup(s, n);
+        if (json_get_str(cfg, "endpointUrl",  &s, &n)) c->endpoint_url = strndup(s, n);
+        if (json_get_str(cfg, "modelName",    &s, &n)) c->model_name   = strndup(s, n);
+        if (json_get_str(cfg, "systemPrompt", &s, &n)) c->system_prompt= strndup(s, n);
         long iv;
-        if (json_get_int(cfg, "max_tool_iterations", &iv))  c->max_tool_iters = (int)iv;
-        if (json_get_int(cfg, "command_timeout_secs", &iv)) c->command_timeout_secs = (int)iv;
+        if (json_get_int(cfg, "maxToolIterations", &iv))  c->max_tool_iters = (int)iv;
+        if (json_get_int(cfg, "commandTimeoutSecs", &iv)) c->command_timeout_secs = (int)iv;
         praxis_set_config(c);
         send_node_information_update();
     } else if (KEQ("NodeInformationUpdateRequest")) {
@@ -363,22 +369,57 @@ static int run_once(const char *host, int port, const char *user, const char *pa
     G_amqp = c;
     pthread_mutex_unlock(&G_amqp_mu);
 
+    //
+    // Declare all topology (queues + exchange + bindings) BEFORE any
+    // basic.consume. Once a consume is active the broker can interleave
+    // basic.deliver frames with our synchronous method-replies, and our
+    // simple read_method() can't tell them apart — so a backlogged queue
+    // would cause the very next declare/bind to "fail" with a frame
+    // mismatch.
+    //
+
     /* declare node-specific queue */
-    snprintf(G_node_queue, sizeof(G_node_queue), "node-%s", tiny_node_id);
-    if (amqp_queue_declare(c, G_node_queue) < 0) goto fail;
-
-    /* publish registration */
-    if (publish_registration(c) < 0) goto fail;
-
-    /* consume from node queue */
-    if (amqp_basic_consume(c, G_node_queue, "tiny-c-direct") < 0) goto fail;
+    snprintf(G_node_queue, sizeof(G_node_queue), "Node_%s", tiny_node_id);
+    if (amqp_queue_declare(c, G_node_queue) < 0) {
+        LOG_WARN("queue.declare(%s) failed", G_node_queue);
+        goto fail;
+    }
 
     /* declare broadcast exchange + bind a private queue */
-    if (amqp_exchange_declare_fanout(c, NODE_BROADCAST_EXCHANGE) < 0) goto fail;
+    if (amqp_exchange_declare_fanout(c, NODE_BROADCAST_EXCHANGE) < 0) {
+        LOG_WARN("exchange.declare(%s) failed", NODE_BROADCAST_EXCHANGE);
+        goto fail;
+    }
     char bqname[128];
-    if (amqp_queue_declare_exclusive(c, bqname, sizeof(bqname)) < 0) goto fail;
-    if (amqp_queue_bind(c, bqname, NODE_BROADCAST_EXCHANGE, "") < 0) goto fail;
-    if (amqp_basic_consume(c, bqname, "tiny-c-broadcast") < 0) goto fail;
+    if (amqp_queue_declare_exclusive(c, bqname, sizeof(bqname)) < 0) {
+        LOG_WARN("queue.declare(exclusive) failed");
+        goto fail;
+    }
+    if (amqp_queue_bind(c, bqname, NODE_BROADCAST_EXCHANGE, "") < 0) {
+        LOG_WARN("queue.bind(%s -> %s) failed", bqname, NODE_BROADCAST_EXCHANGE);
+        goto fail;
+    }
+
+    /* publish registration */
+    if (publish_registration(c) < 0) {
+        LOG_WARN("publish_registration failed");
+        goto fail;
+    }
+
+    //
+    // Start the broadcast consumer first (its queue is freshly created and
+    // empty, so its consume-ok arrives cleanly). Then start the direct
+    // consumer last — once it begins, any backlog or new deliveries can
+    // stream in without colliding with another synchronous method-reply.
+    //
+    if (amqp_basic_consume(c, bqname, "tiny-c-broadcast") < 0) {
+        LOG_WARN("basic.consume(%s) failed", bqname);
+        goto fail;
+    }
+    if (amqp_basic_consume(c, G_node_queue, "tiny-c-direct") < 0) {
+        LOG_WARN("basic.consume(%s) failed", G_node_queue);
+        goto fail;
+    }
 
     LOG_INFO("Listening on %s and %s (broadcast)", G_node_queue, bqname);
 

@@ -1,6 +1,6 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
-use crate::ui::common::{focused_titled_panel, short_id};
+use crate::ui::common::{focused_panel, short_id};
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_FAIL, STATUS_QUEUED, STATUS_RUNNING,
     TEXT, TEXT_BRIGHT,
@@ -39,14 +39,15 @@ fn render_exec_list(
 ) {
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("Name"),
-        Cell::from("Node"),
-        Cell::from("Agent"),
-        Cell::from("Status"),
-        Cell::from("Started"),
-        Cell::from("Duration"),
+        Cell::from("NAME"),
+        Cell::from("NODE"),
+        Cell::from("AGENT"),
+        Cell::from("STATUS"),
+        Cell::from("STARTED"),
+        Cell::from("DURATION"),
     ])
-    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
 
     let now = chrono::Utc::now();
 
@@ -126,7 +127,7 @@ fn render_exec_list(
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(focused_titled_panel(" Executions ", !state.detail_focus))
+        .block(focused_panel(!state.detail_focus))
         .row_highlight_style(
             Style::default()
                 .bg(BG_SELECTED)
@@ -145,7 +146,7 @@ fn render_exec_detail(
     state: &OperationsState,
     sorted: &[(bool, usize)],
 ) {
-    let block = focused_titled_panel(" Detail ", state.detail_focus);
+    let block = focused_panel(state.detail_focus);
 
     let inner = block.inner(area);
     f.render_widget(block, area);

@@ -1,14 +1,12 @@
 use super::EDIT_FG;
 use crate::app::{ModelEditForm, SettingsState};
 use crate::ui::chrome;
-use crate::ui::theme::{
-    ACCENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, MUTED, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_MENU, BG_SELECTED, MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 pub(super) fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     let items = &state.model_definitions;
@@ -42,67 +40,11 @@ pub(super) fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsS
     let width = (max_label + 6).max(20);
     let width = width.min(area.width.saturating_sub(4));
 
-    //
-    // Center the dropdown in the area.
-    //
-
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);
 
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-    f.render_widget(Clear, popup_area);
-    f.render_widget(block, popup_area);
-
-    let inner = Rect {
-        x: popup_area.x + 2,
-        y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(4),
-        height: popup_area.height.saturating_sub(2),
-    };
-
-    //
-    // Title row.
-    //
-    let title_row = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Select model",
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .style(Style::default().bg(BG_MENU)),
-        title_row,
-    );
-
-    let divider_row = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
-        ))),
-        divider_row,
-    );
-
-    let body = Rect {
-        x: inner.x,
-        y: inner.y + 2,
-        width: inner.width,
-        height: inner.height.saturating_sub(2),
-    };
+    let body = chrome::modal_panel(f, popup_area, "Select model", "");
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, label) in labels.iter().enumerate() {
@@ -213,57 +155,7 @@ pub(super) fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm)
         "Add model"
     };
 
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-    f.render_widget(Clear, popup_area);
-    f.render_widget(block, popup_area);
-
-    let inner = Rect {
-        x: popup_area.x + 2,
-        y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(4),
-        height: popup_area.height.saturating_sub(2),
-    };
-
-    //
-    // Title + divider.
-    //
-    let title_row = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            title_text,
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .style(Style::default().bg(BG_MENU)),
-        title_row,
-    );
-
-    let divider_row = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
-        ))),
-        divider_row,
-    );
-
-    let inner = Rect {
-        x: inner.x,
-        y: inner.y + 2,
-        width: inner.width,
-        height: inner.height.saturating_sub(2),
-    };
+    let inner = chrome::modal_panel(f, popup_area, title_text, "");
     form.model_dropdown_inner_h.set(inner.height as usize);
 
     let mut lines: Vec<Line> = Vec::new();

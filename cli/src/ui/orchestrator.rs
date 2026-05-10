@@ -255,9 +255,15 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
                     }
                 }
             }
-            ConversationEntry::ToolGroup(tools) => {
-                lines.extend(build_tool_summary(
-                    tools,
+            ConversationEntry::Tool {
+                name,
+                input,
+                outcome,
+            } => {
+                lines.extend(build_tool_entry(
+                    name,
+                    input.as_deref(),
+                    outcome.as_ref(),
                     session.tools_expanded,
                     session.tools_full,
                 ));
@@ -286,19 +292,12 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
     // Show active tool or waiting spinner.
     //
     if session.is_streaming {
-        if let Some(ref tool_name) = session.active_tool {
-            let spinner_char = spinner_char();
-
-            let pending_count = session.pending_tools.len();
-            let label = if pending_count > 0 {
-                format!("{} {} ({})", spinner_char, tool_name, pending_count + 1)
-            } else {
-                format!("{} {}", spinner_char, tool_name)
-            };
-            lines.push(Line::from(Span::styled(
-                format!("  {}", label),
-                Style::default().fg(MUTED),
-            )));
+        if session.active_tool.is_some() {
+            //
+            // Pending tool already renders as the in-flight Tool
+            // entry above (with a spinner glyph), so nothing extra
+            // is needed here.
+            //
         } else if !last_message_has_visible_assistant_text(&session.messages) {
             let spinner_char = spinner_char();
             lines.push(Line::from(""));
@@ -428,113 +427,83 @@ fn last_message_has_visible_assistant_text(messages: &[ConversationEntry]) -> bo
     }
 }
 
-fn build_tool_summary(
-    tools: &[crate::app::ToolCall],
+//
+// Render a single tool request entry. Header is a faint arrow + tool
+// name; the input is shown in DIM/MUTED below, truncated unless
+// `full` is set.
+//
+
+//
+// Render a single tool call entry — one row whether the call is
+// pending or complete. Indicator is `→` while in flight, `✓` on
+// success, `✗` on failure. When `expanded` is true, input/output
+// detail is shown beneath; `full` removes the truncation cap.
+//
+
+fn build_tool_entry(
+    name: &str,
+    input: Option<&str>,
+    outcome: Option<&crate::app::ToolOutcome>,
     expanded: bool,
     full: bool,
 ) -> Vec<Line<'static>> {
-    let total = tools.len();
-    let failures = tools.iter().filter(|t| !t.success).count();
-
-    let mut counts: Vec<(String, usize)> = Vec::new();
-    for tool in tools {
-        if let Some(entry) = counts.iter_mut().find(|(n, _)| *n == tool.name) {
-            entry.1 += 1;
-        } else {
-            counts.push((tool.name.clone(), 1));
-        }
-    }
-
-    let parts: Vec<String> = counts
-        .iter()
-        .map(|(name, count)| {
-            if *count > 1 {
-                format!("{}\u{00d7}{}", name, count)
-            } else {
-                name.clone()
-            }
-        })
-        .collect();
-
-    let (icon, icon_color) = if failures == 0 {
-        ("\u{2713}", TOOL_OK)
-    } else {
-        ("\u{2717}", TOOL_FAIL)
+    let (icon, icon_color, name_style) = match outcome {
+        None => (
+            spinner_char().to_string(),
+            SECONDARY,
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Some(o) if o.success => (
+            "\u{2713}".to_string(),
+            TOOL_OK,
+            Style::default().fg(MUTED),
+        ),
+        Some(_) => (
+            "\u{2717}".to_string(),
+            TOOL_FAIL,
+            Style::default().fg(TOOL_FAIL),
+        ),
     };
-    let chevron = if expanded { "\u{25be}" } else { "\u{25b8}" };
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
-
-    let mut header_spans = vec![
+    lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
-        Span::styled(
-            format!("{} tool call{}", total, if total == 1 { "" } else { "s" }),
-            Style::default().fg(TEXT_BRIGHT),
-        ),
-        Span::styled(format!("   {}", parts.join(", ")), Style::default().fg(DIM)),
-    ];
-    if failures > 0 {
-        header_spans.push(Span::styled(
-            format!("   {} failed", failures),
-            Style::default().fg(TOOL_FAIL),
-        ));
+        Span::styled(name.to_string(), name_style),
+    ]));
+
+    if !expanded {
+        return lines;
     }
-    header_spans.push(Span::styled(
-        format!("   {}", chevron),
-        Style::default().fg(DIM),
-    ));
-    lines.push(Line::from(header_spans));
 
-    if expanded {
-        for tool in tools {
-            let (tool_icon, tool_icon_color) = if tool.success {
-                ("\u{2713}", TOOL_OK)
-            } else {
-                ("\u{2717}", TOOL_FAIL)
-            };
-            lines.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(format!("{} ", tool_icon), Style::default().fg(tool_icon_color)),
-                Span::styled(
-                    tool.name.clone(),
-                    Style::default().fg(if tool.success { TEXT_BRIGHT } else { TOOL_FAIL }),
-                ),
-            ]));
+    if let Some(input) = input {
+        let max_in = if full { usize::MAX } else { 5 };
+        for (i, iline) in compact_multiline(input, max_in, 200).iter().enumerate() {
+            let prefix = if i == 0 { "in  " } else { "    " };
+            lines.push(build_compact_output_line(prefix, iline, DIM, MUTED));
+        }
+    }
 
-            let max_in = if full { usize::MAX } else { 5 };
+    if let Some(outcome) = outcome {
+        if let Some(ref result) = outcome.result {
             let max_out = if full { usize::MAX } else { 20 };
-
-            if let Some(ref input) = tool.input {
-                let input_lines = compact_multiline(input, max_in, 200);
-                for (i, iline) in input_lines.iter().enumerate() {
-                    let prefix = if i == 0 { "in  " } else { "    " };
-                    lines.push(build_compact_output_line(prefix, iline, DIM, MUTED));
-                }
-            }
-
-            if let Some(ref result) = tool.result {
-                let result_lines = compact_multiline(result, max_out, 200);
-                let label_style = if tool.success { DIM } else { TOOL_FAIL };
-                let text_style = if tool.success { MUTED } else { TOOL_FAIL };
-                for (i, rline) in result_lines.iter().enumerate() {
-                    let prefix = if i == 0 {
-                        if tool.success {
-                            "out "
-                        } else {
-                            "err "
-                        }
-                    } else {
-                        "    "
-                    };
-                    lines.push(build_compact_output_line(
-                        prefix,
-                        rline,
-                        label_style,
-                        text_style,
-                    ));
-                }
+            let label_style = if outcome.success { DIM } else { TOOL_FAIL };
+            let text_style = if outcome.success { MUTED } else { TOOL_FAIL };
+            for (i, rline) in compact_multiline(result, max_out, 200).iter().enumerate() {
+                let prefix = if i == 0 {
+                    if outcome.success { "out " } else { "err " }
+                } else {
+                    "    "
+                };
+                lines.push(build_compact_output_line(
+                    prefix,
+                    rline,
+                    label_style,
+                    text_style,
+                ));
             }
         }
     }

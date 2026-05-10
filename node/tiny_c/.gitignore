@@ -1,2 +1,5 @@
 *.o
 praxis_node_tiny_c
+praxis_node_tiny_c.exe
+src/trust_anchors.inc
+vendor/

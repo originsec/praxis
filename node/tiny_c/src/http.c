@@ -1,4 +1,5 @@
 #include "tiny.h"
+#include "conn.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -9,15 +10,18 @@
   #include <sys/select.h>
 #endif
 
-int http_parse_url(const char *url, char **out_host, int *out_port, char **out_path)
+int http_parse_url(const char *url, char **out_host, int *out_port,
+                   char **out_path, int *out_use_tls)
 {
     const char *p = url;
     int port = 80;
-    if (strncmp(p, "http://", 7) == 0) {
+    int use_tls = 0;
+    if (strncmp(p, "https://", 8) == 0) {
+        p += 8;
+        port = 443;
+        use_tls = 1;
+    } else if (strncmp(p, "http://", 7) == 0) {
         p += 7;
-    } else if (strncmp(p, "https://", 8) == 0) {
-        LOG_ERROR("https endpoints are not supported by node_tiny_c (TLS not bundled)");
-        return -1;
     }
 
     const char *host_end = p;
@@ -42,85 +46,29 @@ int http_parse_url(const char *url, char **out_host, int *out_port, char **out_p
     *out_host = host;
     *out_port = port;
     *out_path = pdup;
+    if (out_use_tls) *out_use_tls = use_tls;
     return 0;
 }
 
-static int tcp_connect(const char *host, int port)
-{
-    char portstr[16];
-    snprintf(portstr, sizeof(portstr), "%d", port);
-    struct addrinfo hints = {0}, *res = NULL;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    int rc = getaddrinfo(host, portstr, &hints, &res);
-    if (rc != 0) {
-        LOG_WARN("getaddrinfo %s: %s", host, gai_strerror(rc));
-        return -1;
-    }
-    int fd = -1;
-    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
-        if (fd < 0) continue;
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        close_sock(fd);
-        fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) return -1;
-    int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    return fd;
-}
+//
+// Read up to want bytes from the connection, append into b. Returns >0
+// bytes read, 0 EOF, -1 error, -2 cancel.
+//
 
-static int write_all(int fd, const void *buf, size_t n)
+static ssize_t read_some(conn_t *c, buf *b, size_t want, volatile int *cancel)
 {
-    const char *p = buf;
-    while (n) {
-        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
-        if (w < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        p += w;
-        n -= (size_t)w;
-    }
-    return 0;
-}
-
-/* read up to want bytes, append to b. Honors cancel via *cancel.
- * Returns >0 bytes read, 0 EOF, -1 error, -2 cancel. */
-static ssize_t read_some(int fd, buf *b, size_t want, volatile int *cancel)
-{
-    if (cancel && *cancel) return -2;
     char tmp[4096];
     if (want > sizeof(tmp)) want = sizeof(tmp);
-    fd_set rfds;
-    struct timeval tv;
-    while (1) {
-        if (cancel && *cancel) return -2;
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-        int s = select(fd + 1, &rfds, NULL, NULL, &tv);
-        if (s < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (s == 0) continue;
-        ssize_t r = recv(fd, tmp, want, 0);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (r == 0) return 0;
-        buf_put(b, tmp, (size_t)r);
-        return r;
-    }
+    ssize_t r = conn_read(c, tmp, want, cancel);
+    if (r > 0) buf_put(b, tmp, (size_t)r);
+    return r;
 }
 
-/* skip past CRLFCRLF in b starting at *off. Returns 1 once found and
- * updates *off to point after it. 0 means more data needed. */
+//
+// Skip past CRLFCRLF in b starting at *off. Returns 1 once found and
+// updates *off to point after it. 0 means more data needed.
+//
+
 static int find_headers_end(buf *b, size_t *off)
 {
     if (b->len < 4) return 0;
@@ -135,9 +83,12 @@ static int find_headers_end(buf *b, size_t *off)
     return 0;
 }
 
-/* Process one chunk of accumulated body data: extract complete "data:"
- * lines and dispatch via on_chunk. Lines are terminated by \n.  We
- * preserve any partial trailing line at the front of the buffer. */
+//
+// Process one chunk of accumulated body data: extract complete "data:"
+// lines and dispatch via on_chunk. Lines are terminated by \n. We
+// preserve any partial trailing line at the front of the buffer.
+//
+
 static void emit_sse(buf *body, void (*on_chunk)(const char *, size_t, void *), void *ud)
 {
     size_t start = 0;
@@ -163,19 +114,28 @@ static void emit_sse(buf *body, void (*on_chunk)(const char *, size_t, void *), 
     }
 }
 
-int http_post_sse(const char *host, int port, const char *path,
+int http_post_sse(const char *host, int port, int use_tls, const char *path,
                   const char *const *headers,
                   const void *body, size_t body_len,
                   void (*on_chunk)(const char *data, size_t n, void *ud),
                   void *ud,
                   volatile int *cancel)
 {
-    int fd = tcp_connect(host, port);
-    if (fd < 0) return -1;
+    conn_t *c = conn_open(host, port, use_tls);
+    if (!c) return -1;
 
     buf req = {0};
     buf_putf(&req, "POST %s HTTP/1.1\r\n", path);
-    buf_putf(&req, "Host: %s:%d\r\n", host, port);
+    //
+    // Omit the explicit port from Host: when it's the default for the
+    // scheme — some endpoints (incl. CDN-fronted ones) reject the
+    // explicit form.
+    //
+    if ((use_tls && port == 443) || (!use_tls && port == 80)) {
+        buf_putf(&req, "Host: %s\r\n", host);
+    } else {
+        buf_putf(&req, "Host: %s:%d\r\n", host, port);
+    }
     buf_puts(&req, "Connection: close\r\n");
     buf_puts(&req, "Accept: text/event-stream\r\n");
     buf_putf(&req, "Content-Length: %zu\r\n", body_len);
@@ -188,26 +148,26 @@ int http_post_sse(const char *host, int port, const char *path,
     buf_puts(&req, "\r\n");
     buf_put(&req, body, body_len);
 
-    int rc = write_all(fd, req.data, req.len);
+    int rc = conn_write_all(c, req.data, req.len);
     buf_free(&req);
-    if (rc < 0) { close_sock(fd); return -1; }
+    if (rc < 0) { conn_close(c); return -1; }
 
     /* read until headers fully received */
     buf raw = {0};
     size_t scan_off = 0;
     while (!find_headers_end(&raw, &scan_off)) {
-        ssize_t r = read_some(fd, &raw, 4096, cancel);
-        if (r == 0) { close_sock(fd); buf_free(&raw); return -1; }
-        if (r < 0)  { close_sock(fd); buf_free(&raw); return r == -2 ? -2 : -1; }
+        ssize_t r = read_some(c, &raw, 4096, cancel);
+        if (r == 0) { conn_close(c); buf_free(&raw); return -1; }
+        if (r < 0)  { conn_close(c); buf_free(&raw); return r == -2 ? -2 : -1; }
     }
 
     /* parse status line */
     int status = 0;
     {
         const char *eol = memchr(raw.data, '\n', raw.len);
-        if (!eol) { close_sock(fd); buf_free(&raw); return -1; }
+        if (!eol) { conn_close(c); buf_free(&raw); return -1; }
         const char *sp1 = memchr(raw.data, ' ', (size_t)(eol - raw.data));
-        if (!sp1) { close_sock(fd); buf_free(&raw); return -1; }
+        if (!sp1) { conn_close(c); buf_free(&raw); return -1; }
         status = atoi(sp1 + 1);
     }
 
@@ -217,7 +177,7 @@ int http_post_sse(const char *host, int port, const char *path,
         buf body_tail = {0};
         buf_put(&body_tail, raw.data + scan_off, raw.len - scan_off);
         for (int i = 0; i < 4; i++) {
-            ssize_t r = read_some(fd, &body_tail, 1024, cancel);
+            ssize_t r = read_some(c, &body_tail, 1024, cancel);
             if (r <= 0) break;
         }
         if (body_tail.len) {
@@ -226,7 +186,7 @@ int http_post_sse(const char *host, int port, const char *path,
         }
         buf_free(&body_tail);
         buf_free(&raw);
-        close_sock(fd);
+        conn_close(c);
         return -1;
     }
 
@@ -236,8 +196,8 @@ int http_post_sse(const char *host, int port, const char *path,
         char headers_low[8192];
         size_t hlen = scan_off < sizeof(headers_low) ? scan_off : sizeof(headers_low) - 1;
         for (size_t i = 0; i < hlen; i++) {
-            char c = raw.data[i];
-            headers_low[i] = (c >= 'A' && c <= 'Z') ? (char)(c | 0x20) : c;
+            char ch = raw.data[i];
+            headers_low[i] = (ch >= 'A' && ch <= 'Z') ? (char)(ch | 0x20) : ch;
         }
         headers_low[hlen] = 0;
         if (strstr(headers_low, "transfer-encoding: chunked")) chunked = 1;
@@ -252,7 +212,7 @@ int http_post_sse(const char *host, int port, const char *path,
     if (!chunked) {
         emit_sse(&body_buf, on_chunk, ud);
         while (1) {
-            ssize_t r = read_some(fd, &body_buf, 4096, cancel);
+            ssize_t r = read_some(c, &body_buf, 4096, cancel);
             if (r == 0) break;
             if (r == -2) { ret = -2; break; }
             if (r < 0)   { ret = -1; break; }
@@ -274,7 +234,7 @@ int http_post_sse(const char *host, int port, const char *path,
                     }
                 }
                 if (!crlf) {
-                    ssize_t r = read_some(fd, &body_buf, 4096, cancel);
+                    ssize_t r = read_some(c, &body_buf, 4096, cancel);
                     if (r == 0) { ret = -1; break; }
                     if (r == -2) { ret = -2; break; }
                     if (r < 0)   { ret = -1; break; }
@@ -299,7 +259,7 @@ int http_post_sse(const char *host, int port, const char *path,
                 }
             }
             if (body_buf.len < need + 2) {
-                ssize_t r = read_some(fd, &body_buf, need + 2 - body_buf.len, cancel);
+                ssize_t r = read_some(c, &body_buf, need + 2 - body_buf.len, cancel);
                 if (r == 0)  { ret = -1; break; }
                 if (r == -2) { ret = -2; break; }
                 if (r < 0)   { ret = -1; break; }
@@ -315,6 +275,6 @@ int http_post_sse(const char *host, int port, const char *path,
     }
 
     buf_free(&body_buf);
-    close_sock(fd);
+    conn_close(c);
     return ret;
 }

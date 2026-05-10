@@ -514,15 +514,13 @@ impl App {
                         md.push_str(&format!("\n{}\n", trimmed));
                     }
                 }
-                ConversationEntry::ToolGroup(tools) => {
-                    if !tools.is_empty() {
-                        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-                        md.push_str(&format!(
-                            "\n\u{2713} {} tool calls ({})\n",
-                            tools.len(),
-                            names.join(", ")
-                        ));
-                    }
+                ConversationEntry::Tool { name, outcome, .. } => {
+                    let icon = match outcome {
+                        None => "\u{2192}",
+                        Some(o) if o.success => "\u{2713}",
+                        Some(_) => "\u{2717}",
+                    };
+                    md.push_str(&format!("\n{} {}\n", icon, name));
                 }
                 ConversationEntry::Info(msg) => {
                     md.push_str(&format!("\n*{}*\n", msg));

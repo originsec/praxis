@@ -1,6 +1,6 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
-use crate::ui::common::focused_titled_panel;
+use crate::ui::common::focused_panel;
 use crate::ui::chrome;
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
@@ -25,11 +25,12 @@ pub(super) fn render_library(f: &mut Frame, area: Rect, state: &OperationsState)
 pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("Name"),
-        Cell::from("Category"),
-        Cell::from("Mode"),
+        Cell::from("NAME"),
+        Cell::from("CATEGORY"),
+        Cell::from("MODE"),
     ])
-    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
 
     let mut rows: Vec<Row> = Vec::new();
 
@@ -79,10 +80,7 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(focused_titled_panel(
-            " Operations & Chains ",
-            !state.detail_focus,
-        ))
+        .block(focused_panel(!state.detail_focus))
         .row_highlight_style(
             Style::default()
                 .bg(BG_SELECTED)
@@ -96,7 +94,7 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
 }
 
 pub(super) fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let block = focused_titled_panel(" Detail ", state.detail_focus);
+    let block = focused_panel(state.detail_focus);
 
     let inner = block.inner(area);
     f.render_widget(block, area);

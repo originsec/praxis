@@ -1716,14 +1716,21 @@ impl App {
             vertical: 1,
             horizontal: 2,
         });
+        //
+        // Layout must match the renderer in `ui::render` exactly, or
+        // hit-tests for the resizable pane border (and other body
+        // clicks) drift by a row. The renderer reserves: header (1) +
+        // padding (1) + content (min) + status (1).
+        //
         let frame_chunks = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Length(1),
         ])
         .split(inner_area);
-        let content_area = frame_chunks[1];
-        let status_area = frame_chunks[2];
+        let content_area = frame_chunks[2];
+        let status_area = frame_chunks[3];
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {

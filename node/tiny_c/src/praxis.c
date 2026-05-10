@@ -649,7 +649,9 @@ static void *prompt_worker(void *arg)
     /* parse endpoint url */
     char *host = NULL, *path = NULL;
     int port = 80;
-    if (!cfg->endpoint_url || http_parse_url(cfg->endpoint_url, &host, &port, &path) < 0) {
+    int use_tls = 0;
+    if (!cfg->endpoint_url ||
+        http_parse_url(cfg->endpoint_url, &host, &port, &path, &use_tls) < 0) {
         acp_send_error(s->client_id, pa->id_raw, -32603, "Invalid endpoint_url");
         praxis_cfg_free(cfg);
         free(pa->prompt); free(pa->id_raw); free(pa);
@@ -714,7 +716,7 @@ static void *prompt_worker(void *arg)
         stream_ctx ctx = {0};
         ctx.sess = s;
 
-        int rc = http_post_sse(host, port, full_path, headers,
+        int rc = http_post_sse(host, port, use_tls, full_path, headers,
                                body.data, body.len,
                                on_sse_chunk, &ctx, &s->cancel);
         buf_free(&body);
