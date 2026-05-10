@@ -1,17 +1,14 @@
 #include "tiny.h"
 
 #include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
+
+#if !defined(_WIN32)
+  #include <sys/select.h>
+#endif
 
 /* AMQP 0-9-1 frame types */
 #define FT_METHOD     1
@@ -29,8 +26,7 @@
 struct amqp {
     int             fd;
     pthread_mutex_t wmu;
-    int             shutdown;
-    int             pipe_r, pipe_w;     /* self-pipe to interrupt select */
+    volatile int    shutdown;          /* set by amqp_request_shutdown */
 
     /* delivery accumulation state for the read loop */
     char     cur_consumer_tag[256];
@@ -88,41 +84,46 @@ static int sock_write_all(int fd, const void *buf_, size_t n)
     return 0;
 }
 
-/* Read exactly n bytes. Wakes from self-pipe to honor shutdown.
- * Returns 0 on success, -1 on error, -2 on shutdown. With timeout_ms < 0
- * blocks forever; otherwise -3 on timeout (no data within window). */
+/* Read exactly n bytes. Honors c->shutdown via a 200ms periodic select
+ * timeout when the caller wanted infinite blocking. Returns 0 on success,
+ * -1 on error, -2 on shutdown, -3 on timeout (only when timeout_ms >= 0
+ * and no data arrived). */
 static int sock_read_exact(struct amqp *c, void *buf_, size_t n, int timeout_ms)
 {
     char *p = buf_;
+    int caller_timeout = timeout_ms;
     while (n) {
         if (c->shutdown) return -2;
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(c->fd, &rfds);
-        FD_SET(c->pipe_r, &rfds);
-        int maxfd = c->fd > c->pipe_r ? c->fd : c->pipe_r;
-        struct timeval tv, *ptv = NULL;
-        if (timeout_ms >= 0) {
-            tv.tv_sec = timeout_ms / 1000;
-            tv.tv_usec = (timeout_ms % 1000) * 1000;
-            ptv = &tv;
-        }
-        int s = select(maxfd + 1, &rfds, NULL, NULL, ptv);
+        struct timeval tv;
+        int slot_ms = timeout_ms >= 0 ? timeout_ms : 200;
+        tv.tv_sec  = slot_ms / 1000;
+        tv.tv_usec = (slot_ms % 1000) * 1000;
+        int s = select((int)(c->fd + 1), &rfds, NULL, NULL, &tv);
         if (s < 0) {
+#if !defined(_WIN32)
             if (errno == EINTR) continue;
+#endif
             return -1;
         }
-        if (s == 0) return -3;
-        if (FD_ISSET(c->pipe_r, &rfds)) return -2;
-        ssize_t r = recv(c->fd, p, n, 0);
+        if (s == 0) {
+            if (caller_timeout >= 0) return -3;
+            continue; /* periodic wakeup; recheck shutdown */
+        }
+        ssize_t r = recv(c->fd, p, (int)n, 0);
         if (r < 0) {
+#if !defined(_WIN32)
             if (errno == EINTR) continue;
+#endif
             return -1;
         }
         if (r == 0) return -1;
         p += r;
         n -= (size_t)r;
-        timeout_ms = -1; /* once we've read partial bytes, block for rest */
+        caller_timeout = -1;
+        timeout_ms = -1; /* once we have partial bytes, finish without timing out */
     }
     return 0;
 }
@@ -316,13 +317,8 @@ amqp *amqp_connect(const char *host, int port, const char *user, const char *pas
 {
     struct amqp *c = calloc(1, sizeof(*c));
     if (!c) return NULL;
-    c->fd = -1; c->pipe_r = -1; c->pipe_w = -1;
+    c->fd = -1;
     pthread_mutex_init(&c->wmu, NULL);
-
-    int pfd[2];
-    if (pipe(pfd) < 0) { free(c); return NULL; }
-    c->pipe_r = pfd[0];
-    c->pipe_w = pfd[1];
 
     char portstr[16];
     snprintf(portstr, sizeof(portstr), "%d", port);
@@ -340,7 +336,7 @@ amqp *amqp_connect(const char *host, int port, const char *user, const char *pas
         fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
         if (fd < 0) continue;
         if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        close(fd);
+        close_sock(fd);
         fd = -1;
     }
     freeaddrinfo(res);
@@ -360,12 +356,13 @@ void amqp_close(amqp *c)
 {
     if (!c) return;
     if (c->fd >= 0) {
-        /* try a graceful connection.close-ok... skip; just close */
+#if defined(_WIN32)
+        shutdown(c->fd, SD_BOTH);
+#else
         shutdown(c->fd, SHUT_RDWR);
-        close(c->fd);
+#endif
+        close_sock(c->fd);
     }
-    if (c->pipe_r >= 0) close(c->pipe_r);
-    if (c->pipe_w >= 0) close(c->pipe_w);
     buf_free(&c->cur_body);
     pthread_mutex_destroy(&c->wmu);
     free(c);
@@ -375,10 +372,13 @@ void amqp_request_shutdown(amqp *c)
 {
     if (!c) return;
     c->shutdown = 1;
-    if (c->pipe_w >= 0) {
-        char x = 0;
-        ssize_t w = write(c->pipe_w, &x, 1);
-        (void)w;
+    /* Tear down the socket so any in-flight recv unblocks immediately. */
+    if (c->fd >= 0) {
+#if defined(_WIN32)
+        shutdown(c->fd, SD_BOTH);
+#else
+        shutdown(c->fd, SHUT_RDWR);
+#endif
     }
 }
 

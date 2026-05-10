@@ -2,15 +2,18 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/wait.h>
-#include <unistd.h>
+
+#if !defined(_WIN32)
+  #include <fcntl.h>
+  #include <signal.h>
+  #include <sys/select.h>
+  #include <sys/wait.h>
+  #include <unistd.h>
+#endif
 
 /* ============================================================== */
 /* config                                                           */
@@ -182,6 +185,8 @@ void praxis_join_workers(void)
 /* run_command                                                      */
 /* ============================================================== */
 
+#if !defined(_WIN32)
+
 static int run_command(const char *command, const char *cwd, int timeout_secs,
                        volatile int *cancel, buf *out)
 {
@@ -258,7 +263,7 @@ static int run_command(const char *command, const char *cwd, int timeout_secs,
         for (int i = 0; i < 10; i++) {
             int r = waitpid(pid, &status, WNOHANG);
             if (r == pid) goto reaped;
-            usleep(100000);
+            sleep_ms(100);
         }
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
@@ -283,6 +288,104 @@ reaped:
     if (killed)                        return -3;     /* timeout */
     return 0;
 }
+
+#else  /* _WIN32 */
+
+/* Windows run_command via CreateProcess + anonymous pipes. The pipes are
+ * inherited by the child; we read both halves on a polling loop and kill
+ * the process on cancel/timeout. */
+static int win_drain(HANDLE h, buf *out)
+{
+    DWORD avail = 0;
+    if (!PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL)) return -1;
+    if (avail == 0) return 0;
+    char tmp[4096];
+    if (avail > sizeof(tmp)) avail = sizeof(tmp);
+    DWORD got = 0;
+    if (!ReadFile(h, tmp, avail, &got, NULL)) return -1;
+    if (got == 0) return -1;
+    buf_put(out, tmp, got);
+    return (int)got;
+}
+
+static int run_command(const char *command, const char *cwd, int timeout_secs,
+                       volatile int *cancel, buf *out)
+{
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE outR = NULL, outW = NULL, errR = NULL, errW = NULL;
+    if (!CreatePipe(&outR, &outW, &sa, 0)) return -1;
+    if (!CreatePipe(&errR, &errW, &sa, 0)) {
+        CloseHandle(outR); CloseHandle(outW);
+        return -1;
+    }
+    SetHandleInformation(outR, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(errR, HANDLE_FLAG_INHERIT, 0);
+
+    /* cmd /c <command> */
+    size_t clen = strlen(command);
+    char *cmdline = malloc(clen + 16);
+    if (!cmdline) {
+        CloseHandle(outR); CloseHandle(outW);
+        CloseHandle(errR); CloseHandle(errW);
+        return -1;
+    }
+    snprintf(cmdline, clen + 16, "cmd /c %s", command);
+
+    STARTUPINFOA si = { sizeof(si) };
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = outW;
+    si.hStdError = errW;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION pi = {0};
+
+    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
+                             CREATE_NO_WINDOW, NULL,
+                             (cwd && *cwd) ? cwd : NULL, &si, &pi);
+    free(cmdline);
+    CloseHandle(outW);
+    CloseHandle(errW);
+    if (!ok) {
+        CloseHandle(outR); CloseHandle(errR);
+        return -1;
+    }
+
+    buf so = {0}, se = {0};
+    uint64_t deadline = monotonic_ms() + (uint64_t)timeout_secs * 1000ULL;
+    int killed = 0;
+    while (1) {
+        if (cancel && *cancel) { TerminateProcess(pi.hProcess, 1); killed = 1; break; }
+        if (monotonic_ms() >= deadline) { TerminateProcess(pi.hProcess, 1); killed = 1; break; }
+        win_drain(outR, &so);
+        win_drain(errR, &se);
+        DWORD wait = WaitForSingleObject(pi.hProcess, 50);
+        if (wait == WAIT_OBJECT_0) break;
+    }
+    /* drain any remaining output */
+    while (win_drain(outR, &so) > 0) {}
+    while (win_drain(errR, &se) > 0) {}
+
+    DWORD status = 0;
+    GetExitCodeProcess(pi.hProcess, &status);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    CloseHandle(outR);
+    CloseHandle(errR);
+
+    char code_buf[32];
+    snprintf(code_buf, sizeof(code_buf), "%lu", status);
+    buf_putf(out, "exit_code: %s\nstdout:\n", code_buf);
+    if (so.len) buf_put(out, so.data, so.len);
+    buf_puts(out, "\nstderr:\n");
+    if (se.len) buf_put(out, se.data, se.len);
+    buf_free(&so);
+    buf_free(&se);
+
+    if (killed && cancel && *cancel)  return -2;
+    if (killed)                        return -3;
+    return 0;
+}
+
+#endif
 
 /* ============================================================== */
 /* tool call parsing — mirrors common::ai::parsing                  */

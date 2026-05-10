@@ -1,15 +1,21 @@
 #include "tiny.h"
 
-#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/utsname.h>
-#include <unistd.h>
+#include <time.h>
 #include <pthread.h>
+
+#if !defined(_WIN32)
+  #include <fcntl.h>
+  #include <sys/utsname.h>
+  #include <unistd.h>
+#else
+  #include <direct.h>
+#endif
 
 /* ============================================================== */
 /* globals                                                          */
@@ -29,16 +35,35 @@ static char            G_node_queue[128];
 /* node id persistence                                              */
 /* ============================================================== */
 
+static int mk_dir(const char *d)
+{
+#if defined(_WIN32)
+    return _mkdir(d);
+#else
+    return mkdir(d, 0755);
+#endif
+}
+
 static int load_or_create_node_id(char out[64])
 {
+    char dir[512] = {0};
+    char path[640] = {0};
+
+#if defined(_WIN32)
+    const char *appdata = getenv("LOCALAPPDATA");
+    if (!appdata) appdata = getenv("APPDATA");
+    if (!appdata) return -1;
+    snprintf(dir, sizeof(dir), "%s\\praxis", appdata);
+    snprintf(path, sizeof(path), "%s\\node_id", dir);
+    mk_dir(dir);
+#else
     const char *xdg = getenv("XDG_DATA_HOME");
     const char *home = getenv("HOME");
     if (!home) return -1;
-    char dir[512];
     if (xdg && *xdg) snprintf(dir, sizeof(dir), "%s/praxis", xdg);
     else             snprintf(dir, sizeof(dir), "%s/.local/share/praxis", home);
-    char path[640];
     snprintf(path, sizeof(path), "%s/node_id", dir);
+#endif
 
     FILE *f = fopen(path, "r");
     if (f) {
@@ -55,17 +80,23 @@ static int load_or_create_node_id(char out[64])
         fclose(f);
     }
 
-    /* create */
     char id[37];
     uuid_v4(id);
-    mkdir(dir, 0755);    /* may fail if intermediate doesn't exist; non-fatal */
-    /* try parent.parent in case ~/.local/share doesn't exist */
-    char parent[512];
-    snprintf(parent, sizeof(parent), "%s/.local", home);
-    mkdir(parent, 0755);
-    snprintf(parent, sizeof(parent), "%s/.local/share", home);
-    mkdir(parent, 0755);
-    mkdir(dir, 0755);
+
+#if !defined(_WIN32)
+    {
+        char parent[512];
+        const char *home2 = getenv("HOME");
+        if (home2) {
+            snprintf(parent, sizeof(parent), "%s/.local", home2);
+            mk_dir(parent);
+            snprintf(parent, sizeof(parent), "%s/.local/share", home2);
+            mk_dir(parent);
+        }
+        mk_dir(dir);
+    }
+#endif
+
     f = fopen(path, "w");
     if (f) { fputs(id, f); fclose(f); }
     snprintf(out, 64, "%s", id);
@@ -78,15 +109,33 @@ static int load_or_create_node_id(char out[64])
 
 static void hostname_into(char *out, size_t cap)
 {
+#if defined(_WIN32)
+    DWORD n = (DWORD)cap;
+    if (!GetComputerNameA(out, &n)) snprintf(out, cap, "unknown");
+#else
     if (gethostname(out, cap) != 0) snprintf(out, cap, "unknown");
+#endif
     out[cap - 1] = 0;
 }
 
 static void os_details_into(char *out, size_t cap)
 {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetNativeSystemInfo(&si);
+    const char *arch = "unknown";
+    switch (si.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64: arch = "x86_64"; break;
+        case PROCESSOR_ARCHITECTURE_ARM64: arch = "aarch64"; break;
+        case PROCESSOR_ARCHITECTURE_INTEL: arch = "x86"; break;
+        default: break;
+    }
+    snprintf(out, cap, "Windows (%s)", arch);
+#else
     struct utsname u;
     if (uname(&u) == 0) snprintf(out, cap, "%s %s (%s)", u.sysname, u.release, u.machine);
     else                 snprintf(out, cap, "Unknown");
+#endif
 }
 
 static int publish_registration(amqp *c)
@@ -219,7 +268,7 @@ void send_node_information_update(void)
         struct timespec t;
         clock_gettime(CLOCK_REALTIME, &t);
         struct tm tm;
-        gmtime_r(&t.tv_sec, &tm);
+        tiny_gmtime_r(&t.tv_sec, &tm);
         long ms = (long)(t.tv_nsec / 1000000);
         if (ms < 0) ms = 0;
         if (ms > 999) ms = 999;
@@ -454,20 +503,42 @@ static void parse_amqp_url(const char *url,
     }
 }
 
+#if defined(_WIN32)
+static BOOL WINAPI win_console_handler(DWORD ctrl)
+{
+    switch (ctrl) {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        handle_signal(0);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+#endif
+
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
-    /* signal handling */
+#if defined(_WIN32)
+    SetConsoleCtrlHandler(win_console_handler, TRUE);
+#else
     struct sigaction sa = {0};
     sa.sa_handler = handle_signal;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
+#endif
+
+    if (net_startup() < 0) return 1;
 
     if (load_or_create_node_id(tiny_node_id) < 0) {
-        LOG_ERROR("could not establish node id (HOME unset?)");
+        LOG_ERROR("could not establish node id (HOME/LOCALAPPDATA unset?)");
+        net_cleanup();
         return 1;
     }
     LOG_INFO("Tiny C node starting; node_id=%s", tiny_node_id);
@@ -480,16 +551,17 @@ int main(int argc, char **argv)
     while (!G_shutdown) {
         if (run_once(host, port, user, pass) < 0) {
             LOG_WARN("connect/register failed; retry in 5s");
-            for (int i = 0; i < 50 && !G_shutdown; i++) usleep(100000);
+            for (int i = 0; i < 50 && !G_shutdown; i++) sleep_ms(100);
             continue;
         }
         if (G_shutdown) break;
         LOG_INFO("Reset/disconnect; reconnecting in 1s");
-        for (int i = 0; i < 10 && !G_shutdown; i++) usleep(100000);
+        for (int i = 0; i < 10 && !G_shutdown; i++) sleep_ms(100);
     }
 
     LOG_INFO("Waiting for in-flight workers...");
     praxis_join_workers();
+    net_cleanup();
     LOG_INFO("Bye.");
     return 0;
 }

@@ -46,6 +46,50 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
+  build-node-tiny-c:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_path: node/tiny_c/praxis_node_tiny_c
+            asset_name: praxis_node_tiny_c-linux-x86_64
+            shell: bash
+          - os: macos-13
+            artifact_path: node/tiny_c/praxis_node_tiny_c
+            asset_name: praxis_node_tiny_c-macos-x86_64
+            shell: bash
+          - os: windows-latest
+            artifact_path: node/tiny_c/praxis_node_tiny_c.exe
+            asset_name: praxis_node_tiny_c-windows-x86_64.exe
+            shell: msys2 {0}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            make
+
+      - name: Build
+        working-directory: node/tiny_c
+        run: make release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.artifact_path }}
+
   build-cli:
     strategy:
       matrix:
@@ -85,7 +129,7 @@ jobs:
     # producing binaries that run on Ubuntu 22.04+, Debian 12+,
     # Fedora 36+, etc.
     #
-    needs: [build-node]
+    needs: [build-node, build-node-tiny-c]
     runs-on: ubuntu-22.04
 
     steps:
@@ -101,11 +145,20 @@ jobs:
         #
         run: cargo build --release -p praxis_service -p praxis_cli -p praxis_node
 
+      - name: Build praxis_node_tiny_c (Linux)
+        run: make -C node/tiny_c release
+
       - name: Download Windows node binary
         uses: actions/download-artifact@v4
         with:
           name: praxis_node-windows-x86_64.exe
           path: artifacts/windows-node
+
+      - name: Download tiny C node (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: praxis_node_tiny_c-windows-x86_64.exe
+          path: artifacts/windows-node-tiny-c
 
       - name: Package binaries
         run: |
@@ -115,8 +168,12 @@ jobs:
              target/release/praxis_cli \
              target/release/praxis_node \
              "praxis-${VERSION}-x86_64-linux/"
+          cp node/tiny_c/praxis_node_tiny_c \
+             "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c"
           cp artifacts/windows-node/praxis_node.exe \
              "praxis-${VERSION}-x86_64-linux/praxis_node_windows.exe"
+          cp artifacts/windows-node-tiny-c/praxis_node_tiny_c.exe \
+             "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c_windows.exe"
           cp pkg/praxisctl/praxisctl "praxis-${VERSION}-x86_64-linux/"
           cp LICENSE "praxis-${VERSION}-x86_64-linux/"
           tar czf "praxis-${VERSION}-x86_64-linux.tar.gz" "praxis-${VERSION}-x86_64-linux"
@@ -128,7 +185,7 @@ jobs:
           path: praxis-*-x86_64-linux.tar.gz
 
   release:
-    needs: [build-node, build-server, build-cli]
+    needs: [build-node, build-node-tiny-c, build-server, build-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -144,9 +201,13 @@ jobs:
           mv artifacts/praxis_node-linux-x86_64/praxis_node praxis_node-linux-x86_64
           mv artifacts/praxis_node-windows-x86_64.exe/praxis_node.exe praxis_node-windows-x86_64.exe
           mv artifacts/praxis_node-macos-x86_64/praxis_node praxis_node-macos-x86_64
+          mv artifacts/praxis_node_tiny_c-linux-x86_64/praxis_node_tiny_c praxis_node_tiny_c-linux-x86_64
+          mv artifacts/praxis_node_tiny_c-macos-x86_64/praxis_node_tiny_c praxis_node_tiny_c-macos-x86_64
+          mv artifacts/praxis_node_tiny_c-windows-x86_64.exe/praxis_node_tiny_c.exe praxis_node_tiny_c-windows-x86_64.exe
           mv artifacts/praxis_cli-windows-x86_64.exe/praxis_cli.exe praxis_cli-windows-x86_64.exe
           mv artifacts/praxis_cli-macos-x86_64/praxis_cli praxis_cli-macos-x86_64
           chmod +x praxis_node-linux-x86_64 praxis_node-macos-x86_64 \
+                   praxis_node_tiny_c-linux-x86_64 praxis_node_tiny_c-macos-x86_64 \
                    praxis_cli-macos-x86_64
           cp artifacts/praxis-server-linux-x86_64/praxis-*-x86_64-linux.tar.gz .
 
@@ -158,6 +219,9 @@ jobs:
             praxis_node-linux-x86_64
             praxis_node-windows-x86_64.exe
             praxis_node-macos-x86_64
+            praxis_node_tiny_c-linux-x86_64
+            praxis_node_tiny_c-macos-x86_64
+            praxis_node_tiny_c-windows-x86_64.exe
             praxis_cli-windows-x86_64.exe
             praxis_cli-macos-x86_64
             praxis-*-x86_64-linux.tar.gz

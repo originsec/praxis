@@ -1,13 +1,19 @@
 #include "tiny.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 #include <pthread.h>
+
+#if !defined(_WIN32)
+  #include <fcntl.h>
+  #include <unistd.h>
+#else
+  #include <bcrypt.h>
+  #include <io.h>
+#endif
 
 static pthread_mutex_t log_mu = PTHREAD_MUTEX_INITIALIZER;
 
@@ -16,7 +22,7 @@ void log_msg(const char *level, const char *fmt, ...)
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     struct tm tm;
-    gmtime_r(&ts.tv_sec, &tm);
+    tiny_gmtime_r(&ts.tv_sec, &tm);
 
     pthread_mutex_lock(&log_mu);
     fprintf(stderr, "%04d-%02d-%02dT%02d:%02d:%02d.%03ldZ %-5s ",
@@ -33,6 +39,12 @@ void log_msg(const char *level, const char *fmt, ...)
 
 void rand_bytes(unsigned char *out, size_t n)
 {
+#if defined(_WIN32)
+    /* BCryptGenRandom with system-preferred RNG. */
+    if (BCryptGenRandom(NULL, out, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0)
+        return;
+    for (size_t i = 0; i < n; i++) out[i] = (unsigned char)rand();
+#else
     int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         for (size_t i = 0; i < n; i++) out[i] = (unsigned char)rand();
@@ -49,6 +61,7 @@ void rand_bytes(unsigned char *out, size_t n)
         got += (size_t)r;
     }
     close(fd);
+#endif
 }
 
 void uuid_v4(char out[37])
@@ -69,9 +82,13 @@ void uuid_v4(char out[37])
 
 uint64_t monotonic_ms(void)
 {
+#if defined(_WIN32)
+    return (uint64_t)GetTickCount64();
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+#endif
 }
 
 void buf_reserve(buf *b, size_t need)
@@ -120,5 +137,38 @@ void buf_free(buf *b)
 
 int is_privileged(void)
 {
+#if defined(_WIN32)
+    /* Best-effort admin check via process token. */
+    HANDLE tok = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) return 0;
+    TOKEN_ELEVATION te = {0};
+    DWORD got = 0;
+    int admin = 0;
+    if (GetTokenInformation(tok, TokenElevation, &te, sizeof(te), &got))
+        admin = te.TokenIsElevated ? 1 : 0;
+    CloseHandle(tok);
+    return admin;
+#else
     return geteuid() == 0;
+#endif
+}
+
+int net_startup(void)
+{
+#if defined(_WIN32)
+    WSADATA wsa;
+    int rc = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (rc != 0) {
+        LOG_ERROR("WSAStartup failed (%d)", rc);
+        return -1;
+    }
+#endif
+    return 0;
+}
+
+void net_cleanup(void)
+{
+#if defined(_WIN32)
+    WSACleanup();
+#endif
 }

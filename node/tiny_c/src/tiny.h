@@ -1,17 +1,18 @@
 /*
  * praxis_node_tiny_c — minimal pure-C praxis node.
  *
- * Runtime dependencies: libc only. All protocol code (AMQP 0-9-1,
- * HTTP/1.1, JSON, ACP JSON-RPC) is hand-rolled and statically linked
- * into the resulting binary.
+ * Runtime dependencies: libc only on Linux/macOS. On Windows the
+ * binary additionally links the system Winsock + bcrypt DLLs (which
+ * play the same "always present" role as libc). All protocol code
+ * (AMQP 0-9-1, HTTP/1.1, JSON, ACP JSON-RPC) is hand-rolled and
+ * statically linked.
  *
- * Scope matches the Rust praxis_node_tiny: register with the praxis
- * service over RabbitMQ, host an ACP server for the native Praxis
- * agent, run shell commands as tool calls, stream chat completions
- * back to clients via session/update notifications.
+ * Scope: register with the praxis service over RabbitMQ, host an ACP
+ * server for the native Praxis agent, run shell commands as tool
+ * calls, stream chat completions back to clients via session/update
+ * notifications.
  *
- * Limitations vs the Rust tiny node:
- *   - Linux only (uses /dev/urandom, gethostname).
+ * Limitations:
  *   - HTTP only for the AI endpoint; TLS is not bundled in v1.
  *     Use a local OpenAI-compatible endpoint (e.g. an HTTP proxy in
  *     front of OpenAI, or a local llama.cpp/ollama server).
@@ -26,6 +27,60 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <sys/types.h>
+
+/* ============================================================== */
+/* platform                                                         */
+/* ============================================================== */
+
+#if defined(_WIN32)
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #include <windows.h>
+  typedef SSIZE_T ssize_t;
+  #define close_sock closesocket
+  #ifndef MSG_NOSIGNAL
+    #define MSG_NOSIGNAL 0
+  #endif
+  #ifndef SOCK_CLOEXEC
+    #define SOCK_CLOEXEC 0
+  #endif
+  /* gmtime_s has args swapped vs gmtime_r. */
+  static inline struct tm *tiny_gmtime_r(const time_t *t, struct tm *out) {
+      return gmtime_s(out, t) == 0 ? out : NULL;
+  }
+  /* sleep_ms in milliseconds — replaces usleep across platforms. */
+  static inline void sleep_ms(unsigned ms) { Sleep(ms); }
+#else
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <netdb.h>
+  #include <unistd.h>
+  #include <time.h>
+  #define close_sock close
+  /* macOS lacks MSG_NOSIGNAL; we ignore SIGPIPE globally. */
+  #ifndef MSG_NOSIGNAL
+    #define MSG_NOSIGNAL 0
+  #endif
+  /* macOS lacks SOCK_CLOEXEC; benign no-op. */
+  #ifndef SOCK_CLOEXEC
+    #define SOCK_CLOEXEC 0
+  #endif
+  static inline struct tm *tiny_gmtime_r(const time_t *t, struct tm *out) {
+      return gmtime_r(t, out);
+  }
+  static inline void sleep_ms(unsigned ms) {
+      struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
+      nanosleep(&ts, NULL);
+  }
+#endif
+
+/* Initialize platform networking. Call once at startup. Returns 0/-1. */
+int net_startup(void);
+void net_cleanup(void);
 
 /* ============================================================== */
 /* util.c — logging, time, random, dynamic buffers, base64         */

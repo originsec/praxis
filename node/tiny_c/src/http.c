@@ -1,15 +1,13 @@
 #include "tiny.h"
 
 #include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
+
+#if !defined(_WIN32)
+  #include <sys/select.h>
+#endif
 
 int http_parse_url(const char *url, char **out_host, int *out_port, char **out_path)
 {
@@ -64,7 +62,7 @@ static int tcp_connect(const char *host, int port)
         fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
         if (fd < 0) continue;
         if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        close(fd);
+        close_sock(fd);
         fd = -1;
     }
     freeaddrinfo(res);
@@ -192,24 +190,24 @@ int http_post_sse(const char *host, int port, const char *path,
 
     int rc = write_all(fd, req.data, req.len);
     buf_free(&req);
-    if (rc < 0) { close(fd); return -1; }
+    if (rc < 0) { close_sock(fd); return -1; }
 
     /* read until headers fully received */
     buf raw = {0};
     size_t scan_off = 0;
     while (!find_headers_end(&raw, &scan_off)) {
         ssize_t r = read_some(fd, &raw, 4096, cancel);
-        if (r == 0) { close(fd); buf_free(&raw); return -1; }
-        if (r < 0)  { close(fd); buf_free(&raw); return r == -2 ? -2 : -1; }
+        if (r == 0) { close_sock(fd); buf_free(&raw); return -1; }
+        if (r < 0)  { close_sock(fd); buf_free(&raw); return r == -2 ? -2 : -1; }
     }
 
     /* parse status line */
     int status = 0;
     {
         const char *eol = memchr(raw.data, '\n', raw.len);
-        if (!eol) { close(fd); buf_free(&raw); return -1; }
+        if (!eol) { close_sock(fd); buf_free(&raw); return -1; }
         const char *sp1 = memchr(raw.data, ' ', (size_t)(eol - raw.data));
-        if (!sp1) { close(fd); buf_free(&raw); return -1; }
+        if (!sp1) { close_sock(fd); buf_free(&raw); return -1; }
         status = atoi(sp1 + 1);
     }
 
@@ -228,7 +226,7 @@ int http_post_sse(const char *host, int port, const char *path,
         }
         buf_free(&body_tail);
         buf_free(&raw);
-        close(fd);
+        close_sock(fd);
         return -1;
     }
 
@@ -317,6 +315,6 @@ int http_post_sse(const char *host, int port, const char *path,
     }
 
     buf_free(&body_buf);
-    close(fd);
+    close_sock(fd);
     return ret;
 }
