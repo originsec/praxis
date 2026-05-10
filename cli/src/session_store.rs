@@ -61,10 +61,6 @@ pub fn sessions_dir() -> Result<PathBuf> {
     Ok(home.join(".praxis").join("sessions"))
 }
 
-pub fn session_path(session_id: &str) -> Result<PathBuf> {
-    Ok(sessions_dir()?.join(format!("{}.json", session_id)))
-}
-
 pub fn save(session: &StoredSession) -> Result<PathBuf> {
     let dir = sessions_dir()?;
     fs::create_dir_all(&dir)?;

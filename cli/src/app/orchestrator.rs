@@ -92,7 +92,6 @@ impl OrchestratorSessionState {
 pub struct OrchestratorState {
     pub sessions: Vec<OrchestratorSessionState>,
     pub active_session_index: Option<usize>,
-    pub session_counter: usize,
     pub input: String,
     pub cursor_pos: usize,
     pub history: Vec<String>,
@@ -130,11 +129,6 @@ impl OrchestratorState {
     pub fn session_by_id_mut(&mut self, id: &str) -> Option<&mut OrchestratorSessionState> {
         self.sessions.iter_mut().find(|s| s.session_id == id)
     }
-
-    pub fn next_session_number(&mut self) -> usize {
-        self.session_counter += 1;
-        self.session_counter
-    }
 }
 
 impl Default for OrchestratorState {
@@ -142,7 +136,6 @@ impl Default for OrchestratorState {
         Self {
             sessions: Vec::new(),
             active_session_index: None,
-            session_counter: 0,
             input: String::new(),
             cursor_pos: 0,
             history: Vec::new(),

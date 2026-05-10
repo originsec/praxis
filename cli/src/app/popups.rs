@@ -36,7 +36,6 @@ pub enum ConfirmKind {
     DeleteInterceptTarget(String), // target_id
     ResetNode(String), // node_id
     DeleteNode(String), // node_id — service handles whether it's local or remote
-    CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
     ToggleIntercept {
@@ -215,9 +214,6 @@ impl App {
                 {
                     self.nodes.active_session_id = None;
                 }
-            }
-            ConfirmKind::CloseOrchestratorSession => {
-                self.close_active_orchestrator_session().await;
             }
             ConfirmKind::ClearAllTraffic => {
                 self.clear_intercept_traffic().await;
