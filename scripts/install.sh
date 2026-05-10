@@ -560,10 +560,10 @@ install_cli_native() {
     else
         case "$OS_KIND" in
             linux)
-                local extracted
-                extracted=$(download_server_tarball_linux "$tmproot")
-                cp "$extracted/praxis_cli" "$tmproot/bin/praxis_cli"
-                rm -rf "$extracted"
+                info "Downloading praxis_cli-linux-x86_64..."
+                download_to "$(release_asset_url praxis_cli-linux-x86_64)" \
+                    "$tmproot/bin/praxis_cli"
+                chmod +x "$tmproot/bin/praxis_cli"
                 ;;
             macos)
                 info "Downloading praxis_cli-macos-arm64..."

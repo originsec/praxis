@@ -331,7 +331,8 @@ static int run_command(const char *command, const char *cwd, int timeout_secs,
     }
     snprintf(cmdline, clen + 16, "cmd /c %s", command);
 
-    STARTUPINFOA si = { sizeof(si) };
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = outW;
     si.hStdError = errW;

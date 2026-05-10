@@ -342,7 +342,7 @@ amqp *amqp_connect(const char *host, int port, const char *user, const char *pas
     freeaddrinfo(res);
     if (fd < 0) { LOG_WARN("AMQP TCP connect %s:%d failed", host, port); amqp_close(c); return NULL; }
     int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
     c->fd = fd;
 
     if (do_handshake(c, user, pass) < 0) {

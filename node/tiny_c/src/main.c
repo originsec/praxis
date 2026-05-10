@@ -282,7 +282,7 @@ void send_node_information_update(void)
     {
         struct timespec t;
         clock_gettime(CLOCK_REALTIME, &t);
-        struct tm tm;
+        struct tm tm = {0};
         tiny_gmtime_r(&t.tv_sec, &tm);
         long ms = (long)(t.tv_nsec / 1000000);
         if (ms < 0) ms = 0;

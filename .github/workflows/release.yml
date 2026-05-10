@@ -94,6 +94,10 @@ jobs:
     strategy:
       matrix:
         include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: praxis_cli
+            asset_name: praxis_cli-linux-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: praxis_cli.exe
@@ -178,11 +182,17 @@ jobs:
           cp LICENSE "praxis-${VERSION}-x86_64-linux/"
           tar czf "praxis-${VERSION}-x86_64-linux.tar.gz" "praxis-${VERSION}-x86_64-linux"
 
-      - name: Upload artifact
+      - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
           name: praxis-server-linux-x86_64
           path: praxis-*-x86_64-linux.tar.gz
+
+      - name: Upload standalone praxis_service (Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_service-linux-x86_64
+          path: target/release/praxis_service
 
   release:
     needs: [build-node, build-node-tiny-c, build-server, build-cli]
@@ -204,11 +214,14 @@ jobs:
           mv artifacts/praxis_node_tiny_c-linux-x86_64/praxis_node_tiny_c praxis_node_tiny_c-linux-x86_64
           mv artifacts/praxis_node_tiny_c-macos-arm64/praxis_node_tiny_c praxis_node_tiny_c-macos-arm64
           mv artifacts/praxis_node_tiny_c-windows-x86_64.exe/praxis_node_tiny_c.exe praxis_node_tiny_c-windows-x86_64.exe
+          mv artifacts/praxis_cli-linux-x86_64/praxis_cli praxis_cli-linux-x86_64
           mv artifacts/praxis_cli-windows-x86_64.exe/praxis_cli.exe praxis_cli-windows-x86_64.exe
           mv artifacts/praxis_cli-macos-arm64/praxis_cli praxis_cli-macos-arm64
+          mv artifacts/praxis_service-linux-x86_64/praxis_service praxis_service-linux-x86_64
           chmod +x praxis_node-linux-x86_64 praxis_node-macos-arm64 \
                    praxis_node_tiny_c-linux-x86_64 praxis_node_tiny_c-macos-arm64 \
-                   praxis_cli-macos-arm64
+                   praxis_cli-linux-x86_64 praxis_cli-macos-arm64 \
+                   praxis_service-linux-x86_64
           cp artifacts/praxis-server-linux-x86_64/praxis-*-x86_64-linux.tar.gz .
 
       - name: Create Release
@@ -222,6 +235,8 @@ jobs:
             praxis_node_tiny_c-linux-x86_64
             praxis_node_tiny_c-macos-arm64
             praxis_node_tiny_c-windows-x86_64.exe
+            praxis_cli-linux-x86_64
             praxis_cli-windows-x86_64.exe
             praxis_cli-macos-arm64
+            praxis_service-linux-x86_64
             praxis-*-x86_64-linux.tar.gz

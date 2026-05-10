@@ -21,7 +21,7 @@ void log_msg(const char *level, const char *fmt, ...)
 {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    struct tm tm;
+    struct tm tm = {0};
     tiny_gmtime_r(&ts.tv_sec, &tm);
 
     pthread_mutex_lock(&log_mu);

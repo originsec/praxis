@@ -34,8 +34,8 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 | Variable | Effect |
 |----------|--------|
 | `PRAXIS_NOT_HIDDEN` | Disable hidden desktop for DevTools agents. Defaults to `1` in debug builds (visible for development) and `0` in release builds (hidden for production). Set to `1` to make the browser window visible for debugging. |
-| `SKIP_NODE_BUILD` | Docker build arg. Set to `1` to skip building praxis_node binaries (Linux and Windows cross-compile). Defaults to `0`. Significantly speeds up Docker builds when only service changes are needed. Usage: `SKIP_NODE_BUILD=1 docker compose up --build` |
-| `CARGO_PROFILE` | Docker build arg. Cargo build profile to use. Defaults to `release` (thin LTO, 16 codegen units). Set to `release-optimized` for fully optimized production builds (full LTO, single codegen unit). Usage: `CARGO_PROFILE=release-optimized docker compose up --build` |
+| `PRAXIS_VERSION` | Docker build arg. Version of the prebuilt release tarball to download from GitHub Releases. Defaults to the version pinned in the `Dockerfile`. Usage: `PRAXIS_VERSION=0.9.26 docker compose up --build` |
+| `PRAXIS_RELEASE_BASE` | Docker build arg. Base URL for the release download (without trailing `/v<version>/...`). Defaults to `https://github.com/originsec/praxis/releases/download`. Override to pull from a fork or mirror. |
 
 ### Logging
 

@@ -40,6 +40,8 @@
   #include <ws2tcpip.h>
   #include <windows.h>
   #include <time.h>
+  #include <string.h>
+  #include <stdlib.h>
   typedef SSIZE_T ssize_t;
   #define close_sock closesocket
   #ifndef MSG_NOSIGNAL
@@ -63,6 +65,21 @@
       return out;
   }
   static inline void sleep_ms(unsigned ms) { Sleep(ms); }
+
+  //
+  // MinGW's msvcrt-based libc does not ship strndup. Provide a drop-in
+  // replacement so the rest of the codebase doesn't need #ifdefs.
+  //
+
+  static inline char *strndup(const char *s, size_t n) {
+      size_t len = 0;
+      while (len < n && s[len]) len++;
+      char *r = (char *)malloc(len + 1);
+      if (!r) return NULL;
+      memcpy(r, s, len);
+      r[len] = '\0';
+      return r;
+  }
 #else
   #include <sys/socket.h>
   #include <netinet/in.h>

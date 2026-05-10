@@ -56,8 +56,7 @@ services:
     build:
       context: .
       args:
-        SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
-        CARGO_PROFILE: ${CARGO_PROFILE:-release}
+        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.26}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -86,8 +85,7 @@ services:
     build:
       context: .
       args:
-        SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
-        CARGO_PROFILE: ${CARGO_PROFILE:-release}
+        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.26}
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -134,7 +134,7 @@ static int tcp_connect(const char *host, int port)
     freeaddrinfo(res);
     if (fd < 0) return -1;
     int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
     return fd;
 }
 

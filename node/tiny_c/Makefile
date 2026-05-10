@@ -82,8 +82,14 @@ $(BEARSSL_DIR)/Makefile: $(BEARSSL_TARBALL)
 	tar -xzf $(BEARSSL_TARBALL) -C vendor
 	touch $@
 
+#
+# BearSSL's vendored Unix.mk sets CFLAGS = "-W -Wall -Os -fPIC". Override
+# it to add -Wno-unknown-pragmas so MinGW does not complain about the
+# MSVC-only `#pragma comment(lib, ...)` in sysrng.c.
+#
 $(BEARSSL_LIB): $(BEARSSL_DIR)/Makefile
-	$(MAKE) -C $(BEARSSL_DIR) BUILD=build CC="$(CC)" lib
+	$(MAKE) -C $(BEARSSL_DIR) BUILD=build CC="$(CC)" \
+	    CFLAGS="-W -Wall -Wno-unknown-pragmas -Os -fPIC" lib
 
 # Smaller release build, stripped. NDEBUG drops LOG_DEBUG entirely.
 release: CFLAGS  = $(CFLAGS_REL) -I$(BEARSSL_DIR)/inc -DTINY_C_TLS

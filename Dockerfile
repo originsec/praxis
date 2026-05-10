@@ -1,98 +1,20 @@
 #
 # Praxis Docker Image
-# Multi-stage build for a systemd-based runtime.
+# Systemd-based runtime built from prebuilt release binaries.
 #
 # The runtime stage uses systemd as PID 1 so `praxisctl` works the
 # same way inside the container as it does on a native Linux install.
 #
-
-# ==============================================================================
-# Stage 1: Prepare recipe for cargo-chef
-# ==============================================================================
-FROM rust:1.88-bookworm AS chef
-RUN cargo install --locked cargo-chef
-WORKDIR /build
-
-# ==============================================================================
-# Stage 2: Analyze dependencies
-# ==============================================================================
-FROM chef AS planner
-COPY Cargo.toml Cargo.lock ./
-COPY agents ./agents
-COPY cli ./cli
-COPY common ./common
-COPY node ./node
-COPY semantic_parser ./semantic_parser
-COPY service ./service
-RUN cargo chef prepare --recipe-path recipe.json
-
-# ==============================================================================
-# Stage 3: Build Rust dependencies (cached layer)
-# ==============================================================================
-FROM chef AS builder
-ARG SKIP_NODE_BUILD=0
-ARG CARGO_PROFILE=release
-
-RUN apt-get update && apt-get install -y pkg-config libssl-dev make \
-    && if [ "$SKIP_NODE_BUILD" = "0" ]; then apt-get install -y mingw-w64; fi \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
-    rustup target add x86_64-pc-windows-gnu && \
-    mkdir -p /root/.cargo && echo '\
-[target.x86_64-pc-windows-gnu]\n\
-linker = "x86_64-w64-mingw32-gcc"\n\
-' >> /root/.cargo/config.toml; \
-    fi
-
-WORKDIR /build
-
+# Binaries are downloaded from the GitHub release matching PRAXIS_VERSION.
+# Override at build time, e.g.:
 #
-# Build dependencies only - this layer is cached until Cargo.toml/Cargo.lock changes.
+#   docker build --build-arg PRAXIS_VERSION=0.9.26 -t praxis .
 #
 
-COPY --from=planner /build/recipe.json recipe.json
-RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
-    fi && \
-    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service
-
-# ==============================================================================
-# Stage 4: Build application (only recompiles on source changes)
-# ==============================================================================
-COPY Cargo.toml Cargo.lock ./
-COPY agents ./agents
-COPY cli ./cli
-COPY common ./common
-COPY node ./node
-COPY semantic_parser ./semantic_parser
-COPY service ./service
-
-RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_node && \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_node --target x86_64-pc-windows-gnu; \
-    else \
-        mkdir -p "target/$CARGO_PROFILE" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE" && \
-        touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe"; \
-    fi
-
-RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service
-
-# Build the pure-C tiny node for both Linux (host) and Windows (mingw).
-# Output binaries land in node/tiny_c/.
-RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
-        make -C node/tiny_c release && \
-        make -C node/tiny_c windows; \
-    else \
-        touch node/tiny_c/praxis_node_tiny_c node/tiny_c/praxis_node_tiny_c.exe; \
-    fi
-
-# ==============================================================================
-# Stage 6: Runtime image (systemd as PID 1)
-# ==============================================================================
 FROM debian:bookworm-slim
-ARG CARGO_PROFILE=release
+
+ARG PRAXIS_VERSION=0.9.26
+ARG PRAXIS_RELEASE_BASE=https://github.com/originsec/praxis/releases/download
 
 ENV container=docker
 ENV DEBIAN_FRONTEND=noninteractive
@@ -104,6 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
         netcat-openbsd \
         iptables \
         iproute2 \
@@ -140,22 +63,37 @@ RUN groupadd -r praxis && \
     install -d -m 0755 /etc/praxis /usr/local/share/praxis/nodes
 
 #
-# Binaries.
+# Download and extract prebuilt release binaries.
+#
+# Tarball layout:
+#   praxis-${PRAXIS_VERSION}-x86_64-linux/
+#     praxis_service
+#     praxis_cli
+#     praxis_node
+#     praxis_node_tiny_c
+#     praxis_node_windows.exe
+#     praxis_node_tiny_c_windows.exe
+#     praxisctl
+#     LICENSE
 #
 
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /usr/local/bin/
+RUN set -eux; \
+    tarball="praxis-${PRAXIS_VERSION}-x86_64-linux.tar.gz"; \
+    url="${PRAXIS_RELEASE_BASE}/v${PRAXIS_VERSION}/${tarball}"; \
+    curl -fsSL -o "/tmp/${tarball}" "$url"; \
+    mkdir -p /tmp/praxis-extract; \
+    tar -xzf "/tmp/${tarball}" -C /tmp/praxis-extract; \
+    src="/tmp/praxis-extract/praxis-${PRAXIS_VERSION}-x86_64-linux"; \
+    install -Dm755 "$src/praxis_service"                   /usr/local/bin/praxis_service; \
+    install -Dm755 "$src/praxis_node"                      /usr/local/share/praxis/nodes/praxis_node_linux; \
+    install -Dm644 "$src/praxis_node_windows.exe"          /usr/local/share/praxis/nodes/praxis_node_windows.exe; \
+    install -Dm755 "$src/praxis_node_tiny_c"               /usr/local/share/praxis/nodes/praxis_node_tiny_c_linux; \
+    install -Dm644 "$src/praxis_node_tiny_c_windows.exe"   /usr/local/share/praxis/nodes/praxis_node_tiny_c_windows.exe; \
+    rm -rf "/tmp/${tarball}" /tmp/praxis-extract
 
 #
-# Node binaries (for download / deployment to targets).
-#
-
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_node                              /usr/local/share/praxis/nodes/praxis_node_linux
-COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_node.exe    /usr/local/share/praxis/nodes/praxis_node_windows.exe
-COPY --from=builder /build/node/tiny_c/praxis_node_tiny_c                                   /usr/local/share/praxis/nodes/praxis_node_tiny_c_linux
-COPY --from=builder /build/node/tiny_c/praxis_node_tiny_c.exe                               /usr/local/share/praxis/nodes/praxis_node_tiny_c_windows.exe
-
-#
-# systemd units, env file, praxisctl.
+# systemd units, env file, praxisctl. These ship with the source tree
+# rather than the release tarball, so we copy them from the build context.
 #
 
 COPY pkg/systemd/praxis-service.service /etc/systemd/system/praxis-service.service
