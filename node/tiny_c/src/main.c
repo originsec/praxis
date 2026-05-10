@@ -323,16 +323,36 @@ static void handle_signal(int s) { (void)s; G_shutdown = 1; if (G_amqp) amqp_req
 /* helper used while parsing the broadcast message envelope */
 static void handle_node_broadcast(json *root)
 {
-    if (!root || root->type != JOBJ) return;
-    if (root->u.obj.count == 0) return;
+    if (!root) return;
 
-    /* externally-tagged: {"VariantName": payload} */
-    const char *var = root->u.obj.keys[0];
-    size_t vlen = root->u.obj.key_lens[0];
-    json *p = root->u.obj.vals[0];
+    //
+    // serde serializes externally-tagged enum variants in two shapes:
+    //
+    //   - Unit variants (e.g. NodeInformationUpdateRequest,
+    //     NodeRefreshRegistration) → bare JSON string
+    //     `"VariantName"`.
+    //   - Variants with payload (e.g. PraxisAgentEnabled,
+    //     InterceptTargetsUpdate)   → object `{"VariantName": payload}`.
+    //
+    // We accept both forms here. Without this, the periodic
+    // NodeInformationUpdateRequest ping never reaches the dispatcher
+    // and the service marks the node offline despite it being alive.
+    //
 
-    if (vlen == 19 && memcmp(var, "PraxisAgentEnabled", 18) == 0) {
-        /* could be 18 or 19; do a real comparison */
+    const char *var = NULL;
+    size_t      vlen = 0;
+    json       *p    = NULL;
+
+    if (root->type == JSTR) {
+        var  = root->u.str.s;
+        vlen = root->u.str.len;
+    } else if (root->type == JOBJ) {
+        if (root->u.obj.count == 0) return;
+        var  = root->u.obj.keys[0];
+        vlen = root->u.obj.key_lens[0];
+        p    = root->u.obj.vals[0];
+    } else {
+        return;
     }
 
 #define KEQ(k) (vlen == sizeof(k) - 1 && memcmp(var, k, sizeof(k) - 1) == 0)
