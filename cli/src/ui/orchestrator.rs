@@ -3,7 +3,7 @@ use crate::markdown;
 use crate::ui::chrome;
 use crate::ui::common::spinner_char;
 use crate::ui::theme::{
-    ACCENT, BG_ELEMENT, BG_PANEL, DIM, ERROR, MUTED, OK, SECONDARY, STATUS_DONE, STATUS_FAIL,
+    ACCENT, BG_ELEMENT, BG_PANEL, DIM, ERROR, MUTED, SECONDARY, STATUS_DONE, STATUS_FAIL,
     STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
@@ -30,7 +30,6 @@ const TOOL_FAIL: Color = STATUS_FAIL;
 const PLAN_DONE: Color = STATUS_DONE;
 const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
-const USER_BAR: Color = ACCENT;
 const SYSTEM_BAR: Color = SECONDARY;
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -38,39 +37,41 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let show_tabs = state.sessions.len() > 1;
 
     //
-    // Show welcome logo only when there are zero sessions.
+    // Show welcome logo when there are no sessions, or when the active
+    // session has no messages yet — the logo stays visible until the
+    // first prompt produces output.
     //
-    let show_welcome = state.sessions.is_empty();
+    let no_sessions = state.sessions.is_empty();
+    let session_idle = session
+        .map(|s| s.messages.is_empty() && !s.is_streaming)
+        .unwrap_or(false);
+    let show_welcome = no_sessions || session_idle;
 
-    if show_welcome {
-        let chunks = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(4),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-        render_welcome(f, chunks[0]);
-        render_input(f, chunks[1], state);
-        render_status_hints(f, chunks[2], state);
-        return;
-    }
-
-    let plan_height = session
+    let has_plan = session
         .and_then(|s| s.current_plan.as_ref())
-        .map(|plan| (plan.steps.len() as u16 + 3).min(13))
-        .unwrap_or(0);
-    let plan_spacer = if plan_height > 0 { 1 } else { 0 };
+        .is_some();
 
     let tab_height = if show_tabs { 1 } else { 0 };
+
+    //
+    // Input box grows by one row per extra line of content (Shift+Enter
+    // inserts \n) — but only once a session is live. While we're still
+    // waiting on SessionCreated the welcome logo sits in chunks[1] and
+    // the input keeps a stable 4-row footprint.
+    //
+    let input_lines = if no_sessions {
+        1
+    } else {
+        input_content_rows(state)
+    };
+    let input_height = (input_lines + 2).max(3);
 
     let chunks = Layout::vertical([
         Constraint::Length(tab_height),
         Constraint::Min(1),
-        Constraint::Length(plan_spacer),
-        Constraint::Length(plan_height),
         Constraint::Length(1),
-        Constraint::Length(4),
+        Constraint::Length(input_height),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
@@ -80,20 +81,39 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         render_tab_bar(f, chunks[0], state);
     }
 
-    if let Some(session) = session {
-        render_conversation(f, chunks[1], session);
-    }
+    if show_welcome {
+        render_welcome(f, chunks[1]);
+    } else {
+        //
+        // Split the main area horizontally when a plan exists so the
+        // plan sits in a right-hand pane.
+        //
+        let (conv_area, plan_area) = if has_plan {
+            let plan_width = (chunks[1].width / 3).clamp(28, 42);
+            let split = Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(plan_width),
+            ])
+            .split(chunks[1]);
+            (split[0], Some(split[1]))
+        } else {
+            (chunks[1], None)
+        };
 
-    if plan_height > 0 {
         if let Some(session) = session {
-            render_plan_widget(f, chunks[3], session);
+            render_conversation(f, conv_area, session);
+        }
+
+        if let Some(plan_area) = plan_area {
+            if let Some(session) = session {
+                render_plan_widget(f, plan_area, session);
+            }
         }
     }
 
-    render_meta(f, chunks[4], state);
-    render_input(f, chunks[5], state);
-    render_tokens(f, chunks[6], state);
-    render_status_hints(f, chunks[7], state);
+    render_input(f, chunks[3], state);
+    render_meta(f, chunks[5], state);
+    render_status_hints(f, chunks[6], state);
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -163,8 +183,25 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
         match entry {
             ConversationEntry::UserPrompt(text) => {
                 lines.push(Line::from(""));
-                let body_lines = wrap_for_bar(text, USER_BAR, TEXT_BRIGHT, true);
-                lines.extend(body_lines);
+                let bar_style = Style::default().fg(ACCENT);
+                let body_style = Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .bg(BG_ELEMENT)
+                    .add_modifier(Modifier::BOLD);
+                let pad_style = Style::default().bg(BG_ELEMENT);
+                let body_lines: Vec<&str> = if text.is_empty() {
+                    vec![""]
+                } else {
+                    text.lines().collect()
+                };
+                for line in body_lines {
+                    lines.push(Line::from(vec![
+                        Span::styled("\u{2503}", bar_style),
+                        Span::styled("  ", pad_style),
+                        Span::styled(line.to_string(), body_style),
+                        Span::styled("  ", pad_style),
+                    ]));
+                }
             }
             ConversationEntry::AssistantText(raw) => {
                 let sliced_owned: String;
@@ -218,9 +255,15 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
                     }
                 }
             }
-            ConversationEntry::ToolGroup(tools) => {
-                lines.extend(build_tool_summary(
-                    tools,
+            ConversationEntry::Tool {
+                name,
+                input,
+                outcome,
+            } => {
+                lines.extend(build_tool_entry(
+                    name,
+                    input.as_deref(),
+                    outcome.as_ref(),
                     session.tools_expanded,
                     session.tools_full,
                 ));
@@ -249,56 +292,40 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
     // Show active tool or waiting spinner.
     //
     if session.is_streaming {
-        if let Some(ref tool_name) = session.active_tool {
-            let spinner_char = spinner_char();
-
-            let pending_count = session.pending_tools.len();
-            let label = if pending_count > 0 {
-                format!("{} {} ({})", spinner_char, tool_name, pending_count + 1)
-            } else {
-                format!("{} {}", spinner_char, tool_name)
-            };
-            lines.push(Line::from(vec![
-                Span::styled("\u{2503}", Style::default().fg(ACCENT)),
-                Span::styled(format!("  {}", label), Style::default().fg(MUTED)),
-            ]));
+        if session.active_tool.is_some() {
+            //
+            // Pending tool already renders as the in-flight Tool
+            // entry above (with a spinner glyph), so nothing extra
+            // is needed here.
+            //
         } else if !last_message_has_visible_assistant_text(&session.messages) {
             let spinner_char = spinner_char();
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("\u{2503}", Style::default().fg(ACCENT)),
-                Span::styled(
-                    format!("  {} thinking", spinner_char),
-                    Style::default().fg(MUTED),
-                ),
-            ]));
+            lines.push(Line::from(Span::styled(
+                format!("  {} thinking", spinner_char),
+                Style::default().fg(MUTED),
+            )));
         }
     }
 
-    let visible_width = inner.width.max(1) as usize;
-    let total_visual_lines: u16 = lines
-        .iter()
-        .map(|line| {
-            let w = line.width();
-            if w == 0 {
-                1u16
-            } else {
-                ((w as f64 / visible_width as f64).ceil() as u16).max(1)
-            }
-        })
-        .sum();
+    //
+    // Use ratatui's own wrap-aware line count so the scroll math
+    // matches the actual rendering. The previous estimate
+    // (`ceil(width / inner_width)`) over-counts wrapped rows on
+    // word-wrapped lines, which pushed the view too far down and
+    // chopped the start of multi-line bullets.
+    //
+    let paragraph = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::NONE));
+    let total_visual_lines = paragraph.line_count(inner.width) as u16;
 
     let visible_height = inner.height;
     let max_scroll = total_visual_lines.saturating_sub(visible_height);
     session.max_scroll.set(max_scroll);
     let scroll = max_scroll.saturating_sub(session.scroll_offset);
 
-    let paragraph = Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0))
-        .block(Block::default().borders(Borders::NONE));
-
-    f.render_widget(paragraph, inner);
+    f.render_widget(paragraph.scroll((scroll, 0)), inner);
 }
 
 //
@@ -306,32 +333,6 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
 // content line is prefixed with the bar character and 2-col padding so
 // continuations remain aligned.
 //
-
-fn wrap_for_bar(
-    text: &str,
-    bar_color: Color,
-    fg: Color,
-    bold: bool,
-) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    let mut style = Style::default().fg(fg);
-    if bold {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    for line in text.lines() {
-        out.push(Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(bar_color)),
-            Span::styled(format!("  {}", line), style),
-        ]));
-    }
-    if out.is_empty() {
-        out.push(Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(bar_color)),
-            Span::raw("  "),
-        ]));
-    }
-    out
-}
 
 fn render_welcome(f: &mut Frame, area: Rect) {
     let art: &[&str] = &[
@@ -368,25 +369,11 @@ fn render_welcome(f: &mut Frame, area: Rect) {
             )));
         } else if row == logo_y + art_h + 1 {
             lines.push(Line::from(vec![
-                Span::styled("\u{2022} ", Style::default().fg(OK)),
-                Span::styled(
-                    "praxis",
-                    Style::default()
-                        .fg(TEXT_BRIGHT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(" v{}", env!("CARGO_PKG_VERSION")),
-                    Style::default().fg(DIM),
-                ),
-                Span::styled("   by Origin ", Style::default().fg(MUTED)),
+                Span::styled("by Origin ", Style::default().fg(MUTED)),
+                Span::styled("[", Style::default().fg(MUTED)),
                 Span::styled("\u{00d8}", Style::default().fg(ACCENT)),
+                Span::styled("]", Style::default().fg(MUTED)),
             ]));
-        } else if row == logo_y + art_h + 2 {
-            lines.push(Line::from(Span::styled(
-                "Type a prompt below to begin.",
-                Style::default().fg(MUTED),
-            )));
         } else {
             lines.push(Line::raw(""));
         }
@@ -440,113 +427,83 @@ fn last_message_has_visible_assistant_text(messages: &[ConversationEntry]) -> bo
     }
 }
 
-fn build_tool_summary(
-    tools: &[crate::app::ToolCall],
+//
+// Render a single tool request entry. Header is a faint arrow + tool
+// name; the input is shown in DIM/MUTED below, truncated unless
+// `full` is set.
+//
+
+//
+// Render a single tool call entry — one row whether the call is
+// pending or complete. Indicator is `→` while in flight, `✓` on
+// success, `✗` on failure. When `expanded` is true, input/output
+// detail is shown beneath; `full` removes the truncation cap.
+//
+
+fn build_tool_entry(
+    name: &str,
+    input: Option<&str>,
+    outcome: Option<&crate::app::ToolOutcome>,
     expanded: bool,
     full: bool,
 ) -> Vec<Line<'static>> {
-    let total = tools.len();
-    let failures = tools.iter().filter(|t| !t.success).count();
-
-    let mut counts: Vec<(String, usize)> = Vec::new();
-    for tool in tools {
-        if let Some(entry) = counts.iter_mut().find(|(n, _)| *n == tool.name) {
-            entry.1 += 1;
-        } else {
-            counts.push((tool.name.clone(), 1));
-        }
-    }
-
-    let parts: Vec<String> = counts
-        .iter()
-        .map(|(name, count)| {
-            if *count > 1 {
-                format!("{}\u{00d7}{}", name, count)
-            } else {
-                name.clone()
-            }
-        })
-        .collect();
-
-    let bar_color = if failures == 0 { TOOL_OK } else { TOOL_FAIL };
-    let chevron = if expanded { "\u{25be}" } else { "\u{25b8}" };
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-    let header_spans = vec![
-        Span::styled("\u{2503}", Style::default().fg(bar_color)),
-        Span::styled(
-            format!("  # {} tool call{}", total, if total == 1 { "" } else { "s" }),
+    let (icon, icon_color, name_style) = match outcome {
+        None => (
+            spinner_char().to_string(),
+            SECONDARY,
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("   ", Style::default()),
-        Span::styled(parts.join(", "), Style::default().fg(DIM)),
-        if failures > 0 {
-            Span::styled(
-                format!("   {} failed", failures),
-                Style::default().fg(TOOL_FAIL),
-            )
-        } else {
-            Span::raw("")
-        },
-        Span::styled(
-            format!("   {}", chevron),
-            Style::default().fg(DIM),
+        Some(o) if o.success => (
+            "\u{2713}".to_string(),
+            TOOL_OK,
+            Style::default().fg(MUTED),
         ),
-    ];
-    lines.push(Line::from(header_spans));
+        Some(_) => (
+            "\u{2717}".to_string(),
+            TOOL_FAIL,
+            Style::default().fg(TOOL_FAIL),
+        ),
+    };
 
-    if expanded {
-        for tool in tools {
-            let (icon, icon_color) = if tool.success {
-                ("\u{2713}", TOOL_OK)
-            } else {
-                ("\u{2717}", TOOL_FAIL)
-            };
-            lines.push(Line::from(vec![
-                Span::styled("\u{2503}", Style::default().fg(bar_color)),
-                Span::styled(format!("    {} ", icon), Style::default().fg(icon_color)),
-                Span::styled(
-                    tool.name.clone(),
-                    Style::default().fg(if tool.success { TEXT_BRIGHT } else { TOOL_FAIL }),
-                ),
-            ]));
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+        Span::styled(name.to_string(), name_style),
+    ]));
 
-            let max_in = if full { usize::MAX } else { 5 };
+    if !expanded {
+        return lines;
+    }
+
+    if let Some(input) = input {
+        let max_in = if full { usize::MAX } else { 5 };
+        for (i, iline) in compact_multiline(input, max_in, 200).iter().enumerate() {
+            let prefix = if i == 0 { "in  " } else { "    " };
+            lines.push(build_compact_output_line(prefix, iline, DIM, MUTED));
+        }
+    }
+
+    if let Some(outcome) = outcome {
+        if let Some(ref result) = outcome.result {
             let max_out = if full { usize::MAX } else { 20 };
-
-            if let Some(ref input) = tool.input {
-                let input_lines = compact_multiline(input, max_in, 200);
-                for (i, iline) in input_lines.iter().enumerate() {
-                    let prefix = if i == 0 { "in  " } else { "    " };
-                    lines.push(build_compact_output_line(prefix, iline, DIM, MUTED, bar_color));
-                }
-            }
-
-            if let Some(ref result) = tool.result {
-                let result_lines = compact_multiline(result, max_out, 200);
-                let label_style = if tool.success { DIM } else { TOOL_FAIL };
-                let text_style = if tool.success { MUTED } else { TOOL_FAIL };
-                for (i, rline) in result_lines.iter().enumerate() {
-                    let prefix = if i == 0 {
-                        if tool.success {
-                            "out "
-                        } else {
-                            "err "
-                        }
-                    } else {
-                        "    "
-                    };
-                    lines.push(build_compact_output_line(
-                        prefix,
-                        rline,
-                        label_style,
-                        text_style,
-                        bar_color,
-                    ));
-                }
+            let label_style = if outcome.success { DIM } else { TOOL_FAIL };
+            let text_style = if outcome.success { MUTED } else { TOOL_FAIL };
+            for (i, rline) in compact_multiline(result, max_out, 200).iter().enumerate() {
+                let prefix = if i == 0 {
+                    if outcome.success { "out " } else { "err " }
+                } else {
+                    "    "
+                };
+                lines.push(build_compact_output_line(
+                    prefix,
+                    rline,
+                    label_style,
+                    text_style,
+                ));
             }
         }
     }
@@ -620,14 +577,12 @@ fn build_compact_output_line(
     line: &str,
     label_color: Color,
     text_color: Color,
-    bar_color: Color,
 ) -> Line<'static> {
     let truncation_suffix = "^!e to show all";
 
     if let Some((head, _)) = line.split_once("   ^!e to show all") {
         Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(bar_color)),
-            Span::styled("        ", Style::default()),
+            Span::raw("        "),
             Span::styled(prefix.to_string(), Style::default().fg(label_color)),
             Span::styled(head.to_string(), Style::default().fg(DIM)),
             Span::styled("   ", Style::default().fg(DIM)),
@@ -638,8 +593,7 @@ fn build_compact_output_line(
         ])
     } else {
         Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(bar_color)),
-            Span::styled("        ", Style::default()),
+            Span::raw("        "),
             Span::styled(prefix.to_string(), Style::default().fg(label_color)),
             Span::styled(line.to_string(), Style::default().fg(text_color)),
         ])
@@ -651,29 +605,28 @@ fn render_plan_widget(f: &mut Frame, area: Rect, session: &OrchestratorSessionSt
         return;
     };
 
+    //
+    // Right-hand pane: a 2-col left gutter separates it from the
+    // conversation; the in-progress step in the list already shows the
+    // current description so we omit the redundant header arrow.
+    //
     let mut lines: Vec<Line> = Vec::new();
 
-    lines.push(Line::from(vec![
-        Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
-        Span::styled(
-            "  # Plan",
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
+    lines.push(Line::from(Span::styled(
+        "Plan",
+        Style::default()
+            .fg(TEXT_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
 
-    if let Some(ref desc) = plan.current_step_description {
-        lines.push(Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
-            Span::styled(
-                format!("  \u{25b8} {}", desc),
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-    }
+    //
+    // Wrap step descriptions manually so continuation lines hang-indent
+    // under the description, aligned past the indicator dot. Available
+    // text width = pane width - left pad (2) - right pad (1) - "icon "
+    // prefix (2 cols).
+    //
+    let text_width = (area.width as usize).saturating_sub(2 + 1 + 2).max(1);
 
     for step in &plan.steps {
         let (icon, icon_color, text_style) = match step.status {
@@ -683,22 +636,101 @@ fn render_plan_widget(f: &mut Frame, area: Rect, session: &OrchestratorSessionSt
             }
             common::PlanStepStatus::NotStarted => ("\u{25cb}", DIM, Style::default().fg(DIM)),
         };
-        lines.push(Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
-            Span::styled(format!("  {} ", icon), Style::default().fg(icon_color)),
-            Span::styled(step.description.clone(), text_style),
-        ]));
+
+        let wrapped = wrap_words(&step.description, text_width);
+        for (i, chunk) in wrapped.iter().enumerate() {
+            if i == 0 {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                    Span::styled(chunk.clone(), text_style),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(chunk.clone(), text_style),
+                ]));
+            }
+        }
     }
 
     if let Some(ref summary) = plan.summary {
-        lines.push(Line::from(vec![
-            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
-            Span::styled(format!("  {}", summary), Style::default().fg(DIM)),
-        ]));
+        let summary_width = (area.width as usize).saturating_sub(2 + 1).max(1);
+        lines.push(Line::from(""));
+        for chunk in wrap_words(summary, summary_width) {
+            lines.push(Line::from(Span::styled(chunk, Style::default().fg(DIM))));
+        }
     }
 
-    let paragraph = Paragraph::new(Text::from(lines));
+    let block = Block::default()
+        .borders(Borders::NONE)
+        .padding(Padding::new(2, 1, 1, 0))
+        .style(Style::default().bg(BG_PANEL));
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .style(Style::default().bg(BG_PANEL));
     f.render_widget(paragraph, area);
+}
+
+//
+// Simple word-wrap by character count. Splits on whitespace; long
+// words that exceed `width` are hard-broken.
+//
+
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0usize;
+
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+        if current_len == 0 {
+            if word_len > width {
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width) {
+                    let s: String = chunk.iter().collect();
+                    if s.chars().count() == width {
+                        lines.push(s);
+                    } else {
+                        current = s;
+                        current_len = current.chars().count();
+                    }
+                }
+            } else {
+                current = word.to_string();
+                current_len = word_len;
+            }
+        } else if current_len + 1 + word_len <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_len += 1 + word_len;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current_len = 0;
+            if word_len > width {
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width) {
+                    let s: String = chunk.iter().collect();
+                    if s.chars().count() == width {
+                        lines.push(s);
+                    } else {
+                        current = s;
+                        current_len = current.chars().count();
+                    }
+                }
+            } else {
+                current = word.to_string();
+                current_len = word_len;
+            }
+        }
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 //
@@ -712,43 +744,61 @@ fn render_meta(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let model_text = match session {
         Some(s) => match (s.provider.as_ref(), s.model.as_ref()) {
             (Some(provider), Some(model)) => format!("{} · {}", provider, model),
-            _ => "Connecting...".to_string(),
+            _ => state.configured_model.clone(),
         },
-        None => String::new(),
+        None => state.configured_model.clone(),
     };
 
-    let left = Line::from(vec![
-        Span::styled("\u{25c6} ", Style::default().fg(ACCENT)),
-        Span::styled(
-            model_text,
-            Style::default().fg(TEXT_BRIGHT),
-        ),
-    ]);
+    let mut left_spans: Vec<Span> = Vec::new();
+    if !model_text.is_empty() {
+        left_spans.push(Span::styled(model_text, Style::default().fg(DIM)));
+    }
+
+    if let Some(s) = session {
+        if s.total_tokens > 0 {
+            if !left_spans.is_empty() {
+                left_spans.push(Span::raw("    "));
+            }
+            left_spans.push(Span::styled(
+                format!("{} tokens", s.total_tokens),
+                Style::default().fg(DIM),
+            ));
+        }
+    }
 
     let right_spans = vec![
-        Span::styled("^e/^!e", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" tools", Style::default().fg(MUTED)),
+        Span::styled("^e/^!e", Style::default().fg(MUTED)),
+        Span::styled(" tools", Style::default().fg(DIM)),
         Span::raw("  "),
-        Span::styled("^!w", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" save", Style::default().fg(MUTED)),
+        Span::styled("^!w", Style::default().fg(MUTED)),
+        Span::styled(" save", Style::default().fg(DIM)),
     ];
+    let right_width = right_spans
+        .iter()
+        .map(|s| s.content.chars().count() as u16)
+        .sum::<u16>();
     let right = Line::from(right_spans).alignment(ratatui::layout::Alignment::Right);
 
     let chunks = Layout::horizontal([
         Constraint::Min(1),
-        Constraint::Length(20),
+        Constraint::Length(right_width),
     ])
     .split(area);
-    f.render_widget(Paragraph::new(left), chunks[0]);
+    f.render_widget(Paragraph::new(Line::from(left_spans)), chunks[0]);
     f.render_widget(Paragraph::new(right), chunks[1]);
 }
 
-fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let is_streaming = state
-        .active_session()
-        .map(|s| s.is_streaming)
-        .unwrap_or(false);
+//
+// Number of visible content rows the input will occupy. Used by the
+// outer layout to grow the input area as the user inserts newlines
+// with Shift+Enter.
+//
 
+pub(super) fn input_content_rows(state: &OrchestratorState) -> u16 {
+    state.input.split('\n').count().max(1) as u16
+}
+
+fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     //
     // Input frame: heavy accent left bar over an element-tinted body.
     // Padding gives the prompt char + cursor breathing room.
@@ -763,130 +813,73 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let mut spans: Vec<Span> = Vec::new();
+    let prompt = Span::styled(
+        "\u{276f} ",
+        Style::default()
+            .fg(ACCENT)
+            .add_modifier(Modifier::BOLD),
+    );
+    let cursor = Span::styled("\u{2588}", Style::default().fg(ACCENT));
+    let text_style = Style::default().fg(TEXT_BRIGHT);
 
-    if is_streaming {
-        spans.push(Span::styled(
-            format!("{} ", spinner_char()),
-            Style::default().fg(ACCENT),
-        ));
-        spans.push(Span::styled("working", Style::default().fg(TEXT_BRIGHT)));
-        spans.push(chrome::mid_dot());
-        spans.push(Span::styled(
-            "^c to cancel",
-            Style::default().fg(MUTED),
-        ));
-    } else {
-        spans.push(Span::styled(
-            "\u{276f}",
-            Style::default()
-                .fg(ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::raw(" "));
-
-        if state.input.is_empty() {
-            //
-            // Placeholder text in dim with cursor at start.
-            //
-            spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
-            spans.push(Span::styled(
-                "  Ask anything…",
-                Style::default()
-                    .fg(DIM)
-                    .add_modifier(Modifier::ITALIC),
-            ));
-        } else {
-            let pos = state.cursor_pos;
-            let before = &state.input[..pos];
-            let after = &state.input[pos..];
-
-            if !before.is_empty() {
-                spans.push(Span::styled(
-                    before.to_string(),
-                    Style::default().fg(TEXT_BRIGHT),
-                ));
-            }
-            spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
-            if !after.is_empty() {
-                spans.push(Span::styled(
-                    after.to_string(),
-                    Style::default().fg(TEXT_BRIGHT),
-                ));
-            }
-        }
-    }
-
-    let paragraph = Paragraph::new(Line::from(spans));
-    f.render_widget(paragraph, inner);
-}
-
-fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let session = state.active_session();
-
-    let line = match session {
-        Some(s) if s.total_tokens > 0 => Line::from(vec![
-            Span::styled("  tokens", Style::default().fg(DIM)),
-            chrome::mid_dot(),
-            Span::styled(
-                format!("{}", s.prompt_tokens),
-                Style::default().fg(MUTED),
-            ),
-            Span::styled(" prompt", Style::default().fg(DIM)),
-            chrome::mid_dot(),
-            Span::styled(
-                format!("{}", s.completion_tokens),
-                Style::default().fg(MUTED),
-            ),
-            Span::styled(" completion", Style::default().fg(DIM)),
-            chrome::mid_dot(),
-            Span::styled(
-                format!("{}", s.total_tokens),
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" total", Style::default().fg(DIM)),
-        ]),
-        _ => Line::from(Span::styled(
-            "  tokens \u{00b7} —",
-            Style::default().fg(DIM),
-        )),
-    };
-
-    f.render_widget(Paragraph::new(line), area);
-}
-
-fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    if state.sessions.is_empty() {
-        let line = Line::from(vec![
-            Span::raw("  "),
-            Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
-            Span::styled(" send", Style::default().fg(MUTED)),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
+    if state.input.is_empty() {
+        let line = Line::from(vec![prompt, cursor]);
+        f.render_widget(Paragraph::new(line), inner);
         return;
     }
 
-    let mut spans = vec![
-        Span::raw("  "),
-        Span::styled("^n", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" new", Style::default().fg(MUTED)),
-        Span::raw("  "),
-        Span::styled("^w", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" close", Style::default().fg(MUTED)),
-    ];
+    //
+    // Multi-line content: render each line as a separate row, drop the
+    // cursor on whichever line the byte cursor falls in. The first
+    // line carries the prompt sigil; continuation rows indent so the
+    // text aligns under the prompt.
+    //
 
-    if state.sessions.len() > 1 {
-        spans.extend([
-            Span::raw("  "),
-            Span::styled("tab/S-tab", Style::default().fg(TEXT_BRIGHT)),
-            Span::styled(" switch", Style::default().fg(MUTED)),
-        ]);
+    let text = &state.input;
+    let cursor_pos = state.cursor_pos.min(text.len());
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut byte_cursor = 0usize;
+    let total_lines = text.split('\n').count();
+
+    for (idx, line_str) in text.split('\n').enumerate() {
+        let line_start = byte_cursor;
+        let line_end = line_start + line_str.len();
+        let cursor_on_this = cursor_pos >= line_start
+            && (cursor_pos < line_end
+                || (cursor_pos == line_end && idx + 1 == total_lines));
+
+        let lead: Span = if idx == 0 {
+            prompt.clone()
+        } else {
+            Span::raw("  ")
+        };
+
+        let mut spans: Vec<Span> = vec![lead];
+
+        if cursor_on_this {
+            let rel = cursor_pos - line_start;
+            let (before, after) = line_str.split_at(rel);
+            if !before.is_empty() {
+                spans.push(Span::styled(before.to_string(), text_style));
+            }
+            spans.push(cursor.clone());
+            if !after.is_empty() {
+                spans.push(Span::styled(after.to_string(), text_style));
+            }
+        } else if !line_str.is_empty() {
+            spans.push(Span::styled(line_str.to_string(), text_style));
+        }
+
+        lines.push(Line::from(spans));
+        byte_cursor = line_end + 1; // skip the '\n'
     }
 
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
+
+
+fn render_status_hints(_f: &mut Frame, _area: Rect, _state: &OrchestratorState) {}
 
 #[allow(dead_code)]
 fn _silence_unused() {

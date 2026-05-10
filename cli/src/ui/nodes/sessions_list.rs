@@ -1,19 +1,20 @@
 use crate::app::NodesState;
+use crate::ui::chrome;
 use crate::ui::common::short_id;
 use crate::ui::theme::{
-    ACCENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, OK, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 pub fn sessions_list_rect(content_area: Rect, count: usize) -> Rect {
     let rows = count.max(1) as u16;
-    let height = (rows + 7).min(content_area.height.saturating_sub(2));
+    let height = (rows + 8).min(content_area.height.saturating_sub(2));
     let max_width = content_area.width.saturating_sub(4);
-    let width = max_width.min(140).max(60.min(max_width));
+    let width = max_width.min(80).max(60.min(max_width));
     let x = content_area.x + (content_area.width.saturating_sub(width)) / 2;
     let y = content_area.y + (content_area.height.saturating_sub(height)) / 2;
     Rect::new(x, y, width, height)
@@ -21,28 +22,11 @@ pub fn sessions_list_rect(content_area: Rect, count: usize) -> Rect {
 
 pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
     let panel = sessions_list_rect(area, state.sessions.len());
-    f.render_widget(Clear, panel);
-
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-    f.render_widget(block, panel);
-
-    let inner = Rect {
-        x: panel.x + 2,
-        y: panel.y + 1,
-        width: panel.width.saturating_sub(4),
-        height: panel.height.saturating_sub(2),
-    };
 
     //
-    // Header row: title left, dismiss hint right.
+    // Compose a bold "Active Sessions" with a dim "<n> active" suffix.
     //
-    let title_row = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: 1,
-    };
-    let title_line = Line::from(vec![
+    let title = Line::from(vec![
         Span::styled(
             "Active Sessions",
             Style::default()
@@ -54,44 +38,17 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
             Style::default().fg(DIM),
         ),
     ]);
-    f.render_widget(Paragraph::new(title_line), title_row);
-
-    let hint_row = Rect {
-        x: inner.x + inner.width.saturating_sub(4),
-        y: inner.y,
-        width: 4,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "esc",
-            Style::default().fg(MUTED),
-        ))),
-        hint_row,
-    );
+    let inner = chrome::modal_panel_line(f, panel, title, "esc");
 
     //
-    // Slim divider.
+    // The full body is the area below the divider; inside we reserve
+    // one row at the bottom for the hints line and one blank gap.
     //
-    let divider = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
-        ))),
-        divider,
-    );
-
     let body = Rect {
         x: inner.x,
-        y: inner.y + 2,
+        y: inner.y,
         width: inner.width,
-        height: inner.height.saturating_sub(4),
+        height: inner.height.saturating_sub(2),
     };
 
     //

@@ -49,12 +49,19 @@ static int load_or_create_node_id(char out[64])
     char dir[512] = {0};
     char path[640] = {0};
 
+    //
+    // Distinct file from the Rust node's `node_id` so the two binaries
+    // can run side-by-side on the same machine without sharing the
+    // same identity (which would make them collide on the
+    // Node_<id> queue and confuse the service registry).
+    //
+
 #if defined(_WIN32)
     const char *appdata = getenv("LOCALAPPDATA");
     if (!appdata) appdata = getenv("APPDATA");
     if (!appdata) return -1;
     snprintf(dir, sizeof(dir), "%s\\praxis", appdata);
-    snprintf(path, sizeof(path), "%s\\node_id", dir);
+    snprintf(path, sizeof(path), "%s\\node_id_tiny_c", dir);
     mk_dir(dir);
 #else
     const char *xdg = getenv("XDG_DATA_HOME");
@@ -62,7 +69,7 @@ static int load_or_create_node_id(char out[64])
     if (!home) return -1;
     if (xdg && *xdg) snprintf(dir, sizeof(dir), "%s/praxis", xdg);
     else             snprintf(dir, sizeof(dir), "%s/.local/share/praxis", home);
-    snprintf(path, sizeof(path), "%s/node_id", dir);
+    snprintf(path, sizeof(path), "%s/node_id_tiny_c", dir);
 #endif
 
     FILE *f = fopen(path, "r");
@@ -147,7 +154,7 @@ static int publish_registration(amqp *c)
     buf body = {0};
     buf_puts(&body, "{\"Registration\":{\"node_id\":");
     jb_strz(&body, tiny_node_id);
-    buf_puts(&body, ",\"node_type\":\"tiny-c\",\"machine_name\":");
+    buf_puts(&body, ",\"node_type\":\"tiny\",\"machine_name\":");
     jb_strz(&body, host);
     buf_puts(&body, ",\"os_details\":");
     jb_strz(&body, os_d);
@@ -174,16 +181,22 @@ static void apply_registration_ack(json *ack)
         LOG_INFO("Registration ack: no praxis_agent_config");
         return;
     }
+    //
+    // PraxisAgentConfig is serialized as camelCase (see
+    // common/src/messaging.rs `#[serde(rename_all = "camelCase")]`), so
+    // keys here must match.
+    //
+
     praxis_cfg *c = calloc(1, sizeof(*c));
     const char *s; size_t n;
-    if (json_get_str(pc, "provider",      &s, &n)) { c->provider     = strndup(s, n); }
-    if (json_get_str(pc, "api_key",       &s, &n)) { c->api_key      = strndup(s, n); }
-    if (json_get_str(pc, "endpoint_url",  &s, &n)) { c->endpoint_url = strndup(s, n); }
-    if (json_get_str(pc, "model_name",    &s, &n)) { c->model_name   = strndup(s, n); }
-    if (json_get_str(pc, "system_prompt", &s, &n)) { c->system_prompt= strndup(s, n); }
+    if (json_get_str(pc, "provider",     &s, &n)) { c->provider     = strndup(s, n); }
+    if (json_get_str(pc, "apiKey",       &s, &n)) { c->api_key      = strndup(s, n); }
+    if (json_get_str(pc, "endpointUrl",  &s, &n)) { c->endpoint_url = strndup(s, n); }
+    if (json_get_str(pc, "modelName",    &s, &n)) { c->model_name   = strndup(s, n); }
+    if (json_get_str(pc, "systemPrompt", &s, &n)) { c->system_prompt= strndup(s, n); }
     long iv;
-    if (json_get_int(pc, "max_tool_iterations", &iv))  c->max_tool_iters = (int)iv;
-    if (json_get_int(pc, "command_timeout_secs", &iv)) c->command_timeout_secs = (int)iv;
+    if (json_get_int(pc, "maxToolIterations", &iv))  c->max_tool_iters = (int)iv;
+    if (json_get_int(pc, "commandTimeoutSecs", &iv)) c->command_timeout_secs = (int)iv;
     praxis_set_config(c);
     LOG_INFO("Praxis agent enabled (model=%s, endpoint=%s)",
              c->model_name ? c->model_name : "?",
@@ -201,6 +214,8 @@ static void publish_acp_envelope(const char *client_id, const char *json_rpc, si
     amqp *c = G_amqp;
     pthread_mutex_unlock(&G_amqp_mu);
     if (!c) return;
+
+    LOG_DEBUG("ACP send to %s: %.*s", client_id, (int)rpc_len, json_rpc);
 
     buf env = {0};
     buf_puts(&env, "{\"Acp\":{\"node_id\":");
@@ -308,16 +323,36 @@ static void handle_signal(int s) { (void)s; G_shutdown = 1; if (G_amqp) amqp_req
 /* helper used while parsing the broadcast message envelope */
 static void handle_node_broadcast(json *root)
 {
-    if (!root || root->type != JOBJ) return;
-    if (root->u.obj.count == 0) return;
+    if (!root) return;
 
-    /* externally-tagged: {"VariantName": payload} */
-    const char *var = root->u.obj.keys[0];
-    size_t vlen = root->u.obj.key_lens[0];
-    json *p = root->u.obj.vals[0];
+    //
+    // serde serializes externally-tagged enum variants in two shapes:
+    //
+    //   - Unit variants (e.g. NodeInformationUpdateRequest,
+    //     NodeRefreshRegistration) → bare JSON string
+    //     `"VariantName"`.
+    //   - Variants with payload (e.g. PraxisAgentEnabled,
+    //     InterceptTargetsUpdate)   → object `{"VariantName": payload}`.
+    //
+    // We accept both forms here. Without this, the periodic
+    // NodeInformationUpdateRequest ping never reaches the dispatcher
+    // and the service marks the node offline despite it being alive.
+    //
 
-    if (vlen == 19 && memcmp(var, "PraxisAgentEnabled", 18) == 0) {
-        /* could be 18 or 19; do a real comparison */
+    const char *var = NULL;
+    size_t      vlen = 0;
+    json       *p    = NULL;
+
+    if (root->type == JSTR) {
+        var  = root->u.str.s;
+        vlen = root->u.str.len;
+    } else if (root->type == JOBJ) {
+        if (root->u.obj.count == 0) return;
+        var  = root->u.obj.keys[0];
+        vlen = root->u.obj.key_lens[0];
+        p    = root->u.obj.vals[0];
+    } else {
+        return;
     }
 
 #define KEQ(k) (vlen == sizeof(k) - 1 && memcmp(var, k, sizeof(k) - 1) == 0)
@@ -331,14 +366,14 @@ static void handle_node_broadcast(json *root)
         /* reuse apply_registration_ack-like logic */
         praxis_cfg *c = calloc(1, sizeof(*c));
         const char *s; size_t n;
-        if (json_get_str(cfg, "provider",      &s, &n)) c->provider     = strndup(s, n);
-        if (json_get_str(cfg, "api_key",       &s, &n)) c->api_key      = strndup(s, n);
-        if (json_get_str(cfg, "endpoint_url",  &s, &n)) c->endpoint_url = strndup(s, n);
-        if (json_get_str(cfg, "model_name",    &s, &n)) c->model_name   = strndup(s, n);
-        if (json_get_str(cfg, "system_prompt", &s, &n)) c->system_prompt= strndup(s, n);
+        if (json_get_str(cfg, "provider",     &s, &n)) c->provider     = strndup(s, n);
+        if (json_get_str(cfg, "apiKey",       &s, &n)) c->api_key      = strndup(s, n);
+        if (json_get_str(cfg, "endpointUrl",  &s, &n)) c->endpoint_url = strndup(s, n);
+        if (json_get_str(cfg, "modelName",    &s, &n)) c->model_name   = strndup(s, n);
+        if (json_get_str(cfg, "systemPrompt", &s, &n)) c->system_prompt= strndup(s, n);
         long iv;
-        if (json_get_int(cfg, "max_tool_iterations", &iv))  c->max_tool_iters = (int)iv;
-        if (json_get_int(cfg, "command_timeout_secs", &iv)) c->command_timeout_secs = (int)iv;
+        if (json_get_int(cfg, "maxToolIterations", &iv))  c->max_tool_iters = (int)iv;
+        if (json_get_int(cfg, "commandTimeoutSecs", &iv)) c->command_timeout_secs = (int)iv;
         praxis_set_config(c);
         send_node_information_update();
     } else if (KEQ("NodeInformationUpdateRequest")) {
@@ -363,22 +398,57 @@ static int run_once(const char *host, int port, const char *user, const char *pa
     G_amqp = c;
     pthread_mutex_unlock(&G_amqp_mu);
 
+    //
+    // Declare all topology (queues + exchange + bindings) BEFORE any
+    // basic.consume. Once a consume is active the broker can interleave
+    // basic.deliver frames with our synchronous method-replies, and our
+    // simple read_method() can't tell them apart — so a backlogged queue
+    // would cause the very next declare/bind to "fail" with a frame
+    // mismatch.
+    //
+
     /* declare node-specific queue */
-    snprintf(G_node_queue, sizeof(G_node_queue), "node-%s", tiny_node_id);
-    if (amqp_queue_declare(c, G_node_queue) < 0) goto fail;
-
-    /* publish registration */
-    if (publish_registration(c) < 0) goto fail;
-
-    /* consume from node queue */
-    if (amqp_basic_consume(c, G_node_queue, "tiny-c-direct") < 0) goto fail;
+    snprintf(G_node_queue, sizeof(G_node_queue), "Node_%s", tiny_node_id);
+    if (amqp_queue_declare(c, G_node_queue) < 0) {
+        LOG_WARN("queue.declare(%s) failed", G_node_queue);
+        goto fail;
+    }
 
     /* declare broadcast exchange + bind a private queue */
-    if (amqp_exchange_declare_fanout(c, NODE_BROADCAST_EXCHANGE) < 0) goto fail;
+    if (amqp_exchange_declare_fanout(c, NODE_BROADCAST_EXCHANGE) < 0) {
+        LOG_WARN("exchange.declare(%s) failed", NODE_BROADCAST_EXCHANGE);
+        goto fail;
+    }
     char bqname[128];
-    if (amqp_queue_declare_exclusive(c, bqname, sizeof(bqname)) < 0) goto fail;
-    if (amqp_queue_bind(c, bqname, NODE_BROADCAST_EXCHANGE, "") < 0) goto fail;
-    if (amqp_basic_consume(c, bqname, "tiny-c-broadcast") < 0) goto fail;
+    if (amqp_queue_declare_exclusive(c, bqname, sizeof(bqname)) < 0) {
+        LOG_WARN("queue.declare(exclusive) failed");
+        goto fail;
+    }
+    if (amqp_queue_bind(c, bqname, NODE_BROADCAST_EXCHANGE, "") < 0) {
+        LOG_WARN("queue.bind(%s -> %s) failed", bqname, NODE_BROADCAST_EXCHANGE);
+        goto fail;
+    }
+
+    /* publish registration */
+    if (publish_registration(c) < 0) {
+        LOG_WARN("publish_registration failed");
+        goto fail;
+    }
+
+    //
+    // Start the broadcast consumer first (its queue is freshly created and
+    // empty, so its consume-ok arrives cleanly). Then start the direct
+    // consumer last — once it begins, any backlog or new deliveries can
+    // stream in without colliding with another synchronous method-reply.
+    //
+    if (amqp_basic_consume(c, bqname, "tiny-c-broadcast") < 0) {
+        LOG_WARN("basic.consume(%s) failed", bqname);
+        goto fail;
+    }
+    if (amqp_basic_consume(c, G_node_queue, "tiny-c-direct") < 0) {
+        LOG_WARN("basic.consume(%s) failed", G_node_queue);
+        goto fail;
+    }
 
     LOG_INFO("Listening on %s and %s (broadcast)", G_node_queue, bqname);
 
@@ -419,6 +489,8 @@ static int run_once(const char *host, int port, const char *user, const char *pa
                         char cidbuf[64];
                         if (cn < sizeof(cidbuf)) {
                             memcpy(cidbuf, cid, cn); cidbuf[cn] = 0;
+                            LOG_DEBUG("ACP recv from %s: %.*s",
+                                      cidbuf, (int)rn, rpc);
                             acp_handle_frame(cidbuf, rpc, rn);
                         }
                     }

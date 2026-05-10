@@ -67,7 +67,7 @@ struct ClientState {
     system_state: Option<SystemState>,
     acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
-    pending_config: Option<HashMap<String, String>>,
+    pending_config: Option<oneshot::Sender<HashMap<String, String>>>,
     pending_acp: HashMap<String, PendingAcp>,
     pending_terminal_creates: HashMap<String, oneshot::Sender<Result<String, String>>>,
     cached_project_paths: Vec<String>,
@@ -284,7 +284,9 @@ impl Client {
             }
 
             ClientDirectMessage::ServiceConfigResponse { values } => {
-                state.pending_config = Some(values);
+                if let Some(tx) = state.pending_config.take() {
+                    let _ = tx.send(values);
+                }
             }
             ClientDirectMessage::ServiceConfigSaved => {}
 
@@ -641,9 +643,10 @@ impl Client {
     //
 
     pub async fn get_config(&self, keys: Vec<String>) -> Result<HashMap<String, String>> {
+        let (tx, rx) = oneshot::channel();
         {
             let mut state = self.state.lock().await;
-            state.pending_config = None;
+            state.pending_config = Some(tx);
         }
 
         let message = ClientSignalMessage::ServiceConfigGet {
@@ -652,16 +655,14 @@ impl Client {
         };
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        for _ in 0..50 {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(values) = state.pending_config.take() {
-                return Ok(values);
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(values)) => Ok(values),
+            Ok(Err(_)) => Err(anyhow!("Config response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_config = None;
+                Err(anyhow!("Timeout waiting for config response"))
             }
         }
-
-        Err(anyhow!("Timeout waiting for config response"))
     }
 
     pub async fn set_config(&self, values: HashMap<String, String>) -> Result<()> {

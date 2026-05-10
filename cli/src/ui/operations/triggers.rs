@@ -1,5 +1,5 @@
 use crate::app::OperationsState;
-use crate::ui::common::titled_panel;
+use crate::ui::common::focused_panel;
 use crate::ui::chrome;
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT, TEXT_BRIGHT,
@@ -25,13 +25,14 @@ pub(super) fn render_triggers(f: &mut Frame, area: Rect, state: &OperationsState
 fn render_triggers_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("Chain"),
-        Cell::from("Type"),
-        Cell::from("Summary"),
-        Cell::from("Next"),
-        Cell::from("On"),
+        Cell::from("CHAIN"),
+        Cell::from("TYPE"),
+        Cell::from("SUMMARY"),
+        Cell::from("NEXT"),
+        Cell::from("ON"),
     ])
-    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
 
     let mut rows: Vec<Row> = Vec::new();
     for t in &state.triggers {
@@ -80,7 +81,7 @@ fn render_triggers_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(titled_panel(" Triggers "))
+        .block(focused_panel(false))
         .row_highlight_style(
             Style::default()
                 .bg(BG_SELECTED)
@@ -94,7 +95,7 @@ fn render_triggers_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 }
 
 fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let block = titled_panel(" Detail ");
+    let block = focused_panel(false);
     let inner = block.inner(area);
     f.render_widget(block, area);
 

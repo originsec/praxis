@@ -3,14 +3,17 @@
 A pure-C implementation of the minimal Praxis node, parity-equivalent in
 scope with the Rust `praxis_node_tiny` (Praxis agent + ACP sessions only).
 
-Runtime dependencies: **libc (and libpthread)**. No external libraries
-are required at runtime; AMQP 0-9-1, JSON, HTTP/1.1, and the ACP JSON-RPC
-plumbing are all hand-rolled and compiled into the binary.
+Runtime dependencies: **libc (and libpthread)**. No external runtime
+libraries are required; AMQP 0-9-1, JSON, HTTP/1.1, and the ACP JSON-RPC
+plumbing are all hand-rolled. TLS is provided by [BearSSL](https://www.bearssl.org/)
+(MIT-licensed) which is downloaded and statically linked at build time.
 
 ## Size
 
-`make release` produces a stripped, gc-sectioned binary around **~50 KB**
-on x86_64 glibc.
+`make release` produces a stripped, gc-sectioned binary around **~230 KB**
+on x86_64 glibc — roughly 50 KB of node code plus ~180 KB of statically
+linked BearSSL (X.509 minimal verifier, TLS 1.2 client) and the
+generated trust-anchor table for the system CA bundle.
 
 ```
 $ ldd praxis_node_tiny_c
@@ -28,6 +31,25 @@ artefacts, not real dependencies.)
 make            # debug-friendly: -O2 -g
 make release    # -Os, gc-sections, stripped
 ```
+
+The first build:
+
+1. Downloads `bearssl-0.6.tar.gz` from <https://www.bearssl.org/> into
+   `vendor/` and extracts it. (Subsequent builds skip the download.)
+2. Compiles BearSSL into `vendor/bearssl-0.6/build/libbearssl.a`.
+3. Generates `src/trust_anchors.inc` from the system CA bundle (see
+   `TA_PEM` in the Makefile — it auto-detects
+   `/etc/ssl/certs/ca-certificates.crt`,
+   `/etc/ca-certificates/extracted/tls-ca-bundle.pem`, or
+   `/etc/pki/tls/certs/ca-bundle.crt`). Override the path with
+   `make TA_PEM=/custom/cabundle.pem`.
+4. Links the node binary against the BearSSL static library.
+
+`make distclean` wipes the vendored BearSSL tree so the next build
+re-downloads and rebuilds from scratch.
+
+Build prerequisites beyond a C compiler + GNU make: `curl` and `tar`
+(only on first build, to fetch BearSSL).
 
 ## Run
 
@@ -47,19 +69,10 @@ tables.
 
 - **Linux only.** Uses `/dev/urandom`, `gethostname(2)`, `sigaction`,
   `select(2)`. No Windows or macOS path.
-- **Plain HTTP only for the AI endpoint.** TLS is not bundled in this
-  version. Point the praxis agent at an OpenAI-compatible endpoint
-  reachable over HTTP — for example a local llama.cpp/ollama server, or
-  a TLS-terminating reverse-proxy in front of OpenAI/Anthropic. Adding
-  mbedTLS or BearSSL (statically linked) is the obvious next step.
 - **OpenAI-compatible chat-completions only.** No Anthropic or Gemini
   provider plumbing. The configured `endpoint_url` should be the API
-  base; the suffix `/chat/completions` is added if missing.
-- **Tool streaming is text-only.** The node emits `agent_message_chunk`
-  notifications for assistant text and inline `[run_command] …` /
-  result blocks. It does not emit proper ACP `tool_call` / `tool_call_update`
-  updates. (Functionally equivalent for end users; the UI just renders
-  them inline.)
+  base; the suffix `/chat/completions` is added if missing. Both
+  `http://` and `https://` URLs are accepted.
 - **No reset queue, no semantic-parser queue, no event-log forwarder,
   no Lua agents, no MCP, no intercept, no terminal capability.** The
   node only advertises `Session`.
@@ -70,13 +83,15 @@ tables.
 
 ```
 src/
-├── tiny.h     — shared declarations and types
-├── util.c     — logging, /dev/urandom, UUIDv4, growing buffers
-├── json.c     — JSON parser + escape-aware writer (no allocation hot path)
-├── http.c     — HTTP/1.1 client with chunked + SSE decoding
-├── amqp.c     — AMQP 0-9-1 client (PLAIN auth, no heartbeats)
-├── praxis.c   — sessions, ACP dispatch, OpenAI chat loop, run_command
-└── main.c     — registration, runtime, signal handling
+├── tiny.h            — shared declarations and types
+├── util.c            — logging, /dev/urandom, UUIDv4, growing buffers
+├── json.c            — JSON parser + escape-aware writer
+├── conn.h, conn.c    — plain TCP / TLS (BearSSL) transport abstraction
+├── http.c            — HTTP/1.1 client with chunked + SSE decoding
+├── amqp.c            — AMQP 0-9-1 client (PLAIN auth, no heartbeats)
+├── praxis.c          — sessions, ACP dispatch, OpenAI chat loop, run_command
+├── main.c            — registration, runtime, signal handling
+└── trust_anchors.inc — generated at build time from the system CA bundle
 ```
 
 ## Wire-protocol notes

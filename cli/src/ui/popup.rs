@@ -12,72 +12,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 
 //
-// Shared dialog chrome: centred panel with menu-tinted background, no
-// border. Title row with bold title left + dismiss hint right, slim
-// divider, returns the inner content rect for the caller.
+// Shared dialog chrome lives in `chrome::modal_panel`. Use that for any
+// new modal so they share the same title/divider/background treatment.
 //
-
-fn render_panel(f: &mut Frame, popup_area: Rect, title: &str, esc_hint: &str) -> Rect {
-    f.render_widget(Clear, popup_area);
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-    f.render_widget(block, popup_area);
-
-    let inner = Rect {
-        x: popup_area.x + 2,
-        y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(4),
-        height: popup_area.height.saturating_sub(2),
-    };
-
-    let header = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-    ])
-    .split(inner);
-
-    let header_chunks = Layout::horizontal([
-        Constraint::Min(1),
-        Constraint::Length(esc_hint.len() as u16 + 1),
-    ])
-    .split(header[0]);
-
-    let title_line = Line::from(vec![
-        chrome::diamond(ACCENT),
-        Span::raw(" "),
-        Span::styled(
-            title.to_string(),
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-    let hint_line = Line::from(Span::styled(
-        esc_hint.to_string(),
-        Style::default().fg(MUTED),
-    ));
-    f.render_widget(
-        Paragraph::new(title_line).style(Style::default().bg(BG_MENU)),
-        header_chunks[0],
-    );
-    f.render_widget(
-        Paragraph::new(hint_line).style(Style::default().bg(BG_MENU)),
-        header_chunks[1],
-    );
-
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
-        ))),
-        header[1],
-    );
-
-    header[2]
-}
 
 pub fn render(f: &mut Frame, popup: &Popup) {
     match popup.kind {
@@ -98,7 +38,7 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
     let area = centered_rect_fixed(width, height, f.area());
 
     let title = if is_info { "Error" } else { "Confirm" };
-    let body = render_panel(f, area, title, "");
+    let body = chrome::modal_panel(f, area, title, "");
 
     let body_chunks = Layout::vertical([
         Constraint::Length(1),
@@ -157,16 +97,12 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     .split(area);
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chrome::diamond(ACCENT),
-            Span::raw(" "),
-            Span::styled(
-                "New Operation",
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(Span::styled(
+            "New Operation",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ))),
         chunks[0],
     );
     f.render_widget(
@@ -319,11 +255,11 @@ pub fn render_add_remote_node_form(f: &mut Frame, area: Rect, form: &AddRemoteNo
         .map(|k| k.display_name)
         .unwrap_or("?");
 
-    let height = (AddRemoteNodeForm::FIELD_COUNT as u16) + 7;
+    let height = (AddRemoteNodeForm::FIELD_COUNT as u16) + 6;
     let width = 60u16.min(area.width.saturating_sub(4));
     let popup_area = centered_rect_fixed(width, height, area);
 
-    let body = render_panel(f, popup_area, "Add Remote Node", "esc");
+    let body = chrome::modal_panel(f, popup_area, "Add Remote Node", "esc");
 
     let body_chunks = Layout::vertical([
         Constraint::Min(1),
@@ -451,7 +387,7 @@ fn render_list_select(f: &mut Frame, popup: &Popup, title: &str) {
     let width = (max_label_width as u16 + 6).min(f.area().width - 4).max(36);
 
     let area = centered_rect_fixed(width, height, f.area());
-    let body = render_panel(f, area, title, "esc");
+    let body = chrome::modal_panel(f, area, title, "esc");
     render_list(f, body, popup, &filtered);
 }
 
@@ -466,7 +402,7 @@ fn render_command_palette(f: &mut Frame, popup: &Popup) {
     let x = 2;
 
     let area = Rect::new(x, y, width, height);
-    let body = render_panel(f, area, "Commands", "esc");
+    let body = chrome::modal_panel(f, area, "Commands", "esc");
     render_list(f, body, popup, &filtered);
 }
 
@@ -475,7 +411,7 @@ fn render_save_session(f: &mut Frame, popup: &Popup) {
     let height = 6u16;
     let area = centered_rect_fixed(width, height, f.area());
 
-    let body = render_panel(f, area, "Save Session", "esc");
+    let body = chrome::modal_panel(f, area, "Save Session", "esc");
 
     let block = Block::default().style(Style::default().bg(BG_ELEMENT));
     let inner = Rect {
@@ -562,16 +498,12 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         format!("Run Operation: {}", opts.op_name)
     };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chrome::diamond(ACCENT),
-            Span::raw(" "),
-            Span::styled(
-                title_text,
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(Span::styled(
+            title_text,
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ))),
         chunks[0],
     );
     f.render_widget(
@@ -598,7 +530,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
     };
     let all_nodes_selected = opts.nodes.iter().all(|(_, _, s)| *s);
     lines.push(Line::from(vec![
-        Span::styled("# Target Nodes", nodes_label_style),
+        Span::styled("Target Nodes", nodes_label_style),
         if all_nodes_selected {
             Span::styled("    (all)", Style::default().fg(DIM))
         } else {
@@ -629,7 +561,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
     };
     let all_agents_selected = opts.agents.iter().all(|(_, s)| *s);
     lines.push(Line::from(vec![
-        Span::styled("# Target Agents", agents_label_style),
+        Span::styled("Target Agents", agents_label_style),
         if all_agents_selected {
             Span::styled("    (all)", Style::default().fg(DIM))
         } else {
@@ -708,16 +640,12 @@ pub fn render_trigger_form(f: &mut Frame, area: Rect, form: &TriggerForm) {
         "New Trigger"
     };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chrome::diamond(ACCENT),
-            Span::raw(" "),
-            Span::styled(
-                title_text,
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(Span::styled(
+            title_text,
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ))),
         chunks[0],
     );
     f.render_widget(
@@ -855,7 +783,7 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "# Target",
+        "Target",
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

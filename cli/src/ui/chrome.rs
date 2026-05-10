@@ -4,10 +4,13 @@
 // design language.
 //
 
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Clear, Paragraph};
 
-use super::theme::{ACCENT, BG, BG_ELEMENT, DIM, MUTED, TEXT, TEXT_BRIGHT};
+use super::theme::{ACCENT, BG, BG_ELEMENT, BG_MENU, BORDER_SUBTLE, DIM, MUTED, TEXT, TEXT_BRIGHT};
 
 //
 // "Bright key, muted label" hint segment with a leading-muted variant
@@ -89,15 +92,14 @@ pub fn pill(label: &str, color: Color) -> Span<'static> {
 }
 
 //
-// Hash-prefixed section title (opencode signature). Bold accent when
-// focused, bright text otherwise.
+// Section title — bold accent when focused, bright text otherwise.
 //
 
 pub fn section_title(title: &str, focused: bool) -> Line<'static> {
     let style = Style::default()
         .fg(if focused { ACCENT } else { TEXT_BRIGHT })
         .add_modifier(Modifier::BOLD);
-    Line::from(Span::styled(format!("# {}", title), style))
+    Line::from(Span::styled(title.to_string(), style))
 }
 
 //
@@ -139,6 +141,111 @@ pub fn tab(label: &str, count: Option<usize>, active: bool) -> Vec<Span<'static>
 
 pub fn tab_sep() -> Span<'static> {
     Span::styled("  \u{00b7}  ", Style::default().fg(DIM))
+}
+
+//
+// Standard modal/popup chrome. Clears `area`, paints the menu-tinted
+// background, renders a bold title on the top row with an optional
+// dismiss hint right-aligned, draws a slim divider below, and returns
+// the body rect for the caller to draw into.
+//
+// All modal-style overlays (settings forms, popups, sessions list,
+// confirm dialogs) should use this so they share the same chrome —
+// keep titles plain (no leading symbol) and let the bold weight do
+// the work.
+//
+
+pub fn modal_panel(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    esc_hint: &str,
+) -> Rect {
+    modal_panel_line(f, area, modal_title(title), esc_hint)
+}
+
+//
+// Like `modal_panel`, but takes a pre-styled title line so callers can
+// compose the title with extra spans (counts, badges, secondary suffix
+// in DIM, etc.). Use `modal_title(text)` to build the standard
+// bold-bright title span.
+//
+
+pub fn modal_panel_line(
+    f: &mut Frame,
+    area: Rect,
+    title: Line<'static>,
+    esc_hint: &str,
+) -> Rect {
+    f.render_widget(Clear, area);
+    let block = Block::default().style(Style::default().bg(BG_MENU));
+    f.render_widget(block, area);
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 1,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+
+    let header = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .split(inner);
+
+    let hint_width = if esc_hint.is_empty() {
+        0
+    } else {
+        esc_hint.len() as u16 + 1
+    };
+    let header_chunks = Layout::horizontal([
+        Constraint::Min(1),
+        Constraint::Length(hint_width),
+    ])
+    .split(header[0]);
+
+    f.render_widget(
+        Paragraph::new(title).style(Style::default().bg(BG_MENU)),
+        header_chunks[0],
+    );
+
+    if !esc_hint.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                esc_hint.to_string(),
+                Style::default().fg(MUTED),
+            )))
+            .style(Style::default().bg(BG_MENU)),
+            header_chunks[1],
+        );
+    }
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "\u{2500}".repeat(inner.width as usize),
+            Style::default().fg(BORDER_SUBTLE),
+        )))
+        .style(Style::default().bg(BG_MENU)),
+        header[1],
+    );
+
+    header[2]
+}
+
+//
+// Standard modal title span: bold, bright. Use as the first span in a
+// composed title line passed to `modal_panel_line`.
+//
+
+pub fn modal_title(text: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::default()
+            .fg(TEXT_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    ))
 }
 
 //

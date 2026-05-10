@@ -519,8 +519,9 @@ impl App {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
                     if form.focused_field == AddRemoteNodeForm::KIND_FIELD {
                         form.kind_idx = (form.kind_idx + kinds_len - 1) % kinds_len;
-                    } else if let Some((_, cursor)) = form.active_pair_mut() {
-                        input::move_left(cursor);
+                    } else if let Some((text, cursor)) = form.active_pair_mut() {
+                        let text_clone = text.clone();
+                        input::move_left(&text_clone, cursor);
                     }
                 }
             }
@@ -782,10 +783,7 @@ impl App {
 
         session.history.push(input.clone());
         session.history_index = None;
-        session.messages.push(ChatMessage {
-            role: ChatRole::User,
-            text: input.clone(),
-        });
+        session.messages.push(ChatMessage::User(input.clone()));
         session.input.clear();
         session.cursor_pos = 0;
         session.is_waiting = true;
@@ -1062,10 +1060,7 @@ impl App {
                     };
                     let client = self.client.clone();
                     let node_id = session.node_id.clone();
-                    session.messages.push(ChatMessage {
-                        role: ChatRole::System,
-                        text: "Cancelling...".to_string(),
-                    });
+                    session.messages.push(ChatMessage::System("Cancelling...".to_string()));
                     tokio::spawn(async move {
                         //
                         // session/cancel is a JSON-RPC notification
@@ -1142,7 +1137,7 @@ impl App {
             }
             KeyCode::Left => {
                 if let Some(session) = self.nodes.active_session_mut() {
-                    input::move_left(&mut session.cursor_pos);
+                    input::move_left(&session.input, &mut session.cursor_pos);
                 }
             }
             KeyCode::Right => {
@@ -1341,11 +1336,15 @@ impl App {
         let outer =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
         let hints_area = outer[1];
-        let node_chunks = Layout::horizontal([
-            Constraint::Percentage(self.nodes.split_percent),
-            Constraint::Percentage(100 - self.nodes.split_percent),
-        ])
-        .split(outer[0]);
+        let node_chunks = if self.nodes.split_percent_user_set {
+            Layout::horizontal([
+                Constraint::Percentage(self.nodes.split_percent),
+                Constraint::Percentage(100 - self.nodes.split_percent),
+            ])
+            .split(outer[0])
+        } else {
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(outer[0])
+        };
         let list_area = node_chunks[0];
         let detail_area = node_chunks[1];
 
@@ -1461,6 +1460,7 @@ impl App {
                         list_area.width + detail_area.width,
                         mouse.column,
                     );
+                    self.nodes.split_percent_user_set = true;
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

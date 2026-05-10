@@ -48,11 +48,20 @@ pub fn render(
     } else {
         let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
-        let chunks = Layout::horizontal([
-            Constraint::Percentage(state.split_percent),
-            Constraint::Percentage(100 - state.split_percent),
-        ])
-        .split(outer[0]);
+        //
+        // Default split: detail pane fixed at 30 cols, node list fills
+        // the rest. If the user has resized the split, honour their
+        // pick (state.split_percent != 0).
+        //
+        let chunks = if state.split_percent_user_set {
+            Layout::horizontal([
+                Constraint::Percentage(state.split_percent),
+                Constraint::Percentage(100 - state.split_percent),
+            ])
+            .split(outer[0])
+        } else {
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(outer[0])
+        };
 
         list::render_node_list(f, chunks[0], state);
         detail::render_node_detail(f, chunks[1], state, ops, chains);

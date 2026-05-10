@@ -15,7 +15,7 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
     let on_target = state.selected < target_count;
 
     let mut header_spans = vec![Span::styled(
-        "# Intercept Targets",
+        "Intercept Targets",
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

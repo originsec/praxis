@@ -1,13 +1,11 @@
 use crate::app::{InterceptTargetForm, InterceptTargetFormField, InterceptTargetFormMode};
 use crate::ui::chrome;
-use crate::ui::theme::{
-    ACCENT, BG_MENU, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_MENU, DIM, MUTED, STATUS_FAIL, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use super::EDIT_FG;
 
@@ -23,60 +21,7 @@ pub(super) fn render(f: &mut Frame, area: Rect, form: &InterceptTargetForm) {
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);
 
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-    f.render_widget(Clear, popup_area);
-    f.render_widget(block, popup_area);
-
-    let inner = Rect {
-        x: popup_area.x + 2,
-        y: popup_area.y + 1,
-        width: popup_area.width.saturating_sub(4),
-        height: popup_area.height.saturating_sub(2),
-    };
-
-    //
-    // Title + divider.
-    //
-    let title_row = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            chrome::diamond(ACCENT),
-            Span::raw(" "),
-            Span::styled(
-                title_text,
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .style(Style::default().bg(BG_MENU)),
-        title_row,
-    );
-    let divider_row = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
-        ))),
-        divider_row,
-    );
-
-    let body_area = Rect {
-        x: inner.x,
-        y: inner.y + 2,
-        width: inner.width,
-        height: inner.height.saturating_sub(2),
-    };
+    let body_area = chrome::modal_panel(f, popup_area, title_text, "");
 
     let row = |label: &str, value: &str, focused: bool| -> Line {
         let prefix = if focused { "\u{276f} " } else { "  " };

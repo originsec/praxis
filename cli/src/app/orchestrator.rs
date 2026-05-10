@@ -8,29 +8,43 @@ use super::*;
 pub enum ConversationEntry {
     UserPrompt(String),
     AssistantText(String),
-    ToolGroup(Vec<ToolCall>),
+    //
+    // Single entry per tool call. `outcome` is `None` while the call
+    // is in flight (we've sent the request but the result hasn't come
+    // back yet) and is filled in when the result arrives. Render uses
+    // `outcome` to pick the indicator (→ pending / ✓ ok / ✗ failed).
+    //
+    Tool {
+        name: String,
+        input: Option<String>,
+        outcome: Option<ToolOutcome>,
+    },
     Info(String),
     Error(String),
+}
+
+#[derive(Clone)]
+pub struct ToolOutcome {
+    pub success: bool,
+    pub result: Option<String>,
 }
 
 pub(crate) fn clone_conversation_entry(e: &ConversationEntry) -> ConversationEntry {
     match e {
         ConversationEntry::UserPrompt(s) => ConversationEntry::UserPrompt(s.clone()),
         ConversationEntry::AssistantText(s) => ConversationEntry::AssistantText(s.clone()),
-        ConversationEntry::ToolGroup(tools) => ConversationEntry::ToolGroup(tools.clone()),
+        ConversationEntry::Tool {
+            name,
+            input,
+            outcome,
+        } => ConversationEntry::Tool {
+            name: name.clone(),
+            input: input.clone(),
+            outcome: outcome.clone(),
+        },
         ConversationEntry::Info(s) => ConversationEntry::Info(s.clone()),
         ConversationEntry::Error(s) => ConversationEntry::Error(s.clone()),
     }
-}
-
-#[derive(Clone)]
-pub struct ToolCall {
-    pub name: String,
-    pub success: bool,
-    pub input: Option<String>,
-    #[allow(dead_code)]
-    pub display: Option<String>,
-    pub result: Option<String>,
 }
 
 pub struct OrchestratorSessionState {
@@ -46,7 +60,6 @@ pub struct OrchestratorSessionState {
     pub total_tokens: u32,
     pub is_streaming: bool,
     pub prompt_seq: u64,
-    pub pending_tools: Vec<ToolCall>,
     //
     // Typewriter reveal: number of *chars* of the current (last)
     // AssistantText entry that are visible while `is_streaming`.
@@ -77,7 +90,6 @@ impl OrchestratorSessionState {
             total_tokens: 0,
             is_streaming: false,
             prompt_seq: 0,
-            pending_tools: Vec::new(),
             revealed_chars: 0,
             active_tool: None,
             active_tool_input: None,
@@ -113,6 +125,12 @@ pub struct OrchestratorState {
     // ~/.praxis/sessions/{session_id}.json after every turn.
     //
     pub stored: Option<crate::session_store::StoredSession>,
+    //
+    // Configured default model — populated from settings at launch so
+    // the meta row can show the right model before SessionCreated
+    // arrives.
+    //
+    pub configured_model: String,
 }
 
 impl OrchestratorState {
@@ -145,6 +163,7 @@ impl Default for OrchestratorState {
             pending_history: None,
             pending_seed_messages: None,
             stored: None,
+            configured_model: String::new(),
         }
     }
 }
@@ -322,6 +341,13 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                input::insert_char(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                    '\n',
+                );
+            }
             KeyCode::Enter => {
                 let input = self.orchestrator.input.trim().to_string();
                 let is_streaming = self
@@ -448,7 +474,7 @@ impl App {
                 input::delete(&mut self.orchestrator.input, &self.orchestrator.cursor_pos);
             }
             KeyCode::Left => {
-                input::move_left(&mut self.orchestrator.cursor_pos);
+                input::move_left(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
             }
             KeyCode::Right => {
                 input::move_right(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
@@ -631,15 +657,6 @@ impl App {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.active_tool = None;
 
-                    //
-                    // Flush pending tool calls before appending text so tool
-                    // calls appear between text blocks.
-                    //
-                    if !session.pending_tools.is_empty() {
-                        let tools = std::mem::take(&mut session.pending_tools);
-                        session.messages.push(ConversationEntry::ToolGroup(tools));
-                    }
-
                     match session.messages.last_mut() {
                         Some(ConversationEntry::AssistantText(existing)) => {
                             existing.push_str(&text);
@@ -670,8 +687,13 @@ impl App {
                 }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     if name != "report_plan" {
-                        session.active_tool = Some(name);
-                        session.active_tool_input = raw_input;
+                        session.active_tool = Some(name.clone());
+                        session.active_tool_input = raw_input.clone();
+                        session.messages.push(ConversationEntry::Tool {
+                            name,
+                            input: raw_input,
+                            outcome: None,
+                        });
                     }
                 }
             }
@@ -682,15 +704,41 @@ impl App {
                 }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     let tool_name = session.active_tool.take().unwrap_or(tool_id);
+                    session.active_tool_input = None;
                     if tool_name != "report_plan" {
-                        let input = session.active_tool_input.take();
-                        session.pending_tools.push(ToolCall {
-                            name: tool_name,
-                            success,
-                            input,
-                            display: None,
-                            result: Some(result),
-                        });
+                        //
+                        // Find the most recent in-flight Tool entry and
+                        // fill in its outcome. Falls back to a fresh
+                        // entry if we somehow received a result without
+                        // a preceding request.
+                        //
+                        let updated = session
+                            .messages
+                            .iter_mut()
+                            .rev()
+                            .find_map(|m| match m {
+                                ConversationEntry::Tool {
+                                    name: n,
+                                    outcome: outcome @ None,
+                                    ..
+                                } if *n == tool_name => Some(outcome),
+                                _ => None,
+                            });
+                        if let Some(slot) = updated {
+                            *slot = Some(ToolOutcome {
+                                success,
+                                result: Some(result),
+                            });
+                        } else {
+                            session.messages.push(ConversationEntry::Tool {
+                                name: tool_name,
+                                input: None,
+                                outcome: Some(ToolOutcome {
+                                    success,
+                                    result: Some(result),
+                                }),
+                            });
+                        }
                     }
                 }
             }
@@ -722,10 +770,6 @@ impl App {
                 let mut last_assistant: Option<String> = None;
                 for session in &mut self.orchestrator.sessions {
                     if session.is_streaming {
-                        if !session.pending_tools.is_empty() {
-                            let tools = std::mem::take(&mut session.pending_tools);
-                            session.messages.push(ConversationEntry::ToolGroup(tools));
-                        }
                         session.active_tool = None;
                         session.current_plan = None;
                         session.is_streaming = false;
@@ -812,8 +856,18 @@ impl App {
             return false;
         };
         session.last_activity_at = std::time::Instant::now();
-        if session.had_tool_call && !session.streaming_content.is_empty() {
-            session.streaming_content.push_str("\n\n");
+        //
+        // Reset the post-tool-call flag on the very first text chunk
+        // after a tool call regardless of whether we inserted a
+        // separator. Otherwise the flag stayed true after an empty
+        // streaming_content and the SECOND text chunk got `\n\n`
+        // wedged in front of it — splitting "You are" into "You" and
+        // "are" on separate lines.
+        //
+        if session.had_tool_call {
+            if !session.streaming_content.is_empty() {
+                session.streaming_content.push_str("\n\n");
+            }
             session.had_tool_call = false;
         }
         session.streaming_content.push_str(text);

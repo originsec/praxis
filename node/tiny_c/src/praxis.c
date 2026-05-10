@@ -487,7 +487,50 @@ typedef struct {
     buf          assistant;            /* full streamed assistant text */
     int          stream_failed;
     char        *system_prompt;        /* tool-augmented; may be NULL */
+
+    //
+    // Once we detect the start of a tool-call JSON in the assistant
+    // stream we stop forwarding agent_message_chunk notifications: the
+    // raw JSON would otherwise leak into the user-visible transcript.
+    // After the stream finishes the prompt loop will emit a proper
+    // tool_call / tool_call_update pair instead.
+    //
+    // streamed_len: bytes already emitted as agent_message_chunk;
+    //               used to compute what to send when we receive a
+    //               new SSE delta but haven't yet seen the suppress
+    //               marker.
+    //
+    int          tool_started;
+    size_t       streamed_len;
 } stream_ctx;
+
+//
+// Decide whether the buffer starting at p[0] is the start of a
+// tool-call JSON object — `{` optionally followed by whitespace and
+// then the literal `"tool"`. Returns:
+//
+//   1  — yes, this is a tool-call marker.
+//  -1  — definitely not (we have enough bytes to rule it out).
+//   0  — undecided (need more bytes to know either way; caller should
+//         hold back streaming the buffer until more SSE deltas arrive
+//         or the stream ends).
+//
+
+static int could_be_marker(const char *p, size_t n)
+{
+    if (n == 0) return 0;
+    if (p[0] != '{') return -1;
+    size_t i = 1;
+    while (i < n && (p[i] == ' ' || p[i] == '\t' ||
+                     p[i] == '\n' || p[i] == '\r')) i++;
+    static const char want[] = "\"tool\"";
+    static const size_t wlen = 6;
+    size_t avail = n - i;
+    if (avail == 0) return 0;
+    size_t cmp_len = avail < wlen ? avail : wlen;
+    if (memcmp(p + i, want, cmp_len) != 0) return -1;
+    return avail < wlen ? 0 : 1;
+}
 
 static const char DEFAULT_SYSTEM_PROMPT[] =
     "You are Praxis, an autonomous agent running on the target system. "
@@ -519,6 +562,76 @@ static char *build_system_prompt(const char *base)
     return b.data;
 }
 
+//
+// Emit a slice of assistant text as an agent_message_chunk session
+// update. Caller-provided len must be > 0.
+//
+
+static void send_agent_chunk(session *s, const char *txt, size_t len)
+{
+    buf u = {0};
+    buf_puts(&u, "{\"sessionUpdate\":\"agent_message_chunk\","
+                  "\"content\":{\"type\":\"text\",\"text\":");
+    jb_str(&u, txt, len);
+    buf_puts(&u, "}}");
+    buf_putc(&u, 0);
+    acp_send_session_notification(s->client_id, s->id, u.data);
+    buf_free(&u);
+}
+
+//
+// Drain as much of the accumulated assistant text as we can safely
+// stream, holding back any tail that could be the start of a
+// tool-call JSON marker. Once we recognise a marker `tool_started`
+// is set and the suppressed tail is left in ctx->assistant for the
+// prompt loop to parse.
+//
+
+static void drain_stream(stream_ctx *ctx)
+{
+    while (!ctx->tool_started) {
+        size_t left = ctx->assistant.len - ctx->streamed_len;
+        if (left == 0) return;
+        const char *base = ctx->assistant.data + ctx->streamed_len;
+
+        //
+        // Stream everything up to the next `{` — that's the only
+        // character that could begin a tool-call marker.
+        //
+        size_t p = 0;
+        while (p < left && base[p] != '{') p++;
+        if (p > 0) {
+            send_agent_chunk(ctx->sess, base, p);
+            ctx->streamed_len += p;
+            base += p;
+            left -= p;
+            if (left == 0) return;
+        }
+
+        //
+        // We're sitting on a `{`. Decide whether it's the start of a
+        // tool-call marker, definitely not, or undecidable yet.
+        //
+        int verdict = could_be_marker(base, left);
+        if (verdict == 1) {
+            ctx->tool_started = 1;
+            return;
+        }
+        if (verdict == 0) {
+            //
+            // Not enough bytes to decide — hold back everything from
+            // this brace onward and wait for the next SSE delta.
+            //
+            return;
+        }
+        //
+        // Not a marker — emit the brace and continue scanning.
+        //
+        send_agent_chunk(ctx->sess, base, 1);
+        ctx->streamed_len += 1;
+    }
+}
+
 /* called for each SSE "data:" payload */
 static void on_sse_chunk(const char *data, size_t n, void *ud)
 {
@@ -539,31 +652,60 @@ static void on_sse_chunk(const char *data, size_t n, void *ud)
             const char *txt; size_t tn;
             if (json_get_str(delta, "content", &txt, &tn) && tn > 0) {
                 buf_put(&ctx->assistant, txt, tn);
-
-                /* emit agent_message_chunk to client */
-                buf u = {0};
-                buf_puts(&u, "{\"sessionUpdate\":\"agent_message_chunk\","
-                              "\"content\":{\"type\":\"text\",\"text\":");
-                jb_str(&u, txt, tn);
-                buf_puts(&u, "}}");
-                buf_putc(&u, 0);
-                acp_send_session_notification(ctx->sess->client_id, ctx->sess->id, u.data);
-                buf_free(&u);
+                drain_stream(ctx);
             }
         }
     }
     json_free(j);
 }
 
-/* Stream a "fake" plain-text chunk to the client (e.g. for tool result
- * delimiters when we don't emit proper tool_call updates). */
-static void emit_text(session *s, const char *txt, size_t n)
+//
+// Emit a `tool_call` session update announcing that a new tool call
+// has started. raw_input is the JSON object string (no enclosing
+// braces stripped) describing the parsed tool arguments — embedded
+// verbatim under the rawInput field. Pass NULL/0 to omit it.
+//
+
+static void emit_tool_call(session *s, const char *tool_call_id,
+                           const char *title,
+                           const char *raw_input, size_t raw_input_len)
 {
     buf u = {0};
-    buf_puts(&u, "{\"sessionUpdate\":\"agent_message_chunk\","
-                  "\"content\":{\"type\":\"text\",\"text\":");
-    jb_str(&u, txt, n);
-    buf_puts(&u, "}}");
+    buf_puts(&u, "{\"sessionUpdate\":\"tool_call\",\"toolCallId\":");
+    jb_strz(&u, tool_call_id);
+    buf_puts(&u, ",\"title\":");
+    jb_strz(&u, title);
+    buf_puts(&u, ",\"kind\":\"execute\",\"status\":\"in_progress\"");
+    if (raw_input && raw_input_len > 0) {
+        buf_puts(&u, ",\"rawInput\":");
+        buf_put(&u, raw_input, raw_input_len);
+    }
+    buf_putc(&u, '}');
+    buf_putc(&u, 0);
+    acp_send_session_notification(s->client_id, s->id, u.data);
+    buf_free(&u);
+}
+
+//
+// Emit a `tool_call_update` carrying the final status and result
+// content for a previously-announced tool call.
+//
+
+static void emit_tool_result(session *s, const char *tool_call_id,
+                             int success, const char *output, size_t out_len)
+{
+    buf u = {0};
+    buf_puts(&u, "{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":");
+    jb_strz(&u, tool_call_id);
+    buf_puts(&u, ",\"status\":");
+    buf_puts(&u, success ? "\"completed\"" : "\"failed\"");
+    if (output && out_len > 0) {
+        buf_puts(&u, ",\"content\":[{\"type\":\"content\","
+                      "\"content\":{\"type\":\"text\",\"text\":");
+        jb_str(&u, output, out_len);
+        buf_puts(&u, "}}]");
+    }
+    buf_putc(&u, '}');
     buf_putc(&u, 0);
     acp_send_session_notification(s->client_id, s->id, u.data);
     buf_free(&u);
@@ -649,7 +791,9 @@ static void *prompt_worker(void *arg)
     /* parse endpoint url */
     char *host = NULL, *path = NULL;
     int port = 80;
-    if (!cfg->endpoint_url || http_parse_url(cfg->endpoint_url, &host, &port, &path) < 0) {
+    int use_tls = 0;
+    if (!cfg->endpoint_url ||
+        http_parse_url(cfg->endpoint_url, &host, &port, &path, &use_tls) < 0) {
         acp_send_error(s->client_id, pa->id_raw, -32603, "Invalid endpoint_url");
         praxis_cfg_free(cfg);
         free(pa->prompt); free(pa->id_raw); free(pa);
@@ -714,7 +858,7 @@ static void *prompt_worker(void *arg)
         stream_ctx ctx = {0};
         ctx.sess = s;
 
-        int rc = http_post_sse(host, port, full_path, headers,
+        int rc = http_post_sse(host, port, use_tls, full_path, headers,
                                body.data, body.len,
                                on_sse_chunk, &ctx, &s->cancel);
         buf_free(&body);
@@ -759,16 +903,22 @@ static void *prompt_worker(void *arg)
 
             const char *cwd = cwd_extra && *cwd_extra ? cwd_extra : (s->cwd ? s->cwd : NULL);
 
+            //
+            // Emit a proper ACP tool_call session update for the
+            // invocation, run the command, then emit a tool_call_update
+            // with the captured output.
+            //
+
+            char tc_id[37];
+            uuid_v4(tc_id);
+            emit_tool_call(s, tc_id, cmd, args_json, alen);
+
             buf out = {0};
-            run_command(cmd, cwd, cmd_timeout, &s->cancel, &out);
+            int rc_cmd = run_command(cmd, cwd, cmd_timeout, &s->cancel, &out);
             buf_putc(&out, 0);
 
-            /* surface the call + result inline as chunks */
-            char banner[512];
-            int bn = snprintf(banner, sizeof(banner),
-                              "\n\n[run_command] %.300s\n", cmd);
-            if (bn > 0) emit_text(s, banner, (size_t)bn);
-            emit_text(s, out.data, strlen(out.data));
+            emit_tool_result(s, tc_id, rc_cmd == 0,
+                             out.data, out.data ? strlen(out.data) : 0);
 
             buf result_msg = {0};
             buf_puts(&result_msg, "Tool result for run_command:\n");
@@ -786,7 +936,19 @@ static void *prompt_worker(void *arg)
             continue;
         }
 
-        /* no tool call → final answer */
+        //
+        // No tool call → final answer. If we held back any tail of
+        // the stream (either because of a false-positive tool marker
+        // or because drain_stream paused on an undecided `{` that
+        // never resolved) flush it now so the user sees what the LLM
+        // actually produced.
+        //
+
+        if (ctx.streamed_len < full_len) {
+            send_agent_chunk(s, full + ctx.streamed_len,
+                             full_len - ctx.streamed_len);
+        }
+
         pthread_mutex_lock(&s->mu);
         msg_append(&s->messages, "assistant", full);
         pthread_mutex_unlock(&s->mu);

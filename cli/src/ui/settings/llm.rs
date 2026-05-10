@@ -17,7 +17,7 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     let on_model_def = state.selected < model_count;
     let mut header_spans = vec![Span::styled(
-        "# Model Definitions",
+        "Model Definitions",
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

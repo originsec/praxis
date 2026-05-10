@@ -13,11 +13,11 @@
  * notifications.
  *
  * Limitations:
- *   - HTTP only for the AI endpoint; TLS is not bundled in v1.
- *     Use a local OpenAI-compatible endpoint (e.g. an HTTP proxy in
- *     front of OpenAI, or a local llama.cpp/ollama server).
  *   - OpenAI-compatible chat-completions API only; no Anthropic or
  *     Gemini provider plumbing.
+ *
+ * TLS: BearSSL (vendored under vendor/) is statically linked. Trust
+ * anchors are generated at build time from the system CA bundle.
  */
 
 #ifndef TINY_H
@@ -205,16 +205,17 @@ void amqp_request_shutdown(amqp *c);
 /* http.c — minimal HTTP/1.1 client + SSE                           */
 /* ============================================================== */
 
-/* Parse url into host/port/path. Only http:// supported. Returns 0/-1.
- * Caller owns out_host/out_path (heap). */
-int  http_parse_url(const char *url, char **out_host, int *out_port, char **out_path);
+/* Parse url into host/port/path/use_tls. Both http:// and https:// are
+ * supported. Caller owns out_host/out_path (heap). Returns 0/-1. */
+int  http_parse_url(const char *url, char **out_host, int *out_port,
+                    char **out_path, int *out_use_tls);
 
 /* Send POST and stream back SSE chunks via on_chunk. headers is a
  * NULL-terminated array of "Key: value" strings.  Each "data:" line
  * payload is delivered to on_chunk. cancel is checked between reads;
  * if non-NULL and *cancel != 0, returns -2.  Returns 0 on clean stream
  * end, -1 on transport error, -2 on cancel. */
-int http_post_sse(const char *host, int port, const char *path,
+int http_post_sse(const char *host, int port, int use_tls, const char *path,
                   const char *const *headers,
                   const void *body, size_t body_len,
                   void (*on_chunk)(const char *data, size_t n, void *ud),

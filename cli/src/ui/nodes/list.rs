@@ -13,13 +13,14 @@ pub(super) fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
     let header = Row::new(vec![
         Cell::from(""),
         Cell::from("ID"),
-        Cell::from("Machine"),
+        Cell::from("MACHINE"),
         Cell::from("OS"),
-        Cell::from("Status"),
-        Cell::from("Agents"),
-        Cell::from("Type"),
+        Cell::from("STATUS"),
+        Cell::from("AGENTS"),
+        Cell::from("TYPE"),
     ])
-    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
 
     let rows: Vec<Row> = state
         .nodes
@@ -60,7 +61,7 @@ pub(super) fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
         Constraint::Length(8),
     ];
 
-    let block = crate::ui::common::focused_titled_panel(" Nodes ", !state.detail_focus);
+    let block = crate::ui::common::focused_panel(!state.detail_focus);
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)

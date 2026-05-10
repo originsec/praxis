@@ -394,7 +394,7 @@ fn group_detail_lines(
 
 fn section_heading(s: &str) -> Line<'static> {
     Line::from(Span::styled(
-        format!("# {}", s),
+        s.to_string(),
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),
