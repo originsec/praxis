@@ -474,7 +474,7 @@ impl App {
                 input::delete(&mut self.orchestrator.input, &self.orchestrator.cursor_pos);
             }
             KeyCode::Left => {
-                input::move_left(&mut self.orchestrator.cursor_pos);
+                input::move_left(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
             }
             KeyCode::Right => {
                 input::move_right(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);

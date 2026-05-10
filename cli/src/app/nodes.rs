@@ -519,8 +519,9 @@ impl App {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
                     if form.focused_field == AddRemoteNodeForm::KIND_FIELD {
                         form.kind_idx = (form.kind_idx + kinds_len - 1) % kinds_len;
-                    } else if let Some((_, cursor)) = form.active_pair_mut() {
-                        input::move_left(cursor);
+                    } else if let Some((text, cursor)) = form.active_pair_mut() {
+                        let text_clone = text.clone();
+                        input::move_left(&text_clone, cursor);
                     }
                 }
             }
@@ -1136,7 +1137,7 @@ impl App {
             }
             KeyCode::Left => {
                 if let Some(session) = self.nodes.active_session_mut() {
-                    input::move_left(&mut session.cursor_pos);
+                    input::move_left(&session.input, &mut session.cursor_pos);
                 }
             }
             KeyCode::Right => {

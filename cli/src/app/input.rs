@@ -1,6 +1,13 @@
+//
+// `cursor` is a byte offset into `text` (not a char count). All ops
+// here keep it on a UTF-8 char boundary so multibyte input — emoji,
+// CJK, accented letters — round-trips without panicking when the
+// caller later slices on the cursor position.
+//
+
 pub(crate) fn insert_char(text: &mut String, cursor: &mut usize, ch: char) {
     text.insert(*cursor, ch);
-    *cursor += 1;
+    *cursor += ch.len_utf8();
 }
 
 pub(crate) fn backspace(text: &mut String, cursor: &mut usize) -> bool {
@@ -8,8 +15,8 @@ pub(crate) fn backspace(text: &mut String, cursor: &mut usize) -> bool {
         return false;
     }
 
-    *cursor -= 1;
-    text.remove(*cursor);
+    let removed = text.remove(prev_char_boundary(text, *cursor));
+    *cursor -= removed.len_utf8();
     true
 }
 
@@ -22,16 +29,32 @@ pub(crate) fn delete(text: &mut String, cursor: &usize) -> bool {
     true
 }
 
-pub(crate) fn move_left(cursor: &mut usize) {
+pub(crate) fn move_left(text: &str, cursor: &mut usize) {
     if *cursor > 0 {
-        *cursor -= 1;
+        *cursor = prev_char_boundary(text, *cursor);
     }
 }
 
 pub(crate) fn move_right(text: &str, cursor: &mut usize) {
     if *cursor < text.len() {
-        *cursor += 1;
+        *cursor += text[*cursor..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
     }
+}
+
+//
+// Walk back from `pos` to the nearest preceding char boundary.
+//
+
+fn prev_char_boundary(text: &str, pos: usize) -> usize {
+    let mut p = pos.saturating_sub(1);
+    while p > 0 && !text.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
 }
 
 pub(crate) fn move_home(cursor: &mut usize) {

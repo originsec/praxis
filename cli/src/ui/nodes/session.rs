@@ -258,7 +258,14 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
                 .add_modifier(Modifier::ITALIC),
         ));
     } else {
-        let pos = session.cursor_pos;
+        //
+        // Snap the cursor to a char boundary so slicing through the
+        // middle of a multibyte sequence (emoji, etc.) doesn't panic.
+        //
+        let mut pos = session.cursor_pos.min(session.input.len());
+        while pos > 0 && !session.input.is_char_boundary(pos) {
+            pos -= 1;
+        }
         let before = &session.input[..pos];
         let after = &session.input[pos..];
         if !before.is_empty() {
@@ -283,7 +290,7 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
         Span::styled(" send", Style::default().fg(MUTED)),
         Span::raw("    "),
         Span::styled("^w", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" pause", Style::default().fg(MUTED)),
+        Span::styled(" suspend", Style::default().fg(MUTED)),
         Span::raw("    "),
         Span::styled("^c", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" close", Style::default().fg(MUTED)),
