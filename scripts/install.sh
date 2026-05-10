@@ -415,10 +415,10 @@ download_server_tarball_linux() {
     local asset="praxis-${version_num}-x86_64-linux.tar.gz"
     local url
     url=$(release_asset_url "$asset")
-    info "Downloading $asset..."
+    info "Downloading $asset..." >&2
     local archive="$out_dir/$asset"
-    download_to "$url" "$archive"
-    tar -xzf "$archive" -C "$out_dir" \
+    download_to "$url" "$archive" >&2
+    tar -xzf "$archive" -C "$out_dir" >&2 \
         || error "Failed to extract $asset"
     rm -f "$archive"
     local extracted="$out_dir/praxis-${version_num}-x86_64-linux"
