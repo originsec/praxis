@@ -9,7 +9,7 @@ praxis/
 ├── common/              # Shared types and utilities
 ├── node/                # Node component (runs on targets)
 ├── service/             # Service component (backend)
-├── web/                 # Web component (frontend + server)
+├── cli/                 # CLI / TUI (first-party client)
 ├── semantic_parser/     # LLM-based text parsing library
 ├── docs/                # This documentation
 ├── .github/             # CI/CD workflows
@@ -63,22 +63,20 @@ service/src/
 └── config/              # Service configuration
 ```
 
-### Web (`web/`)
+### CLI (`cli/`)
 
-The frontend and HTTP/WebSocket server:
-- React SPA frontend
-- Axum HTTP server
-- WebSocket handler
-- RabbitMQ bridge
+The first-party Praxis client:
+- Interactive terminal UI (Ratatui)
+- Non-interactive subcommands for scripting
+- ACP bridge mode (stdin/stdout) for external tooling
+- RabbitMQ-based connection to the service
 
 ```
-web/
-├── src/                 # Rust backend
-└── frontend/            # React frontend
-    └── src/
-        ├── components/
-        ├── pages/
-        └── context/
+cli/
+└── src/
+    ├── app/             # TUI windows (orchestrator, nodes, intercept, ...)
+    ├── components/      # Shared widgets
+    └── main.rs          # Entry point
 ```
 
 ### Semantic Parser (`semantic_parser/`)
@@ -94,12 +92,12 @@ See [Semantic Parser](semantic-parser.md) for details.
 
 ### Setup
 
-1. Install Rust and Node.js
+1. Install Rust
 2. Start RabbitMQ: `docker compose up rabbitmq`
 3. Build: `cargo build`
 4. Run service: `cargo run --bin praxis_service`
-5. Run web: `cargo run --bin praxis_web`
-6. Run node: `cargo run --bin praxis_node`
+5. Run node: `cargo run --bin praxis_node`
+6. Run TUI: `cargo run --bin praxis_cli`
 
 ### Environment Variables for Development
 
@@ -127,24 +125,14 @@ See [Semantic Parser](semantic-parser.md) for details.
 
 ### Adding Agent Connectors
 
-See [Adding New Connectors](../connectors/adding-new.md). Prefer Lua-based connectors for CLI agents — they can be developed and tested at runtime via the web UI without recompiling.
+See [Adding New Connectors](../connectors/adding-new.md). Prefer Lua-based connectors for CLI agents — they can be developed and tested at runtime via the TUI's Settings → Agents tab without recompiling.
 
 Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. Shared libraries are at `node/src/agent_connectors/lua/lib/` (`helpers.lua` for common utilities, `devtools.lua` for CDP/DevTools support).
 
 ### Adding Operations
 
-Operations are JSON definitions. Add to the library via the web UI or directly to the database.
-
-### Frontend Development
-
-For hot reload:
-
-```bash
-cd web/frontend
-npm run dev
-```
-
-The dev server proxies API requests to the running web component.
+Operations are JSON definitions. Add to the library via the TUI's
+Operations window (`Ctrl+P`) or directly to the database.
 
 ## Testing
 

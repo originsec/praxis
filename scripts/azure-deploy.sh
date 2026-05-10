@@ -497,8 +497,6 @@ deploy_praxis() {
             --registry-server "$ACR_LOGIN_SERVER" \
             --registry-username "$ACR_NAME" \
             --registry-password "$ACR_PASSWORD" \
-            --target-port 8080 \
-            --ingress external \
             --cpu 1 \
             --memory 2Gi \
             --min-replicas 1 \
@@ -520,12 +518,6 @@ print_summary() {
     #
     # Resource names from compute_unique_names().
     #
-    PRAXIS_FQDN=$(az containerapp show \
-        --name "$PRAXIS_APP" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query 'properties.configuration.ingress.fqdn' \
-        --output tsv)
-
     RABBITMQ_FQDN=$(az container show \
         --name "$RABBITMQ_APP" \
         --resource-group "$RESOURCE_GROUP" \
@@ -549,9 +541,6 @@ print_summary() {
     echo "  Deployment Complete!"
     echo "=============================================="
     echo -e "${NC}"
-    echo -e "${CYAN}Praxis Web UI (External HTTPS):${NC}"
-    echo "  URL: https://${PRAXIS_FQDN}"
-    echo ""
     echo -e "${CYAN}PostgreSQL Database:${NC}"
     echo "  Host: ${POSTGRES_HOST}"
     echo "  Database: ${POSTGRES_DB}"
@@ -572,7 +561,6 @@ print_summary() {
     echo ""
     echo -e "${CYAN}Management Commands:${NC}"
     echo "  az containerapp logs show -n $PRAXIS_APP -g $RESOURCE_GROUP --follow"
-    echo "  az containerapp browse -n $PRAXIS_APP -g $RESOURCE_GROUP"
     echo "  az container logs --name $RABBITMQ_APP -g $RESOURCE_GROUP --follow"
     echo ""
 }

@@ -41,7 +41,7 @@ Cursor uses HTTP/2 with gRPC for its streaming API (e.g., `/agent.v1.AgentServic
 - **Stream tracking**: Extracts `:path` from HPACK headers for URL context
 - **Bidirectional**: Both request and response frames are captured
 
-In the web UI, HTTP/2 traffic appears grouped by URL (similar to WebSocket), with individual frames expandable to view payloads.
+In the praxis TUI's Intercept window, HTTP/2 traffic appears grouped by URL (similar to WebSocket), with individual frames expandable to view payloads.
 
 ## Session Management
 
@@ -68,7 +68,7 @@ When creating a session, you can specify:
 
 **YOLO Mode** - When enabled, tool permission requests are auto-approved.
 
-**Interactive Mode** - When set (TUI or web sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
+**Interactive Mode** - When set (TUI sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
 
 ### Session Creation
 

@@ -41,7 +41,6 @@
 - [Overview](./architecture/overview.md)
 - [Node](./architecture/node.md)
 - [Service](./architecture/service.md)
-- [Web](./architecture/web.md)
 
 # Deployment
 

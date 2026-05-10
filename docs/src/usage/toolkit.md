@@ -1,24 +1,18 @@
 # Toolkit
 
-The Toolkit provides a library of built-in offensive operations that run directly against target agents. Each tool is a self-contained operation with its own configuration and execution logic, managed through the **Toolkit** page in the web UI.
+The Toolkit provides a library of built-in offensive operations that run directly against target agents. Each tool is a self-contained operation with its own configuration and execution logic, registered in the service.
 
-## Accessing the Toolkit
+## Invoking Tools
 
-Go to **Toolkit** in the sidebar. The page lists all available tools with their descriptions and configuration options.
+Toolkit tools are surfaced through:
 
-## Running a Tool
+- **Chains** — Tool elements in chain definitions invoke registered toolkit tools as part of a workflow.
+- **MCP Server** — toolkit tools are exposed as MCP tools for external AI agents and the built-in Orchestrator.
 
-1. Select a tool from the list
-2. Configure any required parameters
-3. Select the target node and agent
-4. Click **Run**
+## Action Log
 
-Execution results appear inline on the Toolkit page.
+Toolkit executions are recorded in the `ToolkitActionsLog` table and can be queried from the TUI's **Log Query** window (`Ctrl+G`). See [Log Query](./log-query.md).
 
 ## Chain Integration
 
-Toolkit operations can be used as elements in operation chains. When building a chain, toolkit operations are available from the element palette alongside standard operations. This allows you to compose toolkit operations with transforms, memory, and other chain elements into automated workflows.
-
-## Managing Tools
-
-Tools are managed at the service level. The Toolkit page provides full CRUD access — you can view, configure, and execute tools from a single interface.
+Toolkit operations can be used as elements in operation chains. This allows you to compose toolkit operations with transforms, memory, and other chain elements into automated workflows.

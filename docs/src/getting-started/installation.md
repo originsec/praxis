@@ -108,7 +108,7 @@ The installer creates the `praxis` RabbitMQ user and grants it permissions autom
 - `/var/lib/praxis/` — data directory (SQLite database lives here by default)
 - A dedicated `praxis` system user runs the service
 
-The web UI is **not** installed by either the script or the docker image — manage and use Praxis through the `praxis` TUI.
+Manage and use Praxis through the `praxis` TUI — it's the only first-party supported client.
 
 ### What docker install lays down
 
@@ -117,7 +117,7 @@ The repo is cloned into `~/.praxis-docker`. `docker compose` brings up two servi
 - **rabbitmq** — `rabbitmq:3-management` with the `praxis` user pre-created
 - **praxis** — Praxis container running systemd as PID 1; `praxisctl` works inside the container
 
-The MCP server and Claude bridges are exposed on ports 8585, 8586, and 8587. There is no web UI in the docker image.
+The MCP server and Claude bridges are exposed on ports 8585, 8586, and 8587.
 
 ### Removing
 

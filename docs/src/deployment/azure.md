@@ -60,8 +60,7 @@ The script will:
 ### 3. Access Your Deployment
 
 After deployment completes, you'll receive URLs for:
-- **Web Interface (HTTPS)**: `https://praxis-app.{region}.azurecontainerapps.io`
-- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{hash}.{region}.azurecontainer.io:5672`
+- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{hash}.{region}.azurecontainer.io:5672` — point your `praxis` TUI at this with `--rabbitmq` or `PRAXIS_RABBITMQ_URL`
 - **RabbitMQ Management UI**: `http://praxis-rabbitmq-{hash}.{region}.azurecontainer.io:15672`
 
 ## Script Commands
@@ -149,9 +148,6 @@ az containerapp logs show -n praxis-app -g praxis-rg --follow
 # View RabbitMQ logs
 az container logs --name praxis-rabbitmq -g praxis-rg --follow
 
-# Open Praxis in browser
-az containerapp browse -n praxis-app -g praxis-rg
-
 # Restart RabbitMQ
 az container restart --name praxis-rabbitmq -g praxis-rg
 ```
@@ -175,33 +171,13 @@ az postgres flexible-server show -n <server-name> -g praxis-rg --query state
 
 ## Security Best Practices
 
-> **Warning**: The Praxis web interface has no built-in authentication or access control. Anyone who can reach the URL can access and control your Praxis deployment. You must implement access protection at the network or gateway level.
+> **Warning**: Praxis has no built-in authentication or access control. Anyone who can reach the RabbitMQ endpoint can drive the deployment. You must protect access at the network or transport level.
 
-### Protecting the Web Interface
+### Protecting the RabbitMQ Endpoint
 
-Since Praxis does not provide its own authentication, use one of these Azure-native approaches:
-
-**Azure AD Easy Auth (Recommended)**
-
-Container Apps support built-in authentication. Enable it via the Azure Portal or CLI:
-
-```bash
-az containerapp auth update \
-  -n praxis-app \
-  -g praxis-rg \
-  --unauthenticated-client-action RedirectToLoginPage \
-  --set-provider-aad \
-  --client-id <your-app-registration-client-id> \
-  --issuer "https://login.microsoftonline.com/<your-tenant-id>/v2.0"
-```
-
-This requires users to authenticate with Azure AD before accessing Praxis.
-
-**Other Options**
-
-- **VNet Integration** - Restrict to internal network only, access via VPN or Azure Bastion
-- **IP Allowlisting** - Use Container Apps ingress access restrictions to allow specific IPs
-- **Azure Front Door with WAF** - For production: WAF protection, DDoS mitigation, geo-restrictions
+- **VNet Integration** — keep RabbitMQ on an internal network and reach it via VPN or Azure Bastion.
+- **IP Allowlisting** — restrict the RabbitMQ Container Instance's public IP to known operator IPs.
+- **TLS / strong credentials** — change the default `praxis:praxis` credentials and front RabbitMQ with TLS.
 
 ### Other Security Recommendations
 

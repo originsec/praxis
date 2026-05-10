@@ -4,10 +4,11 @@ The Praxis CLI (`praxis_cli`) provides both an interactive terminal UI and a non
 
 ## Purpose
 
-The CLI is the primary terminal interface for Praxis. It provides:
+The CLI is the **first-party** and only first-class supported client for
+Praxis. It provides:
 - Full-featured interactive terminal UI for hands-on control
 - Non-interactive commands for scripting and automation
-- Headless environments without browser access
+- Works equally well over SSH and in headless environments
 
 ## Installation
 
@@ -70,8 +71,8 @@ sessions left alive from previous runs or other clients.
 #### Recon Overlay
 
 The recon overlay opens as a full-screen modal from the Nodes detail
-pane. It shows the same data as the web UI ReconModal — config files,
-tools, and sessions — in a tabbed terminal interface.
+pane. It shows config files, tools, and sessions in a tabbed terminal
+interface.
 
 | Key | Action |
 |-----|--------|
@@ -199,7 +200,7 @@ Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 
 - **Executions** — live tracking of running/queued/completed operations and chains with duration timers
 - **Library** — browse operation and chain definitions with search filtering and detail view
-- **Triggers** — automated chain firing rules, same feature set as the web UI
+- **Triggers** — automated chain firing rules
 
 Common actions:
 - Create new operations inline

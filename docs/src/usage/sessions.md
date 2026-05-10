@@ -4,20 +4,20 @@ Sessions let you interact with AI agents in real-time. When you create a session
 
 ## Creating a Session
 
-From the agent detail page:
+From the **Nodes** window (`Ctrl+L`) in the praxis TUI, with an agent
+selected:
 
-1. Click **Create Session**
-2. Optionally enable **YOLO Mode**
+1. Open a session chat
+2. Optionally enable **YOLO Mode** and pick a working directory
 3. Wait for the session to initialize
 
-The agent process starts on the target node with a PTY attached. You'll see a session indicator once it's ready.
+The agent process starts on the target node with a PTY attached.
 
 ## Session Interface
 
-The session panel shows a conversation view:
+The chat view shows a conversation:
 
-- **Your messages** appear on one side
-- **Agent responses** appear on the other
+- Your messages and agent responses interleave in the transcript
 - Responses are rendered as markdown with syntax highlighting
 
 Type in the input field and press Enter to send a prompt.
@@ -44,9 +44,9 @@ Sessions can be created with context:
 
 ## What Happens During a Session
 
-Clients (CLI, web, external ACP tools) never talk to the node directly.
-Each prompt is an [Agent Client Protocol](https://agentclientprotocol.com/)
-(ACP) JSON-RPC frame that travels CLI/Web → RabbitMQ → service → RabbitMQ
+Clients (the praxis TUI, external ACP tools) never talk to the node
+directly. Each prompt is an [Agent Client Protocol](https://agentclientprotocol.com/)
+(ACP) JSON-RPC frame that travels client → RabbitMQ → service → RabbitMQ
 → node. The node runs a single ACP server that multiplexes all its
 connectors; the target connector is selected per-session via
 `_meta.praxis.connector` on `session/new`, and subsequent frames for the
@@ -78,8 +78,8 @@ transport, `session/update` notifications relay:
 - **Token usage** — prompt/completion token counts updated in real time
 
 Cancellation goes through `session/cancel` (a JSON-RPC notification, no
-response) — Ctrl+C in the TUI or the Cancel button in the web UI sends
-it. The in-flight `session/prompt` then resolves with
+response) — Ctrl+C in the TUI sends it. The in-flight `session/prompt`
+then resolves with
 `stopReason: "cancelled"` and any partial output is preserved in the
 conversation history.
 
@@ -91,22 +91,21 @@ sessions, and external ACP bridges — are prefixed by caller type so a
 client can filter the orchestrator session list to its own entries:
 
 - `CLI_` — created by the TUI's orchestrator
-- `WEB_` — created by the web UI's orchestrator
 - `ACP_` — created by an external ACP client
 
 ## Session Messages
 
-The UI tracks messages per session:
+The TUI tracks messages per session:
 
 - Messages persist while the session is active
 - Conversation history shows the full exchange
-- You can export the session transcript
+- You can save a transcript with `Ctrl+Alt+W`
 
 ## Ending a Session
 
-Click **Close Session** (web), or use Ctrl+C / `d` on the sessions list
-(TUI) to terminate. This sends `session/close` to the node, which drops
-the per-session Lua VM and any owned subprocess. Only the targeted
+Press Ctrl+C in a chat view (when idle) or `d` on the Active Sessions
+overlay to terminate. This sends `session/close` to the node, which
+drops the per-session Lua VM and any owned subprocess. Only the targeted
 session is affected — any other live sessions on the same connector keep
 running.
 
@@ -140,13 +139,12 @@ state shared between sessions even when they target the same connector.
 
 ### Listing and resuming
 
-The clients refresh their view of live sessions by calling `session/list`
-on each connected node. The CLI does this on first connect, when you
-open the Nodes window (`Ctrl+L`), and ~1.5s after a node reset; the web
-UI does it when a node card mounts and again whenever the node reports a
-new `last_update`. Any server-side sessions the client hadn't yet seen —
-for example a session left alive across a CLI restart — are merged into
-the local sessions list and become resumable.
+The TUI refreshes its view of live sessions by calling `session/list` on
+each connected node. It does this on first connect, when you open the
+Nodes window (`Ctrl+L`), and ~1.5s after a node reset. Any server-side
+sessions the TUI hadn't yet seen — for example a session left alive
+across a TUI restart — are merged into the local sessions list and
+become resumable.
 
 ### In the TUI
 
@@ -165,15 +163,6 @@ overlay). `Ctrl+C` cancels the in-flight prompt when the agent is
 working, and closes the session when the agent is idle. The status bar
 shows an `N sessions` counter when any concurrent sessions are live.
 
-### In the web UI
-
-Each node card has a **Sessions** panel listing every ACP session the web
-client knows about for that node. Hover actions let you resume (open the
-agent modal) or discard (send `session/close`) a session. Multiple agent
-session modals can be open side-by-side on the same node card — one per
-connector — so you can drive Claude Code, Codex, and Cursor sessions in
-parallel from a single node.
-
 ## Troubleshooting
 
 ### Session won't create
@@ -185,8 +174,8 @@ parallel from a single node.
 ### Messages not appearing
 
 - Ensure the session is active (check the indicator)
-- Try refreshing the page
-- Check WebSocket connection status
+- Try toggling away and back to the chat view
+- Check the TUI's RabbitMQ connection status (`praxis --status`)
 
 ### Session hangs
 

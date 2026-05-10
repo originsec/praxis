@@ -2,13 +2,13 @@
 
 This guide walks through creating a connector for a new AI agent.
 
-**Prefer Lua connectors** for all agents. Lua scripts are easier to write, can be updated at runtime via the web UI without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. For browser-based agents, the `praxis.devtools` Lua library and `praxis.cdp_*` native API provide Chrome DevTools Protocol support (see M365 Copilot as an example). Use Rust connectors only when you need OS-level capabilities that aren't exposed through the Lua API.
+**Prefer Lua connectors** for all agents. Lua scripts are easier to write, can be updated at runtime via the praxis TUI's Settings → Agents tab without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. For browser-based agents, the `praxis.devtools` Lua library and `praxis.cdp_*` native API provide Chrome DevTools Protocol support (see M365 Copilot as an example). Use Rust connectors only when you need OS-level capabilities that aren't exposed through the Lua API.
 
 ## Lua Connector (Recommended)
 
-Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. They can also be uploaded via the web UI (Settings > Agents).
+Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. They can also be uploaded via the praxis TUI's **Settings → Agents** tab.
 
-> **Tip**: Scripts uploaded or created through the web UI are tagged as user scripts and won't be overwritten by Praxis updates. If you want to customize a built-in script, create a copy with your changes and disable the original.
+> **Tip**: Scripts uploaded or created through the TUI are tagged as user scripts and won't be overwritten by Praxis updates. If you want to customize a built-in script, create a copy with your changes and disable the original.
 
 ### CLI Agents vs Browser-Based Agents
 
@@ -174,7 +174,7 @@ The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transa
 ### Deploying
 
 - **Embedded**: Add the `.lua` file to `agents/` and rebuild. It will be compiled into both node and service binaries.
-- **Runtime**: Upload via Settings > Agents in the web UI. The script is stored in the service database and pushed to all connected nodes.
+- **Runtime**: Upload via the praxis TUI's **Settings → Agents** tab. The script is stored in the service database and pushed to all connected nodes.
 
 ---
 
@@ -235,7 +235,7 @@ session_close = function(_ctx, state)
 end,
 ```
 
-During `acp_prompt`, streaming updates (text, tool calls, tool results) are automatically forwarded to the client (TUI or web UI) in real time. The function blocks until the full response is assembled and returns the final text.
+During `acp_prompt`, streaming updates (text, tool calls, tool results) are automatically forwarded to the client (the praxis TUI) in real time. The function blocks until the full response is assembled and returns the final text.
 
 ---
 
@@ -685,7 +685,7 @@ Domains and URL filters live as **intercept targets** in the service
 database and are pushed to nodes at runtime. To enable capture for a
 new connector:
 
-1. Open **Settings → Intercept** in the web UI or TUI.
+1. Open **Settings → Intercept** in the praxis TUI.
 2. Click **Add intercept target**.
 3. Set `agent_short_name` to the connector's short name (e.g.
    `exampleai`), list the domains to capture, and optionally set a

@@ -62,10 +62,11 @@ trait AgentRecon {
 ```
 
 Traffic interception is no longer per-agent. The set of domains and URL
-filters captured by the proxy is configured centrally in **Settings →
-Intercept** (web/TUI) and pushed to nodes by the service. Connectors do
-not declare intercept domains; they only need to declare a `short_name`
-which intercept targets can reference for traffic attribution.
+filters captured by the proxy is configured centrally in the praxis TUI
+under **Settings → Intercept**, and pushed to nodes by the service.
+Connectors do not declare intercept domains; they only need to declare a
+`short_name` which intercept targets can reference for traffic
+attribution.
 
 ## Feature Support
 
@@ -90,9 +91,9 @@ When Praxis is upgraded to a newer version, built-in scripts are automatically u
 
 ### Built-in vs User Scripts
 
-Scripts are tagged as either **built-in** or **user**. Built-in scripts ship with Praxis and are automatically updated when the service version changes. User scripts are created through the web UI or uploaded manually and are never overwritten by updates.
+Scripts are tagged as either **built-in** or **user**. Built-in scripts ship with Praxis and are automatically updated when the service version changes. User scripts are created through the praxis TUI's **Settings → Agents** tab or uploaded manually and are never overwritten by updates.
 
-Built-in scripts show a "builtin" badge in the web UI script list.
+Built-in scripts show a "builtin" badge in the script list.
 
 > **Note**: If you need to customize a built-in script, the recommended approach is to:
 > 1. Create a new script with your modifications (Settings > Agents > Upload or create new)
@@ -111,7 +112,7 @@ Scripts can be individually enabled or disabled via the toggle icon in the scrip
 
 ### Managing Scripts
 
-Lua agent scripts can be managed through the **Agents** tab in the Settings page of the web UI. From there you can:
+Lua agent scripts can be managed through the **Agents** tab in the praxis TUI's **Settings** page (`Ctrl+S`). From there you can:
 
 - View and edit existing scripts
 - Upload new `.lua` scripts
@@ -134,11 +135,11 @@ For Rust connectors, the basic process is:
 6. Implement session management
 7. Register in the factory
 
-For Lua connectors, add a `.lua` file to the `agents/` directory or upload it through the web UI.
+For Lua connectors, add a `.lua` file to the `agents/` directory or upload it through the praxis TUI's **Settings → Agents** tab.
 
 ## Connector Selection
 
-When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service. Agent version is also extracted and displayed in the web UI.
+When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service. Agent version is also extracted and displayed in the praxis TUI.
 
 Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
