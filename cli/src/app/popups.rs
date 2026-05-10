@@ -274,6 +274,11 @@ impl App {
     pub(crate) fn open_command_palette(&mut self) {
         let commands = vec![
             PopupItem {
+                label: "clear".to_string(),
+                value: "clear".to_string(),
+                description: "Clear the current orchestrator session".to_string(),
+            },
+            PopupItem {
                 label: "model".to_string(),
                 value: "model".to_string(),
                 description: "Select orchestrator model".to_string(),

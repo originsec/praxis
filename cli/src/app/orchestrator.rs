@@ -227,6 +227,37 @@ impl App {
         let _ = crate::session_store::save(stored);
     }
 
+    //
+    // Reset the orchestrator: close any live service session, drop the
+    // local transcript, delete the on-disk record, and start a fresh
+    // empty session.
+    //
+
+    pub(crate) async fn clear_orchestrator_session(&mut self) {
+        let active_sid = self
+            .orchestrator
+            .active_session()
+            .map(|s| s.session_id.clone())
+            .filter(|s| !s.is_empty());
+        if let Some(sid) = active_sid {
+            let _ = self.acp.close_session(&sid).await;
+        }
+
+        if let Some(stored) = self.orchestrator.stored.take() {
+            if let Ok(path) = crate::session_store::session_path(&stored.session_id) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        self.orchestrator.sessions.clear();
+        self.orchestrator.active_session_index = None;
+        self.orchestrator.pending_history = None;
+        self.orchestrator.pending_seed_messages = None;
+        self.orchestrator.pending_prompt = None;
+
+        self.create_new_orchestrator_session().await;
+    }
+
     pub(crate) async fn create_new_orchestrator_session(&mut self) {
         let history = self.orchestrator.pending_history.take().unwrap_or_default();
         if let Err(e) = self.acp.create_session(".", None, history).await {
@@ -481,6 +512,9 @@ impl App {
         let cmd = input.trim_start_matches('/').trim();
 
         match cmd {
+            "clear" => {
+                self.clear_orchestrator_session().await;
+            }
             "model" => {
                 self.open_model_select().await;
             }
