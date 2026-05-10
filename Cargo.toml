@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["cli", "common", "node", "semantic_parser", "service"]
+members = ["cli", "common", "node", "node_tiny", "semantic_parser", "service"]
 exclude = ["web"]
 
 [workspace.package]

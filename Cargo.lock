@@ -3565,6 +3565,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis_node_tiny"
+version = "0.9.23"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "futures",
+ "lapin",
+ "nix 0.31.2",
+ "once_cell",
+ "praxis_common",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows",
+]
+
+[[package]]
 name = "praxis_service"
 version = "0.9.23"
 dependencies = [

@@ -610,7 +610,7 @@ install_service_native() {
     # are not part of the tarball.
     #
 
-    local svc_path node_path
+    local svc_path node_path tiny_path
     local tarball_dir=""
     if svc_path=$(get_local_binary "praxis_service") && \
        node_path=$(get_local_binary "praxis_node"); then
@@ -618,14 +618,17 @@ install_service_native() {
         mkdir -p "$tmproot/bin"
         cp "$svc_path" "$tmproot/bin/praxis_service"
         cp "$node_path" "$tmproot/bin/praxis_node"
+        if tiny_path=$(get_local_binary "praxis_node_tiny"); then
+            cp "$tiny_path" "$tmproot/bin/praxis_node_tiny"
+        fi
     elif (( BUILD_FROM_SOURCE )); then
         has_cmd git || error "git not found. Please install git."
         check_rust
-        info "Building praxis_service and praxis_node..."
+        info "Building praxis_service, praxis_node, and praxis_node_tiny..."
         local cargo_log="$tmproot/cargo.log"
         if ! run_with_progress_bar "$cargo_log" \
                 cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" \
-                praxis_service praxis_node; then
+                praxis_service praxis_node praxis_node_tiny; then
             echo ""
             warn "Build output follows (last 50 lines):"
             tail -n 50 "$cargo_log"
@@ -635,8 +638,11 @@ install_service_native() {
     else
         tarball_dir=$(download_server_tarball_linux "$tmproot")
         mkdir -p "$tmproot/bin"
-        cp "$tarball_dir/praxis_service" "$tmproot/bin/praxis_service"
-        cp "$tarball_dir/praxis_node"    "$tmproot/bin/praxis_node"
+        cp "$tarball_dir/praxis_service"   "$tmproot/bin/praxis_service"
+        cp "$tarball_dir/praxis_node"      "$tmproot/bin/praxis_node"
+        if [[ -f "$tarball_dir/praxis_node_tiny" ]]; then
+            cp "$tarball_dir/praxis_node_tiny" "$tmproot/bin/praxis_node_tiny"
+        fi
         success "Downloaded service binaries"
     fi
 
@@ -654,6 +660,9 @@ install_service_native() {
 
     $SUDO install -m 0755 "$tmproot/bin/praxis_service" "$INSTALL_BIN/praxis_service"
     $SUDO install -m 0755 "$tmproot/bin/praxis_node"    "$INSTALL_SHARE/nodes/praxis_node_linux"
+    if [[ -f "$tmproot/bin/praxis_node_tiny" ]]; then
+        $SUDO install -m 0755 "$tmproot/bin/praxis_node_tiny" "$INSTALL_SHARE/nodes/praxis_node_tiny_linux"
+    fi
 
     if (( WITH_WIN_NODE )); then
         local win_local=""
@@ -674,6 +683,29 @@ install_service_native() {
                 "$tmproot/bin/praxis_node.exe"
         fi
         $SUDO install -m 0755 "$tmproot/bin/praxis_node.exe" "$INSTALL_SHARE/nodes/praxis_node_windows.exe"
+
+        #
+        # Tiny windows node, mirrored from whichever source supplied the
+        # full windows node. Optional — if it can't be located we just
+        # skip it so the existing --with-win-node flow still succeeds.
+        #
+        local win_tiny_local=""
+        if [[ -n "$script_dir" && -f "$script_dir/../target/x86_64-pc-windows-gnu/release/praxis_node_tiny.exe" ]]; then
+            win_tiny_local="$script_dir/../target/x86_64-pc-windows-gnu/release/praxis_node_tiny.exe"
+        fi
+        if [[ -n "$win_tiny_local" ]]; then
+            cp "$win_tiny_local" "$tmproot/bin/praxis_node_tiny.exe"
+        elif [[ -n "$tarball_dir" && -f "$tarball_dir/praxis_node_tiny_windows.exe" ]]; then
+            cp "$tarball_dir/praxis_node_tiny_windows.exe" "$tmproot/bin/praxis_node_tiny.exe"
+        elif ! (( BUILD_FROM_SOURCE )); then
+            info "Downloading praxis_node_tiny-windows-x86_64.exe..."
+            download_to "$(release_asset_url praxis_node_tiny-windows-x86_64.exe)" \
+                "$tmproot/bin/praxis_node_tiny.exe" || true
+        fi
+        if [[ -f "$tmproot/bin/praxis_node_tiny.exe" ]]; then
+            $SUDO install -m 0755 "$tmproot/bin/praxis_node_tiny.exe" \
+                "$INSTALL_SHARE/nodes/praxis_node_tiny_windows.exe"
+        fi
     fi
 
     info "Fetching unit files and praxisctl..."
@@ -736,8 +768,14 @@ print_native_summary() {
     printf "  %bConfig${NC}      /etc/praxis/env\n" "${BOLD}"
     printf "  %bData${NC}        /var/lib/praxis\n" "${BOLD}"
     printf "  %bNode binary${NC} %s/nodes/praxis_node_linux\n" "${BOLD}" "$INSTALL_SHARE"
+    if [[ -f "$INSTALL_SHARE/nodes/praxis_node_tiny_linux" ]]; then
+        printf "  %b           ${NC} %s/nodes/praxis_node_tiny_linux\n" "${BOLD}" "$INSTALL_SHARE"
+    fi
     if (( WITH_WIN_NODE )); then
         printf "  %b           ${NC} %s/nodes/praxis_node_windows.exe\n" "${BOLD}" "$INSTALL_SHARE"
+        if [[ -f "$INSTALL_SHARE/nodes/praxis_node_tiny_windows.exe" ]]; then
+            printf "  %b           ${NC} %s/nodes/praxis_node_tiny_windows.exe\n" "${BOLD}" "$INSTALL_SHARE"
+        fi
     fi
     echo
     printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
