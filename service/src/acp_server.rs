@@ -10,7 +10,6 @@ use acp::JsonRpcMessage;
 use acp::schema::{
     CancelNotification, ClientNotification, ClientRequest, CloseSessionRequest,
     CloseSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, SessionNotification,
 };
 use common::ClientDirectMessage;
@@ -240,30 +239,6 @@ impl AcpServer {
                 self.handle_session_prompt(client_id, id, req, publish_channel).await;
             }
 
-            ClientRequest::LoadSessionRequest(req) => {
-                self.handle_session_load(client_id, id, req, publish_channel).await;
-            }
-
-            ClientRequest::ListSessionsRequest(req) => {
-                let resp = self.handle_session_list(req).await;
-                if let Some(id) = id {
-                    match resp {
-                        Ok(r) => {
-                            let _ = send_to_client(
-                                publish_channel, client_id,
-                                acp_response(id, serde_json::to_value(r).unwrap()),
-                            ).await;
-                        }
-                        Err(e) => {
-                            let _ = send_to_client(
-                                publish_channel, client_id,
-                                acp_error_response(id, i32::from(e.code) as i64, &e.message),
-                            ).await;
-                        }
-                    }
-                }
-            }
-
             ClientRequest::CloseSessionRequest(req) => {
                 self.handle_session_close(client_id, id, req, publish_channel).await;
             }
@@ -397,6 +372,26 @@ impl AcpServer {
         let model_ref = meta_val.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         //
+        // Optional client-supplied conversation history for resume. The
+        // service holds no orchestrator state across sessions; callers
+        // resuming from local storage pass prior turns here so the
+        // model has context.
+        //
+        let history: Vec<(String, String)> = meta_val
+            .get("history")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| {
+                        let role = entry.get("role").and_then(|r| r.as_str())?;
+                        let text = entry.get("text").and_then(|t| t.as_str())?;
+                        Some((role.to_string(), text.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        //
         // Resolve the model definition for the response _meta.
         //
 
@@ -410,7 +405,7 @@ impl AcpServer {
         drop(config);
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, Some(&session_id), model_ref.as_deref(), &self.service_config, publish_channel)
+            .create_session(client_id, &session_id, model_ref.as_deref(), history, &self.service_config, publish_channel)
             .await;
 
         if let Some(id) = id {
@@ -427,82 +422,6 @@ impl AcpServer {
                 acp_response(id, serde_json::to_value(resp).unwrap()),
             ).await;
         }
-    }
-
-    async fn handle_session_load(
-        &self,
-        client_id: &str,
-        id: Option<Value>,
-        req: LoadSessionRequest,
-        publish_channel: &Channel,
-    ) {
-        let session_id = req.session_id.to_string();
-
-        if session_id.is_empty() {
-            if let Some(id) = id {
-                let _ = send_to_client(
-                    publish_channel,
-                    client_id,
-                    acp_error_response(id, -32602, "Missing sessionId"),
-                ).await;
-            }
-            return;
-        }
-
-        //
-        // Replay the event log as ACP messages.
-        //
-
-        let events = self.orchestrator_manager.get_event_log(&session_id).await;
-        for json_rpc in &events {
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                ClientDirectMessage::AcpMessage { json_rpc: json_rpc.clone() },
-            ).await;
-        }
-
-        if let Some(id) = id {
-            //
-            // Mirror handle_session_new: include the orchestrator's
-            // current model state so the client UI can render the
-            // model name on resumed sessions instead of stalling at
-            // "Connecting...".
-            //
-            let config = self.service_config.read().await;
-            let model_def = config.get_orchestrator_model_def();
-            let (provider, model_name) = model_def
-                .map(|d| (d.provider.clone(), d.model.clone()))
-                .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
-            drop(config);
-            let model_id = format!("{}/{}", provider, model_name);
-            let model_state = acp::schema::SessionModelState::new(
-                model_id.clone(),
-                vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
-            );
-
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_response(id, serde_json::to_value(
-                    LoadSessionResponse::new()
-                        .models(model_state)
-                        .meta(serde_json::from_value::<acp::schema::Meta>(json!({
-                            "loaded": true,
-                            "eventCount": events.len(),
-                        })).unwrap())
-                ).unwrap()),
-            ).await;
-        }
-    }
-
-    async fn handle_session_list(&self, _req: ListSessionsRequest) -> acp::Result<ListSessionsResponse> {
-        let session_list = self.orchestrator_manager.list_sessions().await;
-        let sessions: Vec<acp::schema::SessionInfo> = session_list.into_iter()
-            .map(|(sid, name)| acp::schema::SessionInfo::new(sid, ".").title(name))
-            .collect();
-
-        Ok(ListSessionsResponse::new(sessions))
     }
 
     async fn handle_session_close(

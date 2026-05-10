@@ -1,8 +1,7 @@
 use agent_client_protocol as acp;
 use acp::schema::{
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, Implementation,
-    InitializeRequest, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, Meta, NewSessionRequest, NewSessionResponse,
+    InitializeRequest, Meta, NewSessionRequest, NewSessionResponse,
     PlanEntryStatus, PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionId,
     SessionNotification, SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
@@ -28,16 +27,8 @@ pub enum AcpNotification {
         provider: Option<String>,
         model: Option<String>,
     },
-    SessionList {
-        sessions: Vec<(String, String)>,
-    },
     SessionClosed {
         session_id: String,
-    },
-    SessionLoaded {
-        session_id: String,
-        provider: Option<String>,
-        model: Option<String>,
     },
     UserPrompt {
         session_id: String,
@@ -104,17 +95,11 @@ pub struct PermissionOption {
 //
 
 enum BridgeCommand {
-    ListSessions {
-        reply: oneshot::Sender<acp::Result<ListSessionsResponse>>,
-    },
     CreateSession {
         cwd: String,
         model_ref: Option<String>,
+        history: Vec<(String, String)>,
         reply: oneshot::Sender<acp::Result<NewSessionResponse>>,
-    },
-    LoadSession {
-        session_id: String,
-        reply: oneshot::Sender<acp::Result<LoadSessionResponse>>,
     },
     CloseSession {
         session_id: String,
@@ -151,35 +136,18 @@ pub struct AcpBridgeHandle {
 }
 
 impl AcpBridgeHandle {
-    pub async fn list_sessions(&self) -> anyhow::Result<()> {
-        let (tx, _rx) = oneshot::channel();
-        self.cmd_tx
-            .send(BridgeCommand::ListSessions { reply: tx })
-            .map_err(|_| anyhow::anyhow!("ACP bridge closed"))?;
-        Ok(())
-    }
-
     pub async fn create_session(
         &self,
         cwd: &str,
         model_ref: Option<&str>,
+        history: Vec<(String, String)>,
     ) -> anyhow::Result<()> {
         let (tx, _rx) = oneshot::channel();
         self.cmd_tx
             .send(BridgeCommand::CreateSession {
                 cwd: cwd.to_string(),
                 model_ref: model_ref.map(String::from),
-                reply: tx,
-            })
-            .map_err(|_| anyhow::anyhow!("ACP bridge closed"))?;
-        Ok(())
-    }
-
-    pub async fn load_session(&self, session_id: &str) -> anyhow::Result<()> {
-        let (tx, _rx) = oneshot::channel();
-        self.cmd_tx
-            .send(BridgeCommand::LoadSession {
-                session_id: session_id.to_string(),
+                history,
                 reply: tx,
             })
             .map_err(|_| anyhow::anyhow!("ACP bridge closed"))?;
@@ -590,41 +558,37 @@ async fn run_bridge(
                 let cx_clone = cx.clone();
                 let _ = cx.spawn(async move {
                     match cmd {
-                        BridgeCommand::ListSessions { reply } => {
-                            let result = cx_clone
-                                .send_request(ListSessionsRequest::new())
-                                .block_task()
-                                .await;
-                            if let Ok(resp) = &result {
-                                let sessions: Vec<(String, String)> = resp
-                                    .sessions
-                                    .iter()
-                                    .map(|s| {
-                                        let sid = s.session_id.to_string();
-                                        let name =
-                                            s.title.clone().unwrap_or_else(|| sid.clone());
-                                        (sid, name)
-                                    })
-                                    .collect();
-                                let _ = event_tx.send(AppEvent::AcpNotification(
-                                    AcpNotification::SessionList { sessions },
-                                ));
-                            }
-                            let _ = reply.send(result);
-                        }
-
                         BridgeCommand::CreateSession {
                             cwd,
                             model_ref,
+                            history,
                             reply,
                         } => {
-                            let mut req = NewSessionRequest::new(cwd);
+                            let mut meta_obj = serde_json::Map::new();
                             if let Some(mr) = &model_ref {
+                                meta_obj.insert(
+                                    "modelRef".to_string(),
+                                    serde_json::Value::String(mr.clone()),
+                                );
+                            }
+                            if !history.is_empty() {
+                                let arr: Vec<serde_json::Value> = history
+                                    .iter()
+                                    .map(|(role, text)| {
+                                        serde_json::json!({ "role": role, "text": text })
+                                    })
+                                    .collect();
+                                meta_obj.insert(
+                                    "history".to_string(),
+                                    serde_json::Value::Array(arr),
+                                );
+                            }
+
+                            let mut req = NewSessionRequest::new(cwd);
+                            if !meta_obj.is_empty() {
                                 req = req.meta(
-                                    serde_json::from_value::<Meta>(
-                                        serde_json::json!({ "modelRef": mr }),
-                                    )
-                                    .unwrap(),
+                                    serde_json::from_value::<Meta>(serde_json::Value::Object(meta_obj))
+                                        .unwrap(),
                                 );
                             }
 
@@ -643,36 +607,6 @@ async fn run_bridge(
                                 let _ = event_tx.send(AppEvent::AcpNotification(
                                     AcpNotification::SessionCreated {
                                         session_id: resp.session_id.to_string(),
-                                        provider,
-                                        model,
-                                    },
-                                ));
-                            }
-                            let _ = reply.send(result);
-                        }
-
-                        BridgeCommand::LoadSession { session_id, reply } => {
-                            let result = cx_clone
-                                .send_request(LoadSessionRequest::new(
-                                    SessionId::from(session_id.clone()),
-                                    ".",
-                                ))
-                                .block_task()
-                                .await;
-                            if let Ok(resp) = &result {
-                                let (provider, model) = resp
-                                    .models
-                                    .as_ref()
-                                    .map(|m| {
-                                        let id = m.current_model_id.to_string();
-                                        let (p, m) =
-                                            id.split_once('/').unwrap_or(("unknown", &id));
-                                        (Some(p.to_string()), Some(m.to_string()))
-                                    })
-                                    .unwrap_or((None, None));
-                                let _ = event_tx.send(AppEvent::AcpNotification(
-                                    AcpNotification::SessionLoaded {
-                                        session_id,
                                         provider,
                                         model,
                                     },

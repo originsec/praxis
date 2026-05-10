@@ -403,14 +403,9 @@ impl App {
 
     pub async fn init(&mut self) {
         //
-        // Fetch existing orchestrator sessions from the service. If none
-        // exist, a new one will be created when the user types a prompt.
-        //
-
-        let _ = self.acp.list_sessions().await;
-
-        //
-        // Request initial op list so broadcasts can update it.
+        // Request initial op list so broadcasts can update it. The
+        // orchestrator service holds no state — sessions are created
+        // on demand when the user types a prompt.
         //
 
         let _ = self.client.request_semantic_op_list().await;
@@ -446,10 +441,7 @@ impl App {
                 self.handle_acp_notification(notif).await;
                 true
             }
-            AppEvent::SessionListPoll => {
-                let _ = self.acp.list_sessions().await;
-                false
-            }
+            AppEvent::SessionListPoll => false,
             AppEvent::StateUpdate(state) => {
                 let had_no_nodes = self.nodes.nodes.is_empty();
                 self.handle_state_update(state);

@@ -6,6 +6,7 @@ mod config;
 mod event;
 mod markdown;
 mod output;
+mod session_store;
 mod state;
 mod ui;
 
@@ -47,6 +48,14 @@ struct Cli {
     /// Run as ACP stdio proxy (forward JSON-RPC over stdin/stdout to service via RabbitMQ)
     #[arg(long = "acp")]
     acp: bool,
+
+    /// Resume a saved orchestrator session — pick from a list of local sessions.
+    #[arg(long = "resume")]
+    resume: bool,
+
+    /// Continue the most recent local orchestrator session.
+    #[arg(long = "continue")]
+    continue_last: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -209,7 +218,62 @@ async fn run() -> Result<()> {
         return run_acp_proxy(&rabbitmq_url, cli.timeout).await;
     }
 
-    run_tui(&rabbitmq_url, cli.timeout).await
+    let resume = if cli.continue_last {
+        session_store::most_recent()?
+    } else if cli.resume {
+        select_session_interactive()?
+    } else {
+        None
+    };
+
+    run_tui(&rabbitmq_url, cli.timeout, resume).await
+}
+
+fn select_session_interactive() -> Result<Option<session_store::StoredSession>> {
+    let sessions = session_store::list()?;
+    if sessions.is_empty() {
+        eprintln!("No saved orchestrator sessions found in ~/.praxis/sessions/");
+        return Ok(None);
+    }
+
+    println!("Saved orchestrator sessions:");
+    for (i, s) in sessions.iter().enumerate() {
+        let preview = s
+            .first_user_text()
+            .map(|t| {
+                let t = t.replace('\n', " ");
+                if t.len() > 60 {
+                    format!("{}…", &t[..60])
+                } else {
+                    t
+                }
+            })
+            .unwrap_or_else(|| "(empty)".to_string());
+        let when = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
+            s.updated_at_ms as i64,
+        )
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default();
+        println!("  [{}] {}  {}", i + 1, when, preview);
+    }
+    print!("Select session (1-{}, or empty to cancel): ", sessions.len());
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let idx: usize = match input.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= sessions.len() => n - 1,
+        _ => {
+            eprintln!("Invalid selection");
+            return Ok(None);
+        }
+    };
+    Ok(Some(sessions.into_iter().nth(idx).unwrap()))
 }
 
 async fn run_status(rabbitmq_url: &str, timeout: u64) -> Result<()> {
@@ -348,7 +412,11 @@ async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
     Ok(())
 }
 
-async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
+async fn run_tui(
+    rabbitmq_url: &str,
+    timeout: u64,
+    resume: Option<session_store::StoredSession>,
+) -> Result<()> {
     let mut cli_state = state::CliState::load()?;
     let client_id = cli_state.get_or_create_client_id()?;
 
@@ -396,6 +464,9 @@ async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
     );
     app.terminal_paused = terminal_paused;
     app.terminal_resume = terminal_resume;
+    if let Some(stored) = resume {
+        app.seed_orchestrator_resume(stored);
+    }
     app.init().await;
     let mut should_draw = true;
 

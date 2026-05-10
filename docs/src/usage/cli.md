@@ -319,6 +319,8 @@ sessions and does not share state with the non-interactive subcommands.
 | `--acp` | Run as an ACP bridge (stdin/stdout proxy) | - |
 | `--clear` | Clear local state and exit | - |
 | `--status` | Check service connection status | - |
+| `--continue` | Resume the most recent saved orchestrator session | - |
+| `--resume` | List saved orchestrator sessions and pick one to resume | - |
 
 The RabbitMQ URL can also be set via the `PRAXIS_RABBITMQ_URL` environment variable.
 

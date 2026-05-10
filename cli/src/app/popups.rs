@@ -422,7 +422,7 @@ impl App {
     pub(crate) async fn select_model(&mut self, model_name: &str) {
         self.close_active_orchestrator_session().await;
 
-        if let Err(e) = self.acp.create_session(".", Some(model_name)).await {
+        if let Err(e) = self.acp.create_session(".", Some(model_name), Vec::new()).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session
                     .messages
