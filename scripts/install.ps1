@@ -4,8 +4,11 @@
     Praxis Installation Script for Windows.
 .DESCRIPTION
     The Praxis service is Linux-only, so on Windows it can only be
-    installed via Docker. The CLI ('praxis') is always installed
-    natively by compiling from source (requires Rust + git).
+    installed via Docker. The CLI ('praxis') is installed natively.
+
+    By default the CLI is downloaded from the latest GitHub release.
+    Pass -Src to build it from source instead (requires Rust + git).
+    The Docker path always builds from source regardless of -Src.
 
     The interactive menu asks how to install the service:
       - Docker install (rabbitmq + service container)
@@ -19,6 +22,8 @@
 .EXAMPLE
     .\install.ps1 -Cli
 .EXAMPLE
+    .\install.ps1 -Cli -Src
+.EXAMPLE
     .\install.ps1 -Remove
 #>
 
@@ -27,6 +32,7 @@ param(
     [ValidateSet('docker')]
     [string]$Service,
     [switch]$Cli,
+    [switch]$Src,
     [switch]$Remove,
     [switch]$Help
 )
@@ -39,6 +45,7 @@ $PraxisVersion = $env:PRAXIS_VERSION
 $PraxisDir     = if ($env:PRAXIS_DIR) { $env:PRAXIS_DIR } else { Join-Path $HomeDir ".praxis-docker" }
 $CliInstallDir = if ($env:PRAXIS_CLI_DIR) { $env:PRAXIS_CLI_DIR } else { Join-Path $HomeDir ".praxis\bin" }
 $ComposeCmd    = $null
+$BuildFromSource = [bool]$Src
 
 function Write-Info    { param($msg) Write-Host "  ▸ " -ForegroundColor Cyan   -NoNewline; Write-Host $msg }
 function Write-Success { param($msg) Write-Host "  ✓ " -ForegroundColor Green  -NoNewline; Write-Host $msg }
@@ -152,7 +159,10 @@ Usage: install.ps1 [flag]
 
 Flags:
   -Service docker   Install service via Docker (only mode supported on Windows)
-  -Cli              Install CLI natively (compiles 'praxis' from source)
+  -Cli              Install CLI natively
+  -Src              Build the CLI from source instead of downloading the
+                    prebuilt release binary (default). No effect on
+                    -Service docker, which always builds from source.
   -Remove           Remove a previous install (CLI + Docker)
   -Help             Show this message
 
@@ -290,29 +300,43 @@ function Ensure-Rust {
 
 function Install-Cli {
     Write-Section "Installing CLI"
-    if (-not (Test-Command "git"))   { Write-Err "git not found. Install git from https://git-scm.com/download/win" }
-    Ensure-Rust
-
-    Write-Info "Building Praxis CLI for Windows..."
     if (-not (Test-Path $CliInstallDir)) { New-Item -ItemType Directory -Force -Path $CliInstallDir | Out-Null }
+    $binDir = Join-Path $CliInstallDir "bin"
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Force -Path $binDir | Out-Null }
+    $exe = Join-Path $binDir "praxis_cli.exe"
 
-    $repoUrl = "https://github.com/$PraxisRepo"
-    $cliRoot = $CliInstallDir.TrimEnd('\')
-    $cargoLog = Join-Path $env:TEMP "praxis-cargo-install.log"
+    if ($script:BuildFromSource) {
+        if (-not (Test-Command "git"))   { Write-Err "git not found. Install git from https://git-scm.com/download/win" }
+        Ensure-Rust
 
-    $exitCode = Run-WithProgressBar -LogFile $cargoLog -Exe "cargo" -ExeArgs @(
-        "install", "--git", $repoUrl, "--tag", $script:PraxisVersion,
-        "--root", $cliRoot, "praxis_cli"
-    )
-    if ($exitCode -ne 0) {
-        Write-Host ""
-        Write-Warn "Build output (last 50 lines):"
-        Get-Content $cargoLog -Tail 50
-        Write-Err "cargo install failed."
+        Write-Info "Building Praxis CLI for Windows..."
+        $repoUrl = "https://github.com/$PraxisRepo"
+        $cliRoot = $CliInstallDir.TrimEnd('\')
+        $cargoLog = Join-Path $env:TEMP "praxis-cargo-install.log"
+
+        $exitCode = Run-WithProgressBar -LogFile $cargoLog -Exe "cargo" -ExeArgs @(
+            "install", "--git", $repoUrl, "--tag", $script:PraxisVersion,
+            "--root", $cliRoot, "praxis_cli"
+        )
+        if ($exitCode -ne 0) {
+            Write-Host ""
+            Write-Warn "Build output (last 50 lines):"
+            Get-Content $cargoLog -Tail 50
+            Write-Err "cargo install failed."
+        }
+        if (-not (Test-Path $exe)) { Write-Err "Build succeeded but praxis_cli.exe not found at $exe" }
+    } else {
+        $asset = "praxis_cli-windows-x86_64.exe"
+        $url = "https://github.com/$PraxisRepo/releases/download/$($script:PraxisVersion)/$asset"
+        Write-Info "Downloading $asset..."
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+        } catch {
+            Write-Err "Failed to download $url - $($_.Exception.Message)"
+        }
+        if (-not (Test-Path $exe)) { Write-Err "Download did not produce $exe" }
+        Write-Success "Downloaded $asset"
     }
-
-    $exe = Join-Path $CliInstallDir "bin\praxis_cli.exe"
-    if (-not (Test-Path $exe)) { Write-Err "Build succeeded but praxis_cli.exe not found at $exe" }
 
     #
     # Create a `praxis.exe` copy alongside (Windows doesn't follow
@@ -506,6 +530,18 @@ function Remove-All {
 # === Interactive flow ======================================================
 #
 
+function Prompt-BinaryOrSource {
+    $idx = Select-Menu `
+        -Prompt "CLI install method" `
+        -Options @(
+            "Download prebuilt binary from GitHub (recommended)",
+            "Build from source (requires Rust + git)"
+        ) `
+        -Footer "Docker installs always build from source regardless of this choice."
+    Write-Host ""
+    if ($idx -eq 1) { $script:BuildFromSource = $true }
+}
+
 function Interactive-Install {
     $idx = Select-Menu `
         -Prompt "Install service as" `
@@ -519,12 +555,14 @@ function Interactive-Install {
 
     switch ($idx) {
         0 {
+            Prompt-BinaryOrSource
             Get-LatestVersion
             Install-Cli
             Install-Service-Docker
             Print-Docker-Summary
         }
         1 {
+            Prompt-BinaryOrSource
             Get-LatestVersion
             Install-Cli
             Print-Cli-Summary
