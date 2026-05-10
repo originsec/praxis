@@ -188,25 +188,35 @@ detect_platform() {
     local arch
     arch="$(uname -m 2>/dev/null || echo unknown)"
     case "$arch" in
-        x86_64|amd64) ARCH_KIND="x86_64" ;;
-        *)            ARCH_KIND="$arch" ;;
+        x86_64|amd64)   ARCH_KIND="x86_64" ;;
+        arm64|aarch64)  ARCH_KIND="arm64" ;;
+        *)              ARCH_KIND="$arch" ;;
     esac
 }
 
 #
-# Prebuilt release artifacts are only published for x86_64 today. Anything
-# else must build from source — auto-flip BUILD_FROM_SOURCE so the user
-# doesn't get a download error halfway through.
+# Prebuilt release artifacts: x86_64 on Linux/Windows, arm64 on macOS.
+# Anything else falls back to source so users don't hit a download
+# error mid-install.
 #
 
 ensure_binary_supported_or_force_source() {
     if (( BUILD_FROM_SOURCE )); then
         return
     fi
-    if [[ "$ARCH_KIND" != "x86_64" ]]; then
-        warn "Prebuilt binaries are only published for x86_64; arch is '$ARCH_KIND'. Falling back to --src (build from source)."
-        BUILD_FROM_SOURCE=1
-    fi
+    case "$OS_KIND/$ARCH_KIND" in
+        linux/x86_64|macos/arm64)
+            return
+            ;;
+        macos/x86_64)
+            warn "Prebuilt macOS binaries are arm64-only (Apple Silicon). Falling back to --src (build from source) on Intel."
+            BUILD_FROM_SOURCE=1
+            ;;
+        *)
+            warn "Prebuilt binaries unavailable for $OS_KIND/$ARCH_KIND. Falling back to --src (build from source)."
+            BUILD_FROM_SOURCE=1
+            ;;
+    esac
 }
 
 #
@@ -556,8 +566,8 @@ install_cli_native() {
                 rm -rf "$extracted"
                 ;;
             macos)
-                info "Downloading praxis_cli-macos-x86_64..."
-                download_to "$(release_asset_url praxis_cli-macos-x86_64)" \
+                info "Downloading praxis_cli-macos-arm64..."
+                download_to "$(release_asset_url praxis_cli-macos-arm64)" \
                     "$tmproot/bin/praxis_cli"
                 chmod +x "$tmproot/bin/praxis_cli"
                 ;;

@@ -22,10 +22,10 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_name: praxis_node.exe
             asset_name: praxis_node-windows-x86_64.exe
-          - os: macos-13
-            target: x86_64-apple-darwin
+          - os: macos-26
+            target: aarch64-apple-darwin
             artifact_name: praxis_node
-            asset_name: praxis_node-macos-x86_64
+            asset_name: praxis_node-macos-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -54,9 +54,9 @@ jobs:
             artifact_path: node/tiny_c/praxis_node_tiny_c
             asset_name: praxis_node_tiny_c-linux-x86_64
             shell: bash
-          - os: macos-13
+          - os: macos-26
             artifact_path: node/tiny_c/praxis_node_tiny_c
-            asset_name: praxis_node_tiny_c-macos-x86_64
+            asset_name: praxis_node_tiny_c-macos-arm64
             shell: bash
           - os: windows-latest
             artifact_path: node/tiny_c/praxis_node_tiny_c.exe
@@ -98,10 +98,10 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_name: praxis_cli.exe
             asset_name: praxis_cli-windows-x86_64.exe
-          - os: macos-13
-            target: x86_64-apple-darwin
+          - os: macos-26
+            target: aarch64-apple-darwin
             artifact_name: praxis_cli
-            asset_name: praxis_cli-macos-x86_64
+            asset_name: praxis_cli-macos-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -200,15 +200,15 @@ jobs:
         run: |
           mv artifacts/praxis_node-linux-x86_64/praxis_node praxis_node-linux-x86_64
           mv artifacts/praxis_node-windows-x86_64.exe/praxis_node.exe praxis_node-windows-x86_64.exe
-          mv artifacts/praxis_node-macos-x86_64/praxis_node praxis_node-macos-x86_64
+          mv artifacts/praxis_node-macos-arm64/praxis_node praxis_node-macos-arm64
           mv artifacts/praxis_node_tiny_c-linux-x86_64/praxis_node_tiny_c praxis_node_tiny_c-linux-x86_64
-          mv artifacts/praxis_node_tiny_c-macos-x86_64/praxis_node_tiny_c praxis_node_tiny_c-macos-x86_64
+          mv artifacts/praxis_node_tiny_c-macos-arm64/praxis_node_tiny_c praxis_node_tiny_c-macos-arm64
           mv artifacts/praxis_node_tiny_c-windows-x86_64.exe/praxis_node_tiny_c.exe praxis_node_tiny_c-windows-x86_64.exe
           mv artifacts/praxis_cli-windows-x86_64.exe/praxis_cli.exe praxis_cli-windows-x86_64.exe
-          mv artifacts/praxis_cli-macos-x86_64/praxis_cli praxis_cli-macos-x86_64
-          chmod +x praxis_node-linux-x86_64 praxis_node-macos-x86_64 \
-                   praxis_node_tiny_c-linux-x86_64 praxis_node_tiny_c-macos-x86_64 \
-                   praxis_cli-macos-x86_64
+          mv artifacts/praxis_cli-macos-arm64/praxis_cli praxis_cli-macos-arm64
+          chmod +x praxis_node-linux-x86_64 praxis_node-macos-arm64 \
+                   praxis_node_tiny_c-linux-x86_64 praxis_node_tiny_c-macos-arm64 \
+                   praxis_cli-macos-arm64
           cp artifacts/praxis-server-linux-x86_64/praxis-*-x86_64-linux.tar.gz .
 
       - name: Create Release
@@ -218,10 +218,10 @@ jobs:
           files: |
             praxis_node-linux-x86_64
             praxis_node-windows-x86_64.exe
-            praxis_node-macos-x86_64
+            praxis_node-macos-arm64
             praxis_node_tiny_c-linux-x86_64
-            praxis_node_tiny_c-macos-x86_64
+            praxis_node_tiny_c-macos-arm64
             praxis_node_tiny_c-windows-x86_64.exe
             praxis_cli-windows-x86_64.exe
-            praxis_cli-macos-x86_64
+            praxis_cli-macos-arm64
             praxis-*-x86_64-linux.tar.gz
