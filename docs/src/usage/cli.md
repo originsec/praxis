@@ -45,8 +45,8 @@ LLM-powered conversation interface for coordinating operations across the Praxis
 - Plan tracking with step visualization
 - Token usage statistics
 - Command history and conversation scrolling
-- Multiple concurrent orchestrator sessions — `Ctrl+N` opens a new one; `Ctrl+W` closes the current one; `Ctrl+Alt+W` saves the transcript
-- `Ctrl+C` cancels the in-flight prompt in the active session
+- Single orchestrator session per TUI run — the conversation lifetime equals the TUI process lifetime. Use `praxis --continue` or `praxis --resume` on the next launch to bring it back. `Ctrl+Alt+W` exports the transcript to markdown.
+- `Ctrl+C` cancels the in-flight prompt
 - `Ctrl+E` toggles the tools panel; `Ctrl+Alt+E` expands it fully
 
 ### Nodes (`Ctrl+L`)

@@ -268,21 +268,8 @@ impl App {
     pub(crate) async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
-                KeyCode::Char('n') => {
-                    self.create_new_orchestrator_session().await;
-                    return;
-                }
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
                     self.open_save_session();
-                    return;
-                }
-                KeyCode::Char('w') => {
-                    if self.orchestrator.active_session().is_some() {
-                        self.confirm = Some(ConfirmAction {
-                            message: "Close this orchestrator session?".to_string(),
-                            action: ConfirmKind::CloseOrchestratorSession,
-                        });
-                    }
                     return;
                 }
                 KeyCode::Char('c') => {
@@ -312,34 +299,6 @@ impl App {
                 }
                 _ => {}
             }
-        }
-
-        //
-        // Tab / Shift+Tab to switch between sessions.
-        //
-
-        if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(idx) = self.orchestrator.active_session_index {
-                if self.orchestrator.sessions.len() > 1 {
-                    let next = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                        if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 }
-                    } else {
-                        if idx + 1 < self.orchestrator.sessions.len() { idx + 1 } else { 0 }
-                    };
-                    self.switch_to_session(next).await;
-                }
-            }
-            return;
-        }
-
-        if key.code == KeyCode::BackTab {
-            if let Some(idx) = self.orchestrator.active_session_index {
-                if self.orchestrator.sessions.len() > 1 {
-                    let prev = if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 };
-                    self.switch_to_session(prev).await;
-                }
-            }
-            return;
         }
 
         match key.code {
@@ -522,10 +481,6 @@ impl App {
         let cmd = input.trim_start_matches('/').trim();
 
         match cmd {
-            "clear" => {
-                self.close_active_orchestrator_session().await;
-                self.create_new_orchestrator_session().await;
-            }
             "model" => {
                 self.open_model_select().await;
             }
