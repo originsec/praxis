@@ -533,14 +533,27 @@ pub fn session_update_user_text(session_id: &str, text: impl Into<String>) -> Cl
     session_notification(session_id, acp::schema::SessionUpdate::UserMessageChunk(chunk))
 }
 
-pub fn session_update_tool_call(session_id: &str, tool_name: &str, _tool_input: Option<Value>) -> ClientDirectMessage {
-    let tc = acp::schema::ToolCall::new(uuid::Uuid::new_v4().to_string(), tool_name);
+pub fn session_update_tool_call(session_id: &str, tool_name: &str, tool_input: Option<Value>) -> ClientDirectMessage {
+    let mut tc = acp::schema::ToolCall::new(uuid::Uuid::new_v4().to_string(), tool_name);
+    if let Some(input) = tool_input {
+        tc = tc.raw_input(input);
+    }
     session_notification(session_id, acp::schema::SessionUpdate::ToolCall(tc))
 }
 
-pub fn session_update_tool_result(session_id: &str, tool_name: &str, result: &str) -> ClientDirectMessage {
+pub fn session_update_tool_result(
+    session_id: &str,
+    tool_name: &str,
+    result: &str,
+    is_error: bool,
+) -> ClientDirectMessage {
+    let status = if is_error {
+        acp::schema::ToolCallStatus::Failed
+    } else {
+        acp::schema::ToolCallStatus::Completed
+    };
     let fields = acp::schema::ToolCallUpdateFields::new()
-        .status(acp::schema::ToolCallStatus::Completed)
+        .status(status)
         .content(vec![acp::schema::ToolCallContent::Content(acp::schema::Content::new(result))]);
     let update = acp::schema::ToolCallUpdate::new(tool_name.to_string(), fields);
     session_notification(session_id, acp::schema::SessionUpdate::ToolCallUpdate(update))
