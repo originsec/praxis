@@ -223,16 +223,12 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         // Intercept targets.
         //
 
-        ClientSignalMessage::InterceptTargetList { client_id } =>
-            handle_intercept_target_list(ctx, client_id).await,
-        ClientSignalMessage::InterceptTargetAdd { client_id, name, agent_short_name, domains, url_pattern } =>
-            handle_intercept_target_add(ctx, client_id, name, agent_short_name, domains, url_pattern).await,
-        ClientSignalMessage::InterceptTargetUpdate { client_id, target_id, name, agent_short_name, domains, url_pattern } =>
-            handle_intercept_target_update(ctx, client_id, target_id, name, agent_short_name, domains, url_pattern).await,
-        ClientSignalMessage::InterceptTargetDelete { client_id, target_id } =>
-            handle_intercept_target_delete(ctx, client_id, target_id).await,
-        ClientSignalMessage::InterceptTargetToggleDisabled { client_id, target_id, disabled } =>
-            handle_intercept_target_toggle_disabled(ctx, client_id, target_id, disabled).await,
+        ClientSignalMessage::InterceptTargetsGet { client_id } =>
+            handle_intercept_targets_get(ctx, client_id).await,
+        ClientSignalMessage::InterceptTargetsSet { client_id, text } =>
+            handle_intercept_targets_set(ctx, client_id, text).await,
+        ClientSignalMessage::InterceptTargetsResetDefaults { client_id } =>
+            handle_intercept_targets_reset_defaults(ctx, client_id).await,
 
         //
         // LogQuery.
@@ -2882,183 +2878,115 @@ async fn broadcast_intercept_targets(ctx: &ServiceContext, action: &str) {
     }
 }
 
-async fn handle_intercept_target_list(ctx: &ServiceContext, client_id: String) {
-    common::log_info!(
-        "Received InterceptTargetList from client {}",
-        common::short_id(&client_id)
-    );
+//
+// Send the current virtual file (raw text + parsed targets) to a single
+// client. `error` is set when parsing the stored text fails so the UI
+// can surface it; callers can pass an explicit override (e.g. the
+// validation error from a failed Set).
+//
 
-    match ctx.database.list_intercept_targets().await {
-        Ok(targets) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetListResponse { targets },
-            )
-            .await;
-        }
-        Err(e) => {
-            common::log_error!("Failed to list intercept targets: {}", e);
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
-            )
-            .await;
-        }
-    }
-}
-
-async fn handle_intercept_target_add(
+async fn send_intercept_targets_state(
     ctx: &ServiceContext,
-    client_id: String,
-    name: String,
-    agent_short_name: String,
-    domains: Vec<String>,
-    url_pattern: Option<String>,
+    client_id: &str,
+    error: Option<String>,
 ) {
-    common::log_info!(
-        "Received InterceptTargetAdd from client {}",
-        common::short_id(&client_id)
-    );
-
-    let id = uuid::Uuid::new_v4().to_string();
-    match ctx.database.upsert_intercept_target(
-        &id, &name, &agent_short_name, &domains,
-        url_pattern.as_deref(), false, false,
-    ).await {
-        Ok(()) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetAdded { id, name },
-            )
-            .await;
-            broadcast_intercept_targets(ctx, "add").await;
-        }
+    let text = match ctx.database.get_intercept_targets_text().await {
+        Ok(t) => t,
         Err(e) => {
-            common::log_error!("Failed to add intercept target: {}", e);
+            common::log_error!("Failed to load intercept targets text: {}", e);
             let _ = send_to_client(
                 &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
-            )
-            .await;
-        }
-    }
-}
-
-async fn handle_intercept_target_update(
-    ctx: &ServiceContext,
-    client_id: String,
-    target_id: String,
-    name: String,
-    agent_short_name: String,
-    domains: Vec<String>,
-    url_pattern: Option<String>,
-) {
-    common::log_info!(
-        "Received InterceptTargetUpdate from client {}",
-        common::short_id(&client_id)
-    );
-
-    match ctx.database.update_intercept_target(
-        &target_id, &name, &agent_short_name, &domains, url_pattern.as_deref(),
-    ).await {
-        Ok(_) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetUpdated { id: target_id, name },
-            )
-            .await;
-            broadcast_intercept_targets(ctx, "update").await;
-        }
-        Err(e) => {
-            common::log_error!("Failed to update intercept target: {}", e);
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
-            )
-            .await;
-        }
-    }
-}
-
-async fn handle_intercept_target_delete(
-    ctx: &ServiceContext,
-    client_id: String,
-    target_id: String,
-) {
-    common::log_info!(
-        "Received InterceptTargetDelete from client {}",
-        common::short_id(&client_id)
-    );
-
-    match ctx.database.delete_intercept_target(&target_id).await {
-        Ok(success) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetDeleted {
-                    target_id: target_id.clone(),
-                    success,
+                client_id,
+                ClientDirectMessage::InterceptTargetsState {
+                    text: String::new(),
+                    targets: Vec::new(),
+                    error: Some(e.to_string()),
                 },
             )
             .await;
-            if success {
-                broadcast_intercept_targets(ctx, "delete").await;
-            }
+            return;
         }
-        Err(e) => {
-            common::log_error!("Failed to delete intercept target: {}", e);
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
-            )
-            .await;
-        }
-    }
+    };
+
+    let (targets, parse_err) = match crate::intercept_targets::parse(&text) {
+        Ok(t) => (t, None),
+        Err(e) => (Vec::new(), Some(e)),
+    };
+    let _ = send_to_client(
+        &ctx.client_publish_channel,
+        client_id,
+        ClientDirectMessage::InterceptTargetsState {
+            text,
+            targets,
+            error: error.or(parse_err),
+        },
+    )
+    .await;
 }
 
-async fn handle_intercept_target_toggle_disabled(
-    ctx: &ServiceContext,
-    client_id: String,
-    target_id: String,
-    disabled: bool,
-) {
+async fn handle_intercept_targets_get(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
-        "Received InterceptTargetToggleDisabled from client {}",
+        "Received InterceptTargetsGet from client {}",
+        common::short_id(&client_id)
+    );
+    send_intercept_targets_state(ctx, &client_id, None).await;
+}
+
+async fn handle_intercept_targets_set(ctx: &ServiceContext, client_id: String, text: String) {
+    common::log_info!(
+        "Received InterceptTargetsSet from client {}",
         common::short_id(&client_id)
     );
 
-    match ctx.database.set_intercept_target_disabled(&target_id, disabled).await {
-        Ok(success) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetDisabledToggled {
-                    target_id: target_id.clone(),
-                    disabled,
-                },
-            )
-            .await;
-            if success {
-                broadcast_intercept_targets(ctx, "toggle disabled").await;
-            }
-        }
-        Err(e) => {
-            common::log_error!("Failed to toggle intercept target disabled: {}", e);
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
-            )
-            .await;
-        }
+    //
+    // Validate before persisting. On parse failure we leave the stored
+    // text untouched and echo the error back along with the *current*
+    // (still-valid) state, so the UI can show the failure without losing
+    // the user's edits to the textarea on the client side.
+    //
+    if let Err(e) = crate::intercept_targets::parse(&text) {
+        //
+        // Echo the user's draft back so the UI keeps showing what they
+        // typed, with the parse error attached.
+        //
+        let _ = send_to_client(
+            &ctx.client_publish_channel,
+            &client_id,
+            ClientDirectMessage::InterceptTargetsState {
+                text,
+                targets: Vec::new(),
+                error: Some(e),
+            },
+        )
+        .await;
+        return;
     }
+
+    if let Err(e) = ctx.database.set_intercept_targets_text(&text).await {
+        common::log_error!("Failed to save intercept targets: {}", e);
+        send_intercept_targets_state(ctx, &client_id, Some(e.to_string())).await;
+        return;
+    }
+
+    send_intercept_targets_state(ctx, &client_id, None).await;
+    broadcast_intercept_targets(ctx, "set").await;
+}
+
+async fn handle_intercept_targets_reset_defaults(ctx: &ServiceContext, client_id: String) {
+    common::log_info!(
+        "Received InterceptTargetsResetDefaults from client {}",
+        common::short_id(&client_id)
+    );
+
+    let default = crate::intercept_targets::default_text();
+    if let Err(e) = ctx.database.set_intercept_targets_text(default).await {
+        common::log_error!("Failed to reset intercept targets to defaults: {}", e);
+        send_intercept_targets_state(ctx, &client_id, Some(e.to_string())).await;
+        return;
+    }
+
+    send_intercept_targets_state(ctx, &client_id, None).await;
+    broadcast_intercept_targets(ctx, "reset defaults").await;
 }
 
 // ---------------------------------------------------------------------------

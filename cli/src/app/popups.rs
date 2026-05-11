@@ -33,7 +33,7 @@ pub enum ConfirmKind {
     DeleteModel(usize),        // index into model_definitions
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
-    DeleteInterceptTarget(String), // target_id
+    ResetInterceptTargets,
     ResetNode(String), // node_id
     DeleteNode(String), // node_id — service handles whether it's local or remote
     ClearAllTraffic,
@@ -189,10 +189,8 @@ impl App {
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
             }
-            ConfirmKind::DeleteInterceptTarget(target_id) => {
-                let _ = self.client.delete_intercept_target(target_id).await;
-                self.settings.intercept_targets_loaded = false;
-                self.load_intercept_targets().await;
+            ConfirmKind::ResetInterceptTargets => {
+                self.reset_intercept_targets_to_defaults().await;
             }
             ConfirmKind::DeleteNode(node_id) => {
                 let _ = self.client.remove_node(&node_id).await;

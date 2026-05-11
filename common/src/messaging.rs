@@ -282,38 +282,16 @@ pub struct LuaAgentScriptInfo {
 // Intercept target configuration sent from the service to nodes. Each
 // target groups one or more domains under an optional URL filter regex
 // and is attributed to a specific agent (by short_name) for routing of
-// captured traffic.
+// captured traffic. Parsed from the service-side TOML virtual file.
 //
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct InterceptTargetConfig {
-    pub id: String,
     pub name: String,
     pub agent_short_name: String,
     pub domains: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_pattern: Option<String>,
-}
-
-//
-// Service-side view of an intercept target including persistence
-// metadata. Used by the web/TUI management UIs.
-//
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct InterceptTargetInfo {
-    pub id: String,
-    pub name: String,
-    pub agent_short_name: String,
-    pub domains: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url_pattern: Option<String>,
-    #[serde(default)]
-    pub disabled: bool,
-    #[serde(default)]
-    pub is_builtin: bool,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 /// Metadata for a registered Lua connector
@@ -2014,34 +1992,18 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Intercept targets (stored in service database, pushed to nodes).
+    // Intercept targets virtual file (stored as TOML text in service_config,
+    // parsed into InterceptTargetConfig list and pushed to nodes on change).
     //
-    InterceptTargetList {
+    InterceptTargetsGet {
         client_id: String,
     },
-    InterceptTargetAdd {
+    InterceptTargetsSet {
         client_id: String,
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
+        text: String,
     },
-    InterceptTargetUpdate {
+    InterceptTargetsResetDefaults {
         client_id: String,
-        target_id: String,
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
-    },
-    InterceptTargetDelete {
-        client_id: String,
-        target_id: String,
-    },
-    InterceptTargetToggleDisabled {
-        client_id: String,
-        target_id: String,
-        disabled: bool,
     },
 
     //
@@ -2419,29 +2381,15 @@ pub enum ClientDirectMessage {
     },
 
     //
-    // Intercept target responses.
+    // Intercept target virtual-file responses. `text` is the current raw
+    // file contents; `targets` is the parsed list (empty when `error` is
+    // set). `error` carries parse/save failures back to the client.
     //
-    InterceptTargetListResponse {
-        targets: Vec<InterceptTargetInfo>,
-    },
-    InterceptTargetAdded {
-        id: String,
-        name: String,
-    },
-    InterceptTargetUpdated {
-        id: String,
-        name: String,
-    },
-    InterceptTargetDeleted {
-        target_id: String,
-        success: bool,
-    },
-    InterceptTargetDisabledToggled {
-        target_id: String,
-        disabled: bool,
-    },
-    InterceptTargetError {
-        message: String,
+    InterceptTargetsState {
+        text: String,
+        targets: Vec<InterceptTargetConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 
     //

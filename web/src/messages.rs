@@ -316,34 +316,16 @@ pub enum BrowserMessage {
     },
 
     //
-    // Intercept target messages.
+    // Intercept targets virtual file.
     //
-    /// List all intercept targets
-    InterceptTargetList,
-    /// Add a new intercept target
-    InterceptTargetAdd {
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
+    /// Fetch the current intercept-targets TOML and parsed list
+    InterceptTargetsGet,
+    /// Save a new intercept-targets TOML; rejected on parse failure
+    InterceptTargetsSet {
+        text: String,
     },
-    /// Update an existing intercept target
-    InterceptTargetUpdate {
-        target_id: String,
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
-    },
-    /// Delete an intercept target
-    InterceptTargetDelete {
-        target_id: String,
-    },
-    /// Toggle disabled state for an intercept target
-    InterceptTargetToggleDisabled {
-        target_id: String,
-        disabled: bool,
-    },
+    /// Reset the intercept-targets virtual file to built-in defaults
+    InterceptTargetsResetDefaults,
 
     //
     // LogQuery messages.
@@ -693,29 +675,14 @@ pub enum ServerMessage {
     },
 
     //
-    // Intercept target messages.
+    // Intercept targets virtual-file state. `error` is set when the
+    // stored TOML fails to parse or a save was rejected.
     //
-    InterceptTargetList {
-        targets: Vec<common::InterceptTargetInfo>,
-    },
-    InterceptTargetAdded {
-        id: String,
-        name: String,
-    },
-    InterceptTargetUpdated {
-        id: String,
-        name: String,
-    },
-    InterceptTargetDeleted {
-        target_id: String,
-        success: bool,
-    },
-    InterceptTargetDisabledToggled {
-        target_id: String,
-        disabled: bool,
-    },
-    InterceptTargetError {
-        message: String,
+    InterceptTargetsState {
+        text: String,
+        targets: Vec<common::InterceptTargetConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 
     //

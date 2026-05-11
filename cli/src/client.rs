@@ -80,7 +80,9 @@ struct ClientState {
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
-    intercept_targets: Vec<common::InterceptTargetInfo>,
+    intercept_targets_text: String,
+    intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
+    intercept_targets_error: Option<String>,
 
     //
     // Intercept traffic: per-request one-shot senders and live streaming
@@ -411,15 +413,10 @@ impl Client {
                 // Trigger a re-fetch handled by the app layer.
             }
 
-            ClientDirectMessage::InterceptTargetListResponse { targets } => {
-                state.intercept_targets = targets;
-            }
-            ClientDirectMessage::InterceptTargetAdded { .. }
-            | ClientDirectMessage::InterceptTargetUpdated { .. }
-            | ClientDirectMessage::InterceptTargetDeleted { .. }
-            | ClientDirectMessage::InterceptTargetDisabledToggled { .. }
-            | ClientDirectMessage::InterceptTargetError { .. } => {
-                // Re-fetch handled by the app layer.
+            ClientDirectMessage::InterceptTargetsState { text, targets, error } => {
+                state.intercept_targets_text = text;
+                state.intercept_targets_parsed = targets;
+                state.intercept_targets_error = error;
             }
 
             //
@@ -1312,73 +1309,39 @@ impl Client {
     }
 
     //
-    // Intercept target methods.
+    // Intercept targets virtual file.
     //
 
     pub async fn request_intercept_targets(&self) -> Result<()> {
-        let message = ClientSignalMessage::InterceptTargetList {
+        let message = ClientSignalMessage::InterceptTargetsGet {
             client_id: self.client_id.clone(),
         };
         self.publish_signal(message).await
     }
 
-    pub async fn get_intercept_targets(&self) -> Vec<common::InterceptTargetInfo> {
-        self.state.lock().await.intercept_targets.clone()
+    pub async fn get_intercept_targets(&self) -> Vec<common::InterceptTargetConfig> {
+        self.state.lock().await.intercept_targets_parsed.clone()
     }
 
-    pub async fn add_intercept_target(
-        &self,
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::InterceptTargetAdd {
+    pub async fn get_intercept_targets_text(&self) -> String {
+        self.state.lock().await.intercept_targets_text.clone()
+    }
+
+    pub async fn get_intercept_targets_error(&self) -> Option<String> {
+        self.state.lock().await.intercept_targets_error.clone()
+    }
+
+    pub async fn set_intercept_targets(&self, text: String) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetsSet {
             client_id: self.client_id.clone(),
-            name,
-            agent_short_name,
-            domains,
-            url_pattern,
+            text,
         };
         self.publish_signal(message).await
     }
 
-    pub async fn update_intercept_target(
-        &self,
-        target_id: String,
-        name: String,
-        agent_short_name: String,
-        domains: Vec<String>,
-        url_pattern: Option<String>,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::InterceptTargetUpdate {
+    pub async fn reset_intercept_targets_defaults(&self) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetsResetDefaults {
             client_id: self.client_id.clone(),
-            target_id,
-            name,
-            agent_short_name,
-            domains,
-            url_pattern,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn delete_intercept_target(&self, target_id: String) -> Result<()> {
-        let message = ClientSignalMessage::InterceptTargetDelete {
-            client_id: self.client_id.clone(),
-            target_id,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn toggle_intercept_target_disabled(
-        &self,
-        target_id: String,
-        disabled: bool,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::InterceptTargetToggleDisabled {
-            client_id: self.client_id.clone(),
-            target_id,
-            disabled,
         };
         self.publish_signal(message).await
     }

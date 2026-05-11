@@ -268,20 +268,6 @@ CREATE TABLE IF NOT EXISTS lua_agent_scripts (
     updated_at TEXT NOT NULL
 );
 
--- Intercept targets (domains + filter regex per agent, pushed to nodes)
-CREATE TABLE IF NOT EXISTS intercept_targets (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    agent_short_name TEXT NOT NULL,
-    domains TEXT NOT NULL,
-    url_pattern TEXT,
-    disabled SMALLINT NOT NULL DEFAULT 0,
-    is_builtin SMALLINT NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_intercept_targets_agent ON intercept_targets(agent_short_name);
-
 -- Chain payloads table (static content for Payload chain elements)
 CREATE TABLE IF NOT EXISTS chain_payloads (
     id TEXT PRIMARY KEY,

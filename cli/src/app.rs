@@ -886,9 +886,20 @@ impl App {
                     && self.settings.tab == SettingsTab::Intercept
                     && !self.settings.intercept_targets_loaded
                 {
-                    let targets = self.client.get_intercept_targets().await;
-                    if !targets.is_empty() {
-                        self.poll_intercept_targets(targets);
+                    //
+                    // Intercept targets land via the InterceptTargetsState
+                    // direct message, which sets text + parsed list + error
+                    // atomically. The poll picks the response up once the
+                    // text field is non-empty (the service always echoes
+                    // *something* — either the stored TOML, the user's
+                    // unsaved draft on a parse failure, or an error string
+                    // with empty text).
+                    //
+                    let text = self.client.get_intercept_targets_text().await;
+                    let err = self.client.get_intercept_targets_error().await;
+                    if !text.is_empty() || err.is_some() {
+                        let targets = self.client.get_intercept_targets().await;
+                        self.poll_intercept_targets(targets).await;
                         redraw = true;
                     }
                 }
