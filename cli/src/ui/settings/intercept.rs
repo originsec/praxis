@@ -9,7 +9,6 @@ use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, TEXT_BRIGHT, WARN};
 
 pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState) {
     let mut lines: Vec<Line> = Vec::new();
-    let target_count = state.intercept_targets.len();
 
     lines.push(Line::from(vec![
         Span::styled(
@@ -31,72 +30,52 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
         )));
     } else if let Some(err) = state.intercept_targets_error.as_deref() {
         lines.push(Line::from(vec![
-            Span::styled("  Parse error: ", Style::default().fg(STATUS_FAIL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  Parse error: ",
+                Style::default().fg(STATUS_FAIL).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(err.to_string(), Style::default().fg(STATUS_FAIL)),
         ]));
-        lines.push(Line::raw(""));
-    } else if target_count == 0 {
+    } else if state.intercept_targets.is_empty() {
         lines.push(Line::from(Span::styled(
             "  No intercept targets configured.",
             Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
         )));
     }
 
-    for (i, target) in state.intercept_targets.iter().enumerate() {
-        let selected = state.selected == i;
-        let sel_style = if selected {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        };
-        let name_style = if selected {
-            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT_BRIGHT)
-        };
-
+    //
+    // Target rows are read-only and shown without a selection cursor.
+    // Each row puts the short_name in the left column and the inline
+    // domain list to the right, with an optional URL pattern at the
+    // far right.
+    //
+    for target in &state.intercept_targets {
         let mut spans = vec![
-            Span::styled(if selected { "\u{276f} " } else { "  " }, sel_style),
-            Span::styled(format!("{:<24}", target.name), name_style),
+            Span::raw("  "),
             Span::styled(
-                format!("[{}] ", target.agent_short_name),
-                Style::default().fg(DIM),
+                format!("{:<16}", target.agent_short_name),
+                Style::default().fg(TEXT_BRIGHT),
             ),
-            Span::styled(
-                format!("({} domains)", target.domains.len()),
-                Style::default().fg(DIM),
-            ),
+            Span::styled(target.domains.join(", "), Style::default().fg(MUTED)),
         ];
         if let Some(p) = target.url_pattern.as_deref().filter(|p| !p.is_empty()) {
-            spans.push(Span::styled(format!(" /{}/", p), Style::default().fg(DIM)));
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(format!("/{}/", p), Style::default().fg(DIM)));
         }
         lines.push(Line::from(spans));
-
-        if selected && !target.domains.is_empty() {
-            lines.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(target.domains.join(", "), Style::default().fg(MUTED)),
-            ]));
-        }
     }
 
     lines.push(Line::raw(""));
     lines.push(action_row(
         "\u{270e} Edit virtual file in $EDITOR",
-        state.selected == target_count,
+        state.selected == 0,
         ACCENT,
     ));
     lines.push(action_row(
         "\u{21bb} Reset to defaults",
-        state.selected == target_count + 1,
+        state.selected == 1,
         WARN,
     ));
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" activate", Style::default().fg(MUTED)),
-    ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);

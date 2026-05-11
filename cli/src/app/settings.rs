@@ -411,8 +411,11 @@ impl App {
                 self.settings.agent_scripts.len() + 6
             }
             SettingsTab::Intercept => {
-                // Parsed target rows + two action rows (edit file, reset defaults).
-                self.settings.intercept_targets.len() + 2
+                //
+                // Target rows are non-selectable; only the two action
+                // rows (edit virtual file, reset to defaults) count.
+                //
+                2
             }
             SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
             SettingsTab::About => 0,
@@ -845,19 +848,20 @@ impl App {
                 }
             }
             SettingsTab::Intercept => {
-                let target_count = self.settings.intercept_targets.len();
                 //
-                // Target rows are read-only; editing happens at the file
-                // level, so Enter on a target is a no-op. Only the two
-                // dedicated action rows below the list react.
+                // 0 = edit virtual file, 1 = reset to defaults. Target
+                // rows are not selectable; the parsed list is shown for
+                // reference only.
                 //
-                if sel == target_count {
-                    self.edit_intercept_targets_in_editor().await;
-                } else if sel == target_count + 1 {
-                    self.confirm = Some(ConfirmAction {
-                        message: "Reset intercept targets to built-in defaults?".to_string(),
-                        action: ConfirmKind::ResetInterceptTargets,
-                    });
+                match sel {
+                    0 => self.edit_intercept_targets_in_editor().await,
+                    1 => {
+                        self.confirm = Some(ConfirmAction {
+                            message: "Reset intercept targets to built-in defaults?".to_string(),
+                            action: ConfirmKind::ResetInterceptTargets,
+                        });
+                    }
+                    _ => {}
                 }
             }
             SettingsTab::Service => {
@@ -1230,13 +1234,16 @@ impl App {
                         }
                     }
                     SettingsTab::Intercept => {
+                        //
+                        // Layout: header (0), blank (1), tc target lines
+                        // (2..2+tc), blank, then the two action rows.
+                        // Target rows are not clickable.
+                        //
                         let tc = self.settings.intercept_targets.len();
-                        // Row 0: header, 1: blank, 2..2+tc: targets, 2+tc: blank,
-                        // 3+tc: "+ Add target" (idx tc).
-                        if rel_row >= 2 && rel_row < 2 + tc {
-                            Some(rel_row - 2)
-                        } else if rel_row == 3 + tc {
-                            Some(tc)
+                        if rel_row == 3 + tc {
+                            Some(0)
+                        } else if rel_row == 4 + tc {
+                            Some(1)
                         } else {
                             None
                         }
