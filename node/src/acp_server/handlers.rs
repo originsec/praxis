@@ -270,9 +270,25 @@ pub async fn handle_session_prompt(
     .await;
 
     //
-    // Wait for the forwarder to drain any in-flight updates. The senders
-    // owned by the transact path drop when transact returns, which closes
-    // the channel and lets the forwarder finish.
+    // Drop any sender clone left over in the global registry. In the happy
+    // path the transact body (Lua `acp_prompt`, Praxis native session, etc.)
+    // calls `take_update_sender` and owns the sender for the duration of the
+    // prompt. If transact errors or panics before reaching that call, the
+    // registered sender stays behind, the forwarder's `rx.recv().await`
+    // never returns None, and the `fwd.await` below would hang forever —
+    // which manifests upstream as a semantic-op timeout against streaming
+    // agents. Taking it here is a no-op on the happy path and a safety net
+    // otherwise.
+    //
+
+    if let Some(handle) = acp_handle.as_ref() {
+        let _ = crate::acp::take_update_sender(handle);
+    }
+
+    //
+    // Wait for the forwarder to drain any in-flight updates. With all sender
+    // clones dropped (including the one just removed above), the channel
+    // closes and the forwarder finishes.
     //
 
     if let Some(fwd) = forwarder {
