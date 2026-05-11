@@ -114,17 +114,26 @@ void net_cleanup(void);
 /* ============================================================== */
 
 void log_msg(const char *level, const char *fmt, ...);
+
+/*
+ * All logging is compiled out entirely in release builds — the
+ * binary writes nothing to stdout or stderr at runtime. The release
+ * Makefile target defines NDEBUG; the debug target does not.
+ *
+ * The no-op form still references the variadic args inside a
+ * never-taken branch so callers don't trip -Wunused warnings when
+ * a variable is only consumed by a log call.
+ */
+#ifdef NDEBUG
+#define LOG_NOOP_(...) do { if (0) log_msg("",  __VA_ARGS__); } while (0)
+#define LOG_INFO(...)  LOG_NOOP_(__VA_ARGS__)
+#define LOG_WARN(...)  LOG_NOOP_(__VA_ARGS__)
+#define LOG_ERROR(...) LOG_NOOP_(__VA_ARGS__)
+#define LOG_DEBUG(...) LOG_NOOP_(__VA_ARGS__)
+#else
 #define LOG_INFO(...)  log_msg("INFO",  __VA_ARGS__)
 #define LOG_WARN(...)  log_msg("WARN",  __VA_ARGS__)
 #define LOG_ERROR(...) log_msg("ERROR", __VA_ARGS__)
-
-/*
- * LOG_DEBUG is compiled out entirely in release builds. The release
- * Makefile target defines NDEBUG; the debug target does not.
- */
-#ifdef NDEBUG
-#define LOG_DEBUG(...) ((void)0)
-#else
 #define LOG_DEBUG(...) log_msg("DEBUG", __VA_ARGS__)
 #endif
 
