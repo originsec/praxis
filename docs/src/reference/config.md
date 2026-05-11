@@ -34,7 +34,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 | Variable | Effect |
 |----------|--------|
 | `PRAXIS_NOT_HIDDEN` | Disable hidden desktop for DevTools agents. Defaults to `1` in debug builds (visible for development) and `0` in release builds (hidden for production). Set to `1` to make the browser window visible for debugging. |
-| `PRAXIS_VERSION` | Docker build arg. Version of the prebuilt release tarball to download from GitHub Releases. Defaults to the version pinned in the `Dockerfile`. Usage: `PRAXIS_VERSION=0.9.27 docker compose up --build` |
+| `PRAXIS_VERSION` | Docker build arg. Version of the prebuilt release tarball to download from GitHub Releases. Defaults to the version pinned in the `Dockerfile`. Usage: `PRAXIS_VERSION=0.9.28 docker compose up --build` |
 | `PRAXIS_RELEASE_BASE` | Docker build arg. Base URL for the release download (without trailing `/v<version>/...`). Defaults to `https://github.com/originsec/praxis/releases/download`. Override to pull from a fork or mirror. |
 
 ### Logging

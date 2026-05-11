@@ -56,7 +56,7 @@ services:
     build:
       context: .
       args:
-        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.27}
+        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.28}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -85,7 +85,7 @@ services:
     build:
       context: .
       args:
-        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.27}
+        PRAXIS_VERSION: ${PRAXIS_VERSION:-0.9.28}
     depends_on:
       rabbitmq:
         condition: service_healthy

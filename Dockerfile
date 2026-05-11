@@ -8,12 +8,12 @@
 # Binaries are downloaded from the GitHub release matching PRAXIS_VERSION.
 # Override at build time, e.g.:
 #
-#   docker build --build-arg PRAXIS_VERSION=0.9.27 -t praxis .
+#   docker build --build-arg PRAXIS_VERSION=0.9.28 -t praxis .
 #
 
 FROM debian:bookworm-slim
 
-ARG PRAXIS_VERSION=0.9.27
+ARG PRAXIS_VERSION=0.9.28
 ARG PRAXIS_RELEASE_BASE=https://github.com/originsec/praxis/releases/download
 
 ENV container=docker
