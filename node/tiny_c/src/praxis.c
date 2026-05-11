@@ -82,7 +82,6 @@ typedef struct ai_msg {
 
 typedef struct session {
     char            id[40];          /* uuid string */
-    char            client_id[64];
     char           *cwd;             /* may be NULL */
     ai_msg         *messages;
     int             busy;            /* 1 while a worker is running */
@@ -485,6 +484,7 @@ static int parse_tool_call(const char *text, size_t n,
 
 typedef struct {
     session     *sess;
+    const char  *client_id;            /* destination for session/update sends */
     buf          assistant;            /* full streamed assistant text */
     int          stream_failed;
     char        *system_prompt;        /* tool-augmented; may be NULL */
@@ -568,7 +568,8 @@ static char *build_system_prompt(const char *base)
 // update. Caller-provided len must be > 0.
 //
 
-static void send_agent_chunk(session *s, const char *txt, size_t len)
+static void send_agent_chunk(const char *client_id, const char *session_id,
+                              const char *txt, size_t len)
 {
     buf u = {0};
     buf_puts(&u, "{\"sessionUpdate\":\"agent_message_chunk\","
@@ -576,7 +577,7 @@ static void send_agent_chunk(session *s, const char *txt, size_t len)
     jb_str(&u, txt, len);
     buf_puts(&u, "}}");
     buf_putc(&u, 0);
-    acp_send_session_notification(s->client_id, s->id, u.data);
+    acp_send_session_notification(client_id, session_id, u.data);
     buf_free(&u);
 }
 
@@ -602,7 +603,7 @@ static void drain_stream(stream_ctx *ctx)
         size_t p = 0;
         while (p < left && base[p] != '{') p++;
         if (p > 0) {
-            send_agent_chunk(ctx->sess, base, p);
+            send_agent_chunk(ctx->client_id, ctx->sess->id, base, p);
             ctx->streamed_len += p;
             base += p;
             left -= p;
@@ -628,7 +629,7 @@ static void drain_stream(stream_ctx *ctx)
         //
         // Not a marker — emit the brace and continue scanning.
         //
-        send_agent_chunk(ctx->sess, base, 1);
+        send_agent_chunk(ctx->client_id, ctx->sess->id, base, 1);
         ctx->streamed_len += 1;
     }
 }
@@ -667,7 +668,8 @@ static void on_sse_chunk(const char *data, size_t n, void *ud)
 // verbatim under the rawInput field. Pass NULL/0 to omit it.
 //
 
-static void emit_tool_call(session *s, const char *tool_call_id,
+static void emit_tool_call(const char *client_id, session *s,
+                           const char *tool_call_id,
                            const char *title,
                            const char *raw_input, size_t raw_input_len)
 {
@@ -683,7 +685,7 @@ static void emit_tool_call(session *s, const char *tool_call_id,
     }
     buf_putc(&u, '}');
     buf_putc(&u, 0);
-    acp_send_session_notification(s->client_id, s->id, u.data);
+    acp_send_session_notification(client_id, s->id, u.data);
     buf_free(&u);
 }
 
@@ -692,7 +694,8 @@ static void emit_tool_call(session *s, const char *tool_call_id,
 // content for a previously-announced tool call.
 //
 
-static void emit_tool_result(session *s, const char *tool_call_id,
+static void emit_tool_result(const char *client_id, session *s,
+                             const char *tool_call_id,
                              int success, const char *output, size_t out_len)
 {
     buf u = {0};
@@ -708,7 +711,7 @@ static void emit_tool_result(session *s, const char *tool_call_id,
     }
     buf_putc(&u, '}');
     buf_putc(&u, 0);
-    acp_send_session_notification(s->client_id, s->id, u.data);
+    acp_send_session_notification(client_id, s->id, u.data);
     buf_free(&u);
 }
 
@@ -750,6 +753,7 @@ static void msg_append(ai_msg **head, const char *role, const char *content)
 
 typedef struct {
     session  *sess;
+    char     *client_id;     /* client_id of the originating session/prompt request */
     char     *prompt;
     char     *id_raw;        /* JSON-RPC id for the prompt request, raw bytes */
 } prompt_args;
@@ -780,11 +784,12 @@ static void *prompt_worker(void *arg)
 {
     prompt_args *pa = arg;
     session *s = pa->sess;
+    const char *client_id = pa->client_id;
 
     praxis_cfg *cfg = snapshot_cfg();
     if (!cfg) {
-        acp_send_error(s->client_id, pa->id_raw, -32603, "Praxis agent not configured");
-        free(pa->prompt); free(pa->id_raw); free(pa);
+        acp_send_error(client_id, pa->id_raw, -32603, "Praxis agent not configured");
+        free(pa->client_id); free(pa->prompt); free(pa->id_raw); free(pa);
         s->busy = 0;
         return NULL;
     }
@@ -795,9 +800,9 @@ static void *prompt_worker(void *arg)
     int use_tls = 0;
     if (!cfg->endpoint_url ||
         http_parse_url(cfg->endpoint_url, &host, &port, &path, &use_tls) < 0) {
-        acp_send_error(s->client_id, pa->id_raw, -32603, "Invalid endpoint_url");
+        acp_send_error(client_id, pa->id_raw, -32603, "Invalid endpoint_url");
         praxis_cfg_free(cfg);
-        free(pa->prompt); free(pa->id_raw); free(pa);
+        free(pa->client_id); free(pa->prompt); free(pa->id_raw); free(pa);
         s->busy = 0;
         return NULL;
     }
@@ -858,6 +863,7 @@ static void *prompt_worker(void *arg)
 
         stream_ctx ctx = {0};
         ctx.sess = s;
+        ctx.client_id = client_id;
 
         int rc = http_post_sse(host, port, use_tls, full_path, headers,
                                body.data, body.len,
@@ -912,13 +918,13 @@ static void *prompt_worker(void *arg)
 
             char tc_id[37];
             uuid_v4(tc_id);
-            emit_tool_call(s, tc_id, cmd, args_json, alen);
+            emit_tool_call(client_id, s, tc_id, cmd, args_json, alen);
 
             buf out = {0};
             int rc_cmd = run_command(cmd, cwd, cmd_timeout, &s->cancel, &out);
             buf_putc(&out, 0);
 
-            emit_tool_result(s, tc_id, rc_cmd == 0,
+            emit_tool_result(client_id, s, tc_id, rc_cmd == 0,
                              out.data, out.data ? strlen(out.data) : 0);
 
             buf result_msg = {0};
@@ -946,7 +952,7 @@ static void *prompt_worker(void *arg)
         //
 
         if (ctx.streamed_len < full_len) {
-            send_agent_chunk(s, full + ctx.streamed_len,
+            send_agent_chunk(client_id, s->id, full + ctx.streamed_len,
                              full_len - ctx.streamed_len);
         }
 
@@ -962,17 +968,17 @@ static void *prompt_worker(void *arg)
     if (cancelled) {
         char result[64];
         snprintf(result, sizeof(result), "{\"stopReason\":\"cancelled\"}");
-        acp_send_response(s->client_id, pa->id_raw, result);
+        acp_send_response(client_id, pa->id_raw, result);
     } else if (erred) {
-        acp_send_error(s->client_id, pa->id_raw, -32603, "transact failed");
+        acp_send_error(client_id, pa->id_raw, -32603, "transact failed");
     } else {
-        acp_send_response(s->client_id, pa->id_raw, "{\"stopReason\":\"end_turn\"}");
+        acp_send_response(client_id, pa->id_raw, "{\"stopReason\":\"end_turn\"}");
     }
 
     free(host);
     free(full_path);
     praxis_cfg_free(cfg);
-    free(pa->prompt); free(pa->id_raw); free(pa);
+    free(pa->client_id); free(pa->prompt); free(pa->id_raw); free(pa);
     s->busy = 0;
     return NULL;
 }
@@ -1018,7 +1024,6 @@ static void handle_session_new(const char *client_id, const char *id_raw, json *
     if (!s) { acp_send_error(client_id, id_raw, -32603, "alloc failed"); return; }
     pthread_mutex_init(&s->mu, NULL);
     uuid_v4(s->id);
-    snprintf(s->client_id, sizeof(s->client_id), "%s", client_id);
     const char *cwd; size_t cwlen;
     if (json_get_str(params, "cwd", &cwd, &cwlen) && cwlen > 0) {
         s->cwd = malloc(cwlen + 1);
@@ -1090,12 +1095,13 @@ static void handle_session_prompt(const char *client_id, const char *id_raw, jso
 
     prompt_args *pa = calloc(1, sizeof(*pa));
     pa->sess = s;
+    pa->client_id = strdup(client_id);
     pa->prompt = text.data;       /* take ownership; do not buf_free */
     pa->id_raw = strdup(id_raw ? id_raw : "null");
 
     pthread_t th;
     if (pthread_create(&th, NULL, prompt_worker, pa) != 0) {
-        free(pa->prompt); free(pa->id_raw); free(pa);
+        free(pa->client_id); free(pa->prompt); free(pa->id_raw); free(pa);
         s->busy = 0;
         acp_send_error(client_id, id_raw, -32603, "Failed to spawn worker");
         return;
