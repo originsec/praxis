@@ -546,6 +546,42 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }))
     }
 
+    #[tool(description = "List active ACP sessions on a node. Returns each session's session_id, title (agent connector), and cwd. The session_id values can be passed to session_prompt or session_close.")]
+    async fn session_list(
+        &self,
+        Parameters(params): Parameters<NodeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
+
+        let result = client
+            .acp_request(&node_id, "session/list", json!({}))
+            .await.map_err(mcp_err)?;
+
+        let sessions: Vec<_> = result
+            .get("sessions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().filter_map(|s| {
+                    let session_id = s.get("sessionId").and_then(|v| v.as_str())?;
+                    Some(json!({
+                        "session_id": session_id,
+                        "session_id_short": crate::short_id(session_id),
+                        "title": s.get("title").and_then(|v| v.as_str()),
+                        "cwd": s.get("cwd").and_then(|v| v.as_str()),
+                    }))
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        json_result(json!({
+            "node_id": node_id,
+            "sessions": sessions,
+            "count": sessions.len(),
+        }))
+    }
+
     #[tool(description = "Close a session. Requires the session_id returned from session_create.")]
     async fn session_close(
         &self,
