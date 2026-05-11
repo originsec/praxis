@@ -1349,7 +1349,7 @@ async fn handle_codex_notification(
             }
             if let Some((acp_session_id, turn)) = lookup_active_turn(state, key.as_deref()) {
                 let _ = send_acp_to_client(&ctx, &node_id, &turn.client_id,
-                    session_update_tool_result(&acp_session_id, "shell", delta),
+                    session_update_tool_result(&acp_session_id, "shell", delta, false),
                 )
                 .await;
             }

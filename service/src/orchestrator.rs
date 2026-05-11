@@ -401,8 +401,9 @@ impl OrchestratorManager {
 
                             send_msg!(session_update_tool_call(&sid, &tool_name, tool_input_value));
 
-                            let result = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
-                                local_result
+                            let (result, is_error) = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
+                                let err = result_is_error(&local_result);
+                                (local_result, err)
                             } else {
                                 execute_mcp_tool(&peer, &tool_name, &tool_args).await
                             };
@@ -420,7 +421,7 @@ impl OrchestratorManager {
                                 }
                             }
 
-                            send_msg!(session_update_tool_result(&sid, &tool_name, &result));
+                            send_msg!(session_update_tool_result(&sid, &tool_name, &result, is_error));
 
                             tool_results.push((tool_name, result));
                             response_text = remaining_text;
@@ -706,7 +707,7 @@ async fn execute_mcp_tool(
     peer: &rmcp::service::Peer<rmcp::RoleClient>,
     tool_name: &str,
     tool_input: &Value,
-) -> String {
+) -> (String, bool) {
     let arguments = if let Some(obj) = tool_input.as_object() {
         if obj.is_empty() { None } else { Some(obj.clone()) }
     } else {
@@ -724,16 +725,32 @@ async fn execute_mcp_tool(
                     _ => None,
                 })
                 .unwrap_or_else(|| "{}".to_string());
-            text
+            let is_error = result.is_error.unwrap_or(false) || result_is_error(&text);
+            (text, is_error)
         }
         Err(e) => {
-            json!({
+            let payload = json!({
                 "status": "error",
                 "message": format!("MCP tool call failed: {}", e),
                 "display": format!("Error: {}", e)
-            }).to_string()
+            }).to_string();
+            (payload, true)
         }
     }
+}
+
+//
+// Inspect a tool-result payload for a `status: "error"` field — this is
+// the convention used by both local and MCP-side tool wrappers to signal
+// a logical failure even when the transport call itself succeeded.
+//
+
+fn result_is_error(result: &str) -> bool {
+    serde_json::from_str::<Value>(result)
+        .ok()
+        .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(str::to_string))
+        .map(|s| s == "error")
+        .unwrap_or(false)
 }
 
 fn convert_mcp_tools(mcp_tools: Vec<rmcp::model::Tool>) -> Vec<Tool> {
