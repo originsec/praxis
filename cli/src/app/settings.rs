@@ -1,9 +1,7 @@
-mod intercept_target_form;
 mod model_form;
 
 use super::*;
 
-pub use self::intercept_target_form::{InterceptTargetForm, InterceptTargetFormField, InterceptTargetFormMode};
 pub use self::model_form::ModelEditForm;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -72,11 +70,14 @@ pub struct SettingsState {
     pub agent_scripts_loaded: bool,
 
     //
-    // Intercept targets (URLs/filters pushed to nodes).
+    // Intercept targets (URLs/filters pushed to nodes). The virtual file
+    // lives as TOML text on the service; we cache the parsed list and
+    // any parse error here for the Intercept settings tab.
     //
-    pub intercept_targets: Vec<common::InterceptTargetInfo>,
+    pub intercept_targets: Vec<common::InterceptTargetConfig>,
+    pub intercept_targets_text: String,
+    pub intercept_targets_error: Option<String>,
     pub intercept_targets_loaded: bool,
-    pub intercept_target_form: Option<InterceptTargetForm>,
 
     //
     // Connection info (read-only, set at startup).
@@ -142,8 +143,9 @@ impl Default for SettingsState {
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
             intercept_targets: Vec::new(),
+            intercept_targets_text: String::new(),
+            intercept_targets_error: None,
             intercept_targets_loaded: false,
-            intercept_target_form: None,
             dropdown_open: false,
             dropdown_selected: 0,
             dropdown_field: 0,
@@ -348,13 +350,18 @@ impl App {
         self.terminal_paused
             .store(true, std::sync::atomic::Ordering::Relaxed);
         crossterm::terminal::disable_raw_mode().ok();
-        crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen).ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        ).ok();
 
         let status = std::process::Command::new(&editor).arg(&path).status();
 
         crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
         )
         .ok();
@@ -409,8 +416,11 @@ impl App {
                 self.settings.agent_scripts.len() + 6
             }
             SettingsTab::Intercept => {
-                // Targets list + "Add new"
-                self.settings.intercept_targets.len() + 1
+                //
+                // Target rows are non-selectable; only the two action
+                // rows (edit virtual file, reset to defaults) count.
+                //
+                2
             }
             SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
             SettingsTab::About => 0,
@@ -558,10 +568,13 @@ impl App {
         }
     }
 
-    pub(crate) fn poll_intercept_targets(&mut self, targets: Vec<common::InterceptTargetInfo>) {
-        let mut targets = targets;
-        targets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    pub(crate) async fn poll_intercept_targets(
+        &mut self,
+        targets: Vec<common::InterceptTargetConfig>,
+    ) {
         self.settings.intercept_targets = targets;
+        self.settings.intercept_targets_text = self.client.get_intercept_targets_text().await;
+        self.settings.intercept_targets_error = self.client.get_intercept_targets_error().await;
         self.settings.intercept_targets_loaded = true;
     }
 
@@ -653,10 +666,6 @@ impl App {
             return;
         }
 
-        if self.settings.intercept_target_form.is_some() {
-            self.handle_intercept_target_form_key(key).await;
-            return;
-        }
 
         match key.code {
             KeyCode::Tab => {
@@ -734,35 +743,6 @@ impl App {
                     self.confirm = Some(ConfirmAction {
                         message: format!("Delete agent script '{}'?", name),
                         action: ConfirmKind::DeleteAgentScript(id),
-                    });
-                }
-            }
-            KeyCode::Char(' ') if self.settings.tab == SettingsTab::Intercept => {
-                let sel = self.settings.selected;
-                if sel < self.settings.intercept_targets.len() {
-                    let target = &self.settings.intercept_targets[sel];
-                    let id = target.id.clone();
-                    let new_disabled = !target.disabled;
-                    let _ = self
-                        .client
-                        .toggle_intercept_target_disabled(id, new_disabled)
-                        .await;
-                    self.settings.intercept_targets_loaded = false;
-                    self.load_intercept_targets().await;
-                }
-            }
-            KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && self.settings.tab == SettingsTab::Intercept =>
-            {
-                let sel = self.settings.selected;
-                if sel < self.settings.intercept_targets.len() {
-                    let target = &self.settings.intercept_targets[sel];
-                    let name = target.name.clone();
-                    let id = target.id.clone();
-                    self.confirm = Some(ConfirmAction {
-                        message: format!("Delete intercept target '{}'?", name),
-                        action: ConfirmKind::DeleteInterceptTarget(id),
                     });
                 }
             }
@@ -873,13 +853,20 @@ impl App {
                 }
             }
             SettingsTab::Intercept => {
-                let target_count = self.settings.intercept_targets.len();
-                if sel < target_count {
-                    let target = &self.settings.intercept_targets[sel];
-                    self.settings.intercept_target_form =
-                        Some(InterceptTargetForm::from_existing(target));
-                } else if sel == target_count {
-                    self.settings.intercept_target_form = Some(InterceptTargetForm::new_create());
+                //
+                // 0 = edit virtual file, 1 = reset to defaults. Target
+                // rows are not selectable; the parsed list is shown for
+                // reference only.
+                //
+                match sel {
+                    0 => self.edit_intercept_targets_in_editor().await,
+                    1 => {
+                        self.confirm = Some(ConfirmAction {
+                            message: "Reset intercept targets to built-in defaults?".to_string(),
+                            action: ConfirmKind::ResetInterceptTargets,
+                        });
+                    }
+                    _ => {}
                 }
             }
             SettingsTab::Service => {
@@ -1252,13 +1239,16 @@ impl App {
                         }
                     }
                     SettingsTab::Intercept => {
+                        //
+                        // Layout: header (0), blank (1), tc target lines
+                        // (2..2+tc), blank, then the two action rows.
+                        // Target rows are not clickable.
+                        //
                         let tc = self.settings.intercept_targets.len();
-                        // Row 0: header, 1: blank, 2..2+tc: targets, 2+tc: blank,
-                        // 3+tc: "+ Add target" (idx tc).
-                        if rel_row >= 2 && rel_row < 2 + tc {
-                            Some(rel_row - 2)
-                        } else if rel_row == 3 + tc {
-                            Some(tc)
+                        if rel_row == 3 + tc {
+                            Some(0)
+                        } else if rel_row == 4 + tc {
+                            Some(1)
                         } else {
                             None
                         }
@@ -1327,67 +1317,132 @@ impl App {
         }
     }
 
-    pub(crate) async fn handle_intercept_target_form_key(&mut self, key: KeyEvent) {
-        let Some(form) = self.settings.intercept_target_form.as_mut() else {
-            return;
-        };
+    //
+    // Open the intercept-targets virtual file (raw TOML) in $EDITOR.
+    // On a clean exit and non-empty content the new text is sent to the
+    // service; a parse error there is surfaced via the status line and
+    // the locally-cached error field.
+    //
 
-        match key.code {
-            KeyCode::Esc => {
-                self.settings.intercept_target_form = None;
-            }
-            KeyCode::Tab => form.focus_next(),
-            KeyCode::BackTab => form.focus_prev(),
-            KeyCode::Enter => {
-                self.save_intercept_target_form().await;
-            }
-            KeyCode::Backspace => form.backspace(),
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                form.type_char(c);
-            }
-            _ => {}
+    pub(crate) async fn edit_intercept_targets_in_editor(&mut self) {
+        use std::io::Write;
+
+        //
+        // Make sure we have the current text before opening the editor —
+        // poll the cached state first, fetching fresh if needed.
+        //
+        if !self.settings.intercept_targets_loaded {
+            self.load_intercept_targets().await;
         }
-    }
-
-    async fn save_intercept_target_form(&mut self) {
-        let Some(form) = self.settings.intercept_target_form.as_mut() else {
-            return;
+        let initial_text = self.client.get_intercept_targets_text().await;
+        let initial_text = if initial_text.is_empty() {
+            //
+            // Fallback for the case where the service hasn't responded yet:
+            // start from an empty buffer rather than overwriting silently.
+            //
+            "# Praxis intercept targets — service did not return content.\n# Save this file to write it; reset to defaults from the settings menu.\n".to_string()
+        } else {
+            initial_text
         };
-        let (name, agent, domains, url_pattern) = match form.validate() {
-            Ok(v) => v,
-            Err(msg) => {
-                form.error = Some(msg);
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() }
+            });
+
+        let tmp = match tempfile::Builder::new()
+            .prefix("praxis_intercept_targets_")
+            .suffix(".toml")
+            .tempfile()
+        {
+            Ok(f) => f,
+            Err(e) => {
+                self.settings.status_message = Some(format!("Failed to create temp file: {}", e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
                 return;
             }
         };
-        let result = match form.mode {
-            InterceptTargetFormMode::Create => {
-                self.client
-                    .add_intercept_target(name, agent, domains, url_pattern)
-                    .await
-            }
-            InterceptTargetFormMode::Edit => {
-                let id = form.editing_id.clone().unwrap_or_default();
-                self.client
-                    .update_intercept_target(id, name, agent, domains, url_pattern)
-                    .await
-            }
-        };
 
-        match result {
+        if let Err(e) = tmp.as_file().write_all(initial_text.as_bytes()) {
+            self.settings.status_message = Some(format!("Failed to write temp file: {}", e));
+            self.settings.status_message_at = Some(std::time::Instant::now());
+            return;
+        }
+
+        let path = tmp.path().to_path_buf();
+
+        self.terminal_paused.store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        ).ok();
+
+        let status = std::process::Command::new(&editor).arg(&path).status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        ).ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+        self.needs_full_redraw = true;
+
+        match status {
+            Ok(s) if s.success() => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    if content == initial_text {
+                        self.settings.status_message = Some("No changes".to_string());
+                        self.settings.status_message_at = Some(std::time::Instant::now());
+                        return;
+                    }
+                    if let Err(e) = self.client.set_intercept_targets(content).await {
+                        self.settings.status_message =
+                            Some(format!("Failed to save targets: {}", e));
+                        self.settings.status_message_at = Some(std::time::Instant::now());
+                        return;
+                    }
+                    self.settings.status_message = Some("Saved".to_string());
+                    self.settings.status_message_at = Some(std::time::Instant::now());
+                    self.settings.intercept_targets_loaded = false;
+                    self.load_intercept_targets().await;
+                }
+                Err(e) => {
+                    self.settings.status_message = Some(format!("Failed to read file: {}", e));
+                    self.settings.status_message_at = Some(std::time::Instant::now());
+                }
+            },
             Ok(_) => {
-                self.settings.intercept_target_form = None;
-                self.settings.status_message = Some("Saved".to_string());
+                self.settings.status_message = Some("Editor exited with error".to_string());
                 self.settings.status_message_at = Some(std::time::Instant::now());
-                self.settings.intercept_targets_loaded = false;
-                self.load_intercept_targets().await;
             }
             Err(e) => {
-                if let Some(form) = self.settings.intercept_target_form.as_mut() {
-                    form.error = Some(format!("Save failed: {}", e));
-                }
+                self.settings.status_message =
+                    Some(format!("Failed to launch editor '{}': {}", editor, e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
             }
         }
+    }
+
+    pub(crate) async fn reset_intercept_targets_to_defaults(&mut self) {
+        if let Err(e) = self.client.reset_intercept_targets_defaults().await {
+            self.settings.status_message = Some(format!("Failed to reset: {}", e));
+            self.settings.status_message_at = Some(std::time::Instant::now());
+            return;
+        }
+        self.settings.status_message = Some("Reset to defaults".to_string());
+        self.settings.status_message_at = Some(std::time::Instant::now());
+        self.settings.intercept_targets_loaded = false;
+        self.load_intercept_targets().await;
     }
 }
 

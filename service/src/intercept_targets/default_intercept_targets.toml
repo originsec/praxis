@@ -1,0 +1,37 @@
+# Praxis intercept targets.
+#
+# Each [section] is a single intercept target. The section header is the
+# agent short_name used to route captured traffic to the matching agent
+# connector. Comment a section out (prefix every line with #) to disable
+# it. Use the "Reset to defaults" option to restore this file's original
+# contents.
+#
+# Fields per target:
+#   domains     = ["host1", "host2"]               (required, one or more)
+#   url_pattern = "regex matched against URL path" (optional)
+
+[claudecode]
+domains = ["api.anthropic.com", "a-api.anthropic.com"]
+url_pattern = "messages"
+
+[claudedesktop]
+domains = ["api.anthropic.com", "a-api.anthropic.com"]
+url_pattern = "messages"
+
+[cursor]
+domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
+
+[droid]
+domains = [
+    "api.factory.ai",
+    "staging.api.factory.ai",
+    "preprod.api.factory.ai",
+    "dev.api.factory.ai",
+]
+
+[gemini]
+domains = ["generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"]
+
+[m365copilot]
+domains = ["substrate.office.com"]
+url_pattern = "m365Copilot/Chathub"

@@ -681,20 +681,29 @@ fn is_process_running(name: &str) -> bool {
 ## Step 4: Configure Interception
 
 Traffic interception is no longer declared on the connector itself.
-Domains and URL filters live as **intercept targets** in the service
-database and are pushed to nodes at runtime. To enable capture for a
-new connector:
+Domains and URL filters live as **intercept targets** in a TOML virtual
+file on the service, and the parsed list is pushed to nodes at runtime.
+To enable capture for a new connector:
 
 1. Open **Settings → Intercept** in the praxis TUI.
-2. Click **Add intercept target**.
-3. Set `agent_short_name` to the connector's short name (e.g.
-   `exampleai`), list the domains to capture, and optionally set a
-   URL regex filter.
-4. Save. The service broadcasts the new target list to all connected
-   nodes immediately.
+2. Select **Edit virtual file in $EDITOR** and add a new section keyed
+   by the connector's `agent_short_name`. For example:
 
-Built-in connectors are seeded with a default intercept target on first
-boot; you can edit, disable, or delete those defaults from the same UI.
+   ```toml
+   [exampleai]
+   domains = ["api.example.ai"]
+   url_pattern = "v1/chat"  # optional
+   ```
+
+3. Save the file and exit the editor. The service parses the new
+   contents, persists them, and broadcasts the updated list to all
+   connected nodes immediately. Parse errors are reported in the
+   settings status bar and the stored file is left untouched.
+
+Built-in connectors ship in this file by default; use the **Reset to
+built-in defaults** action to discard local edits and start over. To
+disable a target without deleting it, comment out the entire section
+with `#`.
 
 ## Step 5: Implement Reconnaissance
 

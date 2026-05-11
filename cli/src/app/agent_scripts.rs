@@ -66,13 +66,18 @@ impl App {
         self.terminal_paused
             .store(true, std::sync::atomic::Ordering::Relaxed);
         crossterm::terminal::disable_raw_mode().ok();
-        crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen).ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        ).ok();
 
         let status = std::process::Command::new(&editor).arg(&path).status();
 
         crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
         )
         .ok();

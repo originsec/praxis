@@ -439,7 +439,99 @@ impl Database {
             }
         }
 
+        //
+        // Migration: replace the legacy per-row `intercept_targets` table
+        // with the TOML virtual file stored in service_config. Existing
+        // customisations (including user-edited builtins) are preserved
+        // by converting the rows to TOML before dropping the table. The
+        // old version-tracking key is removed.
+        //
+        self.migrate_intercept_targets_to_toml().await;
+
         Ok(())
+    }
+
+    async fn migrate_intercept_targets_to_toml(&self) {
+        use sqlx::Row;
+
+        let toml_already_set = self
+            .get_config(crate::intercept_targets::SERVICE_CONFIG_KEY)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+
+        if !toml_already_set {
+            //
+            // Pull the rows in a backend-neutral way. Both backends use the
+            // same column names; failure to read is treated as "nothing to
+            // migrate" since the table may not exist on a fresh install.
+            //
+            let rows: Vec<(String, String, String, Option<String>, bool)> = match &self.pool {
+                DatabasePool::Sqlite(pool) => {
+                    match sqlx::query(
+                        "SELECT name, agent_short_name, domains, url_pattern, disabled \
+                         FROM intercept_targets ORDER BY agent_short_name"
+                    ).fetch_all(pool).await {
+                        Ok(rs) => rs.into_iter().map(|r| (
+                            r.get::<String, _>(0),
+                            r.get::<String, _>(1),
+                            r.get::<String, _>(2),
+                            r.get::<Option<String>, _>(3),
+                            r.get::<bool, _>(4),
+                        )).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                }
+                DatabasePool::Postgres(pool) => {
+                    match sqlx::query(
+                        "SELECT name, agent_short_name, domains, url_pattern, disabled \
+                         FROM intercept_targets ORDER BY agent_short_name"
+                    ).fetch_all(pool).await {
+                        Ok(rs) => rs.into_iter().map(|r| (
+                            r.get::<String, _>(0),
+                            r.get::<String, _>(1),
+                            r.get::<String, _>(2),
+                            r.get::<Option<String>, _>(3),
+                            r.get::<i16, _>(4) != 0,
+                        )).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                }
+            };
+
+            if !rows.is_empty() {
+                let toml_text = render_legacy_rows_as_toml(&rows);
+                if let Err(e) = self
+                    .set_config(crate::intercept_targets::SERVICE_CONFIG_KEY, &toml_text)
+                    .await
+                {
+                    common::log_warn!(
+                        "intercept_targets migration: failed to persist converted TOML: {}",
+                        e
+                    );
+                } else {
+                    common::log_info!(
+                        "Migrated {} legacy intercept target row(s) into TOML virtual file",
+                        rows.len()
+                    );
+                }
+            }
+        }
+
+        //
+        // Drop the legacy table and version key regardless of whether we
+        // migrated anything. Failures are non-fatal.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets").execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets").execute(pool).await;
+            }
+        }
+        let _ = self.delete_config("builtin_intercept_targets_version").await;
     }
 
     /// Check if using PostgreSQL backend
@@ -478,4 +570,59 @@ impl Database {
     pub(crate) fn pool(&self) -> &DatabasePool {
         &self.pool
     }
+}
+
+//
+// Render rows from the legacy `intercept_targets` table as TOML for the
+// new virtual file. `domains` is the JSON-encoded array stored in the
+// old column; disabled rows are emitted as commented-out sections so
+// users see them and can re-enable by uncommenting.
+//
+
+fn render_legacy_rows_as_toml(
+    rows: &[(String, String, String, Option<String>, bool)],
+) -> String {
+    let mut out = String::from(crate::intercept_targets::default_text().lines()
+        .take_while(|l| l.starts_with('#') || l.is_empty())
+        .collect::<Vec<_>>().join("\n"));
+    out.push_str("\n\n");
+
+    for (legacy_name, short_name, domains_json, url_pattern, disabled) in rows {
+        let domains: Vec<String> = serde_json::from_str(domains_json).unwrap_or_default();
+        let prefix = if *disabled { "# " } else { "" };
+        //
+        // Legacy rows had a separate human-readable `name` column; the
+        // new format keys solely off short_name. If the two differed in
+        // the old DB, leave the old display name in a trailing comment
+        // so the user can still see the original label.
+        //
+        if legacy_name != short_name && !legacy_name.is_empty() {
+            out.push_str(&format!("{}[{}] # was: {}\n", prefix, short_name, legacy_name));
+        } else {
+            out.push_str(&format!("{}[{}]\n", prefix, short_name));
+        }
+        let domain_list = domains
+            .iter()
+            .map(|d| toml_str(d))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!("{}domains = [{}]\n", prefix, domain_list));
+        if let Some(pat) = url_pattern.as_deref().filter(|p| !p.is_empty()) {
+            out.push_str(&format!("{}url_pattern = {}\n", prefix, toml_str(pat)));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn toml_str(s: &str) -> String {
+    let escaped: String = s.chars().flat_map(|c| match c {
+        '\\' => "\\\\".chars().collect::<Vec<_>>(),
+        '"' => "\\\"".chars().collect::<Vec<_>>(),
+        '\n' => "\\n".chars().collect::<Vec<_>>(),
+        '\r' => "\\r".chars().collect::<Vec<_>>(),
+        '\t' => "\\t".chars().collect::<Vec<_>>(),
+        c => vec![c],
+    }).collect();
+    format!("\"{}\"", escaped)
 }

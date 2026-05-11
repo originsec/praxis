@@ -2,7 +2,6 @@ mod about;
 mod agents;
 mod forms;
 mod intercept;
-mod intercept_target_form;
 mod llm;
 mod service;
 
@@ -57,10 +56,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     if let Some(ref form) = state.model_form {
         forms::render_model_form(f, area, form);
-    }
-
-    if let Some(ref form) = state.intercept_target_form {
-        intercept_target_form::render(f, area, form);
     }
 
     if let Some(ref msg) = state.status_message {

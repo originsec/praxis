@@ -297,22 +297,16 @@ pub async fn handle_browser_message(
         }
 
         //
-        // Intercept target messages.
+        // Intercept targets virtual file.
         //
-        BrowserMessage::InterceptTargetList => {
-            state.rabbitmq.list_intercept_targets().await?;
+        BrowserMessage::InterceptTargetsGet => {
+            state.rabbitmq.get_intercept_targets().await?;
         }
-        BrowserMessage::InterceptTargetAdd { name, agent_short_name, domains, url_pattern } => {
-            state.rabbitmq.add_intercept_target(name, agent_short_name, domains, url_pattern).await?;
+        BrowserMessage::InterceptTargetsSet { text } => {
+            state.rabbitmq.set_intercept_targets(text).await?;
         }
-        BrowserMessage::InterceptTargetUpdate { target_id, name, agent_short_name, domains, url_pattern } => {
-            state.rabbitmq.update_intercept_target(target_id, name, agent_short_name, domains, url_pattern).await?;
-        }
-        BrowserMessage::InterceptTargetDelete { target_id } => {
-            state.rabbitmq.delete_intercept_target(target_id).await?;
-        }
-        BrowserMessage::InterceptTargetToggleDisabled { target_id, disabled } => {
-            state.rabbitmq.toggle_intercept_target_disabled(target_id, disabled).await?;
+        BrowserMessage::InterceptTargetsResetDefaults => {
+            state.rabbitmq.reset_intercept_targets_defaults().await?;
         }
 
         //

@@ -27,21 +27,46 @@ Praxis acts as a man-in-the-middle:
 
 The set of domains and URL filters captured by the proxy is configured
 centrally on the service and pushed to nodes — there is no per-agent
-hard-coded list. Each **intercept target** groups one or more domains
-under an optional URL regex and is attributed to an agent
-(`agent_short_name`) for traffic routing and recon attribution.
+hard-coded list. The full list lives as a single **TOML virtual file**
+on the service. Each `[section]` is one intercept target; the section
+header is the `agent_short_name` used to route captured traffic to the
+matching connector.
 
-Praxis ships built-in targets for the bundled connectors (Claude Code,
-Claude Desktop, Cursor, Droid, Gemini, M365 Copilot). They are seeded
-on first boot and can be edited, disabled, or deleted.
+```toml
+[claudecode]
+domains = ["api.anthropic.com", "a-api.anthropic.com"]
+url_pattern = "messages"
+
+[cursor]
+domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
+```
+
+Fields per target:
+
+| Field         | Required | Notes                                                |
+|---------------|----------|------------------------------------------------------|
+| `domains`     | yes      | One or more hostnames to capture for this target.    |
+| `url_pattern` | no       | Optional regex matched against the request URL path. |
+
+Lines starting with `#` are ignored. To disable a target without
+deleting it, comment out the entire section. Praxis ships built-in
+targets for the bundled connectors (Claude Code, Claude Desktop,
+Cursor, Droid, Gemini, M365 Copilot); the defaults are seeded on first
+boot.
 
 ### Managing targets
 
-- **TUI:** Settings (`Ctrl+S`) → Intercept tab. `enter` to edit, `space`
-  to toggle enable/disable, `^d` to delete.
+- **TUI:** Settings (`Ctrl+S`) → Intercept tab. The tab shows the
+  currently-parsed targets and two actions:
+  - **Edit virtual file in $EDITOR** — opens the raw TOML in your editor
+    (`$VISUAL` / `$EDITOR`, falling back to `vi`/`notepad`). Save and
+    exit to send the new contents to the service; parse errors are
+    reported in the status bar and the stored file is left untouched.
+  - **Reset to built-in defaults** — restores the file shipped with
+    Praxis after a confirmation prompt.
 
-Changes take effect immediately: the service broadcasts the new list to
-all connected nodes. If interception is currently enabled on a node,
+Changes take effect immediately: the service broadcasts the parsed list
+to all connected nodes. If interception is currently enabled on a node,
 the new list is applied the next time interception is enabled.
 
 ## Interception Methods
