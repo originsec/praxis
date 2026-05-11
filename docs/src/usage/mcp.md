@@ -85,6 +85,7 @@ All recon tools take a `node` prefix and an `agent` short-name.
 ### Sessions
 
 - `session_create` — Create a new ACP session (`node`, `agent`, optional `project`, `yolo`). Returns a `session_id`.
+- `session_list` — Enumerate active ACP sessions on a node (`node`). Returns each session's id (full + short), title, and cwd.
 - `session_prompt` — Send a prompt to a session (`node`, `session_id`, `prompt`)
 - `session_close` — Close a session (`node`, `session_id`)
 
