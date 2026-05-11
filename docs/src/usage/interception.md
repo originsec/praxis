@@ -34,22 +34,19 @@ matching connector.
 
 ```toml
 [claudecode]
-name = "Claude Code"
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
 [cursor]
-name = "Cursor Agent"
 domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 ```
 
 Fields per target:
 
-| Field         | Required | Notes                                                         |
-|---------------|----------|---------------------------------------------------------------|
-| `name`        | yes      | Human-readable label shown in the UI.                         |
-| `domains`     | yes      | One or more hostnames to capture for this target.             |
-| `url_pattern` | no       | Optional regex matched against the request URL path.          |
+| Field         | Required | Notes                                                |
+|---------------|----------|------------------------------------------------------|
+| `domains`     | yes      | One or more hostnames to capture for this target.    |
+| `url_pattern` | no       | Optional regex matched against the request URL path. |
 
 Lines starting with `#` are ignored. To disable a target without
 deleting it, comment out the entire section. Praxis ships built-in

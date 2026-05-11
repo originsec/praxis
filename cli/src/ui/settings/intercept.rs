@@ -5,7 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
-use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, TEXT_BRIGHT};
+use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, TEXT_BRIGHT, WARN};
 
 pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState) {
     let mut lines: Vec<Line> = Vec::new();
@@ -82,32 +82,34 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
 
     lines.push(Line::raw(""));
     lines.push(action_row(
-        "Edit virtual file in $EDITOR",
+        "\u{270e} Edit virtual file in $EDITOR",
         state.selected == target_count,
+        ACCENT,
     ));
     lines.push(action_row(
-        "Reset to built-in defaults",
+        "\u{21bb} Reset to defaults",
         state.selected == target_count + 1,
+        WARN,
     ));
 
     lines.push(Line::raw(""));
     lines.push(Line::from(vec![
         Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" edit / activate", Style::default().fg(MUTED)),
+        Span::styled(" activate", Style::default().fg(MUTED)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
 
-fn action_row(label: &str, selected: bool) -> Line<'_> {
+fn action_row(label: &str, selected: bool, active_color: ratatui::style::Color) -> Line<'_> {
     let prefix_style = if selected {
-        Style::default().fg(ACCENT)
+        Style::default().fg(active_color)
     } else {
         Style::default().fg(DIM)
     };
     let label_style = if selected {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        Style::default().fg(active_color).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(DIM)
     };

@@ -847,12 +847,11 @@ impl App {
             SettingsTab::Intercept => {
                 let target_count = self.settings.intercept_targets.len();
                 //
-                // Whether the cursor is on a target row or the "Edit
-                // virtual file" action, the activation behaviour is the
-                // same: open the raw TOML in $EDITOR. The second action
-                // row resets the file to built-in defaults (confirmed).
+                // Target rows are read-only; editing happens at the file
+                // level, so Enter on a target is a no-op. Only the two
+                // dedicated action rows below the list react.
                 //
-                if sel <= target_count {
+                if sel == target_count {
                     self.edit_intercept_targets_in_editor().await;
                 } else if sel == target_count + 1 {
                     self.confirm = Some(ConfirmAction {

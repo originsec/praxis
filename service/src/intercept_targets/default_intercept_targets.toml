@@ -7,26 +7,21 @@
 # contents.
 #
 # Fields per target:
-#   name        = "Friendly Name"                  (required)
 #   domains     = ["host1", "host2"]               (required, one or more)
 #   url_pattern = "regex matched against URL path" (optional)
 
 [claudecode]
-name = "Claude Code"
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
 [claudedesktop]
-name = "Claude Desktop"
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
 [cursor]
-name = "Cursor Agent"
 domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 
 [droid]
-name = "Droid CLI"
 domains = [
     "api.factory.ai",
     "staging.api.factory.ai",
@@ -35,10 +30,8 @@ domains = [
 ]
 
 [gemini]
-name = "Gemini CLI"
 domains = ["generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"]
 
 [m365copilot]
-name = "Microsoft 365 Copilot"
 domains = ["substrate.office.com"]
 url_pattern = "m365Copilot/Chathub"

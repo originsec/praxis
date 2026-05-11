@@ -587,11 +587,20 @@ fn render_legacy_rows_as_toml(
         .collect::<Vec<_>>().join("\n"));
     out.push_str("\n\n");
 
-    for (name, short_name, domains_json, url_pattern, disabled) in rows {
+    for (legacy_name, short_name, domains_json, url_pattern, disabled) in rows {
         let domains: Vec<String> = serde_json::from_str(domains_json).unwrap_or_default();
         let prefix = if *disabled { "# " } else { "" };
-        out.push_str(&format!("{}[{}]\n", prefix, short_name));
-        out.push_str(&format!("{}name = {}\n", prefix, toml_str(name)));
+        //
+        // Legacy rows had a separate human-readable `name` column; the
+        // new format keys solely off short_name. If the two differed in
+        // the old DB, leave the old display name in a trailing comment
+        // so the user can still see the original label.
+        //
+        if legacy_name != short_name && !legacy_name.is_empty() {
+            out.push_str(&format!("{}[{}] # was: {}\n", prefix, short_name, legacy_name));
+        } else {
+            out.push_str(&format!("{}[{}]\n", prefix, short_name));
+        }
         let domain_list = domains
             .iter()
             .map(|d| toml_str(d))

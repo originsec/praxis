@@ -691,7 +691,6 @@ To enable capture for a new connector:
 
    ```toml
    [exampleai]
-   name = "Example AI"
    domains = ["api.example.ai"]
    url_pattern = "v1/chat"  # optional
    ```

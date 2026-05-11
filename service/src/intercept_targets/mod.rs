@@ -17,7 +17,6 @@ pub const SERVICE_CONFIG_KEY: &str = "intercept_targets_toml";
 
 #[derive(Debug, Deserialize)]
 struct RawTarget {
-    name: String,
     domains: Vec<String>,
     #[serde(default)]
     url_pattern: Option<String>,
@@ -43,9 +42,6 @@ pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
         if short_name.is_empty() {
             return Err("Empty [section] name; each target needs a short_name header.".to_string());
         }
-        if raw.name.trim().is_empty() {
-            return Err(format!("Target [{}]: 'name' is required.", short_name));
-        }
         let domains: Vec<String> = raw.domains
             .into_iter()
             .map(|d| d.trim().to_string())
@@ -60,8 +56,14 @@ pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
         let url_pattern = raw.url_pattern
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty());
+        //
+        // The section header is both the agent_short_name (used for
+        // traffic routing) and the human-readable label shown in logs
+        // and UI. We populate `name` with it so downstream code that
+        // expected a separate display string still has something useful.
+        //
         out.push(InterceptTargetConfig {
-            name: raw.name,
+            name: short_name.clone(),
             agent_short_name: short_name,
             domains,
             url_pattern,
@@ -84,14 +86,22 @@ mod tests {
 
     #[test]
     fn comment_disables_section() {
-        let text = "# [claudecode]\n# name = \"x\"\n# domains = [\"y\"]\n";
+        let text = "# [claudecode]\n# domains = [\"y\"]\n";
         let targets = parse(text).unwrap();
         assert!(targets.is_empty());
     }
 
     #[test]
     fn missing_domains_errors() {
-        let text = "[foo]\nname = \"Foo\"\ndomains = []\n";
+        let text = "[foo]\ndomains = []\n";
         assert!(parse(text).is_err());
+    }
+
+    #[test]
+    fn name_equals_short_name() {
+        let text = "[claudecode]\ndomains = [\"api.anthropic.com\"]\n";
+        let targets = parse(text).unwrap();
+        assert_eq!(targets[0].name, "claudecode");
+        assert_eq!(targets[0].agent_short_name, "claudecode");
     }
 }
