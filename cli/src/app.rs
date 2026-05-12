@@ -136,6 +136,13 @@ pub struct ReconOverlay {
     pub right_pane_focused: bool,
     pub recon_split_percent: u16,
     pub recon_dragging: bool,
+
+    //
+    // Transient status line for the Config tab editor flow (^e). Shown
+    // in the recon header and auto-clears after a few seconds.
+    //
+
+    pub config_edit_status: Option<(String, std::time::Instant)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1215,6 +1222,7 @@ impl App {
             right_pane_focused: false,
             recon_split_percent: 25,
             recon_dragging: false,
+            config_edit_status: None,
         });
 
         let client = self.client.clone();
@@ -1467,6 +1475,11 @@ impl App {
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.trigger_recon_refresh(true).await;
             }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if recon.active_tab == ReconTab::Config {
+                    self.edit_recon_config_in_editor().await;
+                }
+            }
             _ => {}
         }
     }
@@ -1620,6 +1633,240 @@ impl App {
                 });
             }
             _ => {}
+        }
+    }
+
+    //
+    // Open the currently-selected Config item in $EDITOR. On a clean
+    // exit with changed content, write the new buffer back to the node
+    // via _praxis/write_file and refresh the cached content shown in
+    // the right pane.
+    //
+
+    pub(crate) async fn edit_recon_config_in_editor(&mut self) {
+        use std::io::Write;
+
+        let (node_id, agent_short_name, path) = {
+            let Some(ref recon) = self.nodes.recon else { return };
+            if recon.active_tab != ReconTab::Config {
+                return;
+            }
+            let Some(ref result) = recon.recon_result else { return };
+            let Some(item) = result.config.items.get(recon.selected_left) else {
+                return;
+            };
+            (
+                recon.node_id.clone(),
+                recon.agent_short_name.clone(),
+                item.path.clone(),
+            )
+        };
+
+        //
+        // Always pull fresh content from the node before opening the editor
+        // so we don't overwrite remote edits made since the last fetch.
+        //
+
+        let read_result = self
+            .client
+            .acp_request(
+                &node_id,
+                "_praxis/read_file",
+                serde_json::json!({
+                    "agent_short_name": agent_short_name,
+                    "file_type": "Config",
+                    "path": path,
+                }),
+            )
+            .await;
+
+        let initial_text = match read_result {
+            Ok(value) => {
+                if let Some(c) = value.get("content").and_then(|v| v.as_str()) {
+                    c.to_string()
+                } else {
+                    let err = value
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("could not read file")
+                        .to_string();
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        recon.config_edit_status =
+                            Some((format!("Read failed: {}", err), std::time::Instant::now()));
+                    }
+                    return;
+                }
+            }
+            Err(e) => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.config_edit_status =
+                        Some((format!("Read failed: {}", e), std::time::Instant::now()));
+                }
+                return;
+            }
+        };
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            });
+
+        let suffix = std::path::Path::new(&path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e))
+            .unwrap_or_default();
+
+        let tmp = match tempfile::Builder::new()
+            .prefix("praxis_recon_config_")
+            .suffix(&suffix)
+            .tempfile()
+        {
+            Ok(f) => f,
+            Err(e) => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.config_edit_status = Some((
+                        format!("Failed to create temp file: {}", e),
+                        std::time::Instant::now(),
+                    ));
+                }
+                return;
+            }
+        };
+
+        if let Err(e) = tmp.as_file().write_all(initial_text.as_bytes()) {
+            if let Some(recon) = self.nodes.recon.as_mut() {
+                recon.config_edit_status = Some((
+                    format!("Failed to write temp file: {}", e),
+                    std::time::Instant::now(),
+                ));
+            }
+            return;
+        }
+
+        let tmp_path = tmp.path().to_path_buf();
+
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        )
+        .ok();
+
+        let status = std::process::Command::new(&editor).arg(&tmp_path).status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+        )
+        .ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+        self.needs_full_redraw = true;
+
+        let now = std::time::Instant::now();
+
+        match status {
+            Ok(s) if s.success() => match std::fs::read_to_string(&tmp_path) {
+                Ok(new_content) => {
+                    if new_content == initial_text {
+                        if let Some(recon) = self.nodes.recon.as_mut() {
+                            recon.config_edit_status = Some(("No changes".to_string(), now));
+                        }
+                        return;
+                    }
+
+                    let write_result = self
+                        .client
+                        .acp_request(
+                            &node_id,
+                            "_praxis/write_file",
+                            serde_json::json!({
+                                "file_type": "Config",
+                                "path": path,
+                                "contents": new_content,
+                            }),
+                        )
+                        .await;
+
+                    let (ok, err) = match write_result {
+                        Ok(value) => {
+                            let success = value
+                                .get("success")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let err = value
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            (success && err.is_none(), err)
+                        }
+                        Err(e) => (false, Some(format!("{}", e))),
+                    };
+
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        if ok {
+                            recon.config_edit_status = Some(("Saved".to_string(), now));
+
+                            //
+                            // Drop the cached content for this item and re-fetch
+                            // so the right pane reflects what was written.
+                            //
+
+                            if let Some(ref mut result) = recon.recon_result {
+                                if let Some(item) =
+                                    result.config.items.get_mut(recon.selected_left)
+                                {
+                                    item.contents = None;
+                                }
+                            }
+                        } else {
+                            recon.config_edit_status = Some((
+                                format!("Save failed: {}", err.unwrap_or_default()),
+                                now,
+                            ));
+                        }
+                    }
+
+                    if ok {
+                        self.handle_recon_enter().await;
+                    }
+                }
+                Err(e) => {
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        recon.config_edit_status =
+                            Some((format!("Read back failed: {}", e), now));
+                    }
+                }
+            },
+            Ok(_) => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.config_edit_status =
+                        Some(("Editor exited with error".to_string(), now));
+                }
+            }
+            Err(e) => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.config_edit_status =
+                        Some((format!("Failed to launch '{}': {}", editor, e), now));
+                }
+            }
         }
     }
 
