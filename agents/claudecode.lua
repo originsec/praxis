@@ -226,6 +226,49 @@ local function run_session_close(state)
   -- Claude Code sessions don't need explicit cleanup
 end
 
+--
+-- Discover Claude Code slash commands (.claude/commands/**/*.md) and skills
+-- (.claude/skills/<name>/SKILL.md) for the home and each project.
+--
+
+local function discover_skills(home, project_paths)
+  local skills = {}
+
+  local home_claude = praxis.path_join({ home, ".claude" })
+  for _, s in ipairs(helpers.discover_command_skills(home_claude, {
+    dir = "commands",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })) do
+    table.insert(skills, s)
+  end
+  for _, s in ipairs(helpers.discover_skill_md_skills(home_claude, { dir = "skills" })) do
+    table.insert(skills, s)
+  end
+
+  for _, proj in ipairs(project_paths or {}) do
+    local proj_claude = praxis.path_join({ proj, ".claude" })
+    for _, s in ipairs(helpers.discover_command_skills(proj_claude, {
+      dir = "commands",
+      pattern = "%.md$",
+      name_prefix = "/",
+      parse = "markdown",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+    for _, s in ipairs(helpers.discover_skill_md_skills(proj_claude, {
+      dir = "skills",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+  end
+
+  return skills
+end
+
 local recon_config = {
   home_dir = ".claude",
 
@@ -252,6 +295,7 @@ local recon_config = {
 
   auth_check = path_has_valid_auth,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
 
   session_fns = {
     create = run_create_session,
