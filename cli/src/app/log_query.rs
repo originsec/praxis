@@ -7,6 +7,7 @@
 // response is folded back into state via `AppEvent::LogQueryResult`.
 //
 
+use std::cell::Cell;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -67,6 +68,7 @@ pub struct LogQueryState {
     pub selected_row: usize,
     pub row_expanded: bool,
     pub detail_scroll: u16,
+    pub detail_max_scroll: Cell<u16>,
 
     //
     // Row-search filter. When `search_active` is false, `filter` is ignored
@@ -113,6 +115,7 @@ impl Default for LogQueryState {
             selected_row: 0,
             row_expanded: false,
             detail_scroll: 0,
+            detail_max_scroll: Cell::new(0),
             search_active: false,
             search_input: String::new(),
             filtered_indices: Vec::new(),
