@@ -301,6 +301,40 @@ local function post_collect(result, _ctx)
   end
 end
 
+--
+-- Discover Gemini CLI custom commands (.gemini/commands/**/*.toml) at user
+-- and project scope. Nested directories form namespaced command names.
+--
+
+local function discover_skills(home, project_paths)
+  local skills = {}
+
+  local home_gemini = praxis.path_join({ home, ".gemini" })
+  for _, s in ipairs(helpers.discover_command_skills(home_gemini, {
+    dir = "commands",
+    pattern = "%.toml$",
+    name_prefix = "/",
+    parse = "toml",
+  })) do
+    table.insert(skills, s)
+  end
+
+  for _, proj in ipairs(project_paths or {}) do
+    local proj_gemini = praxis.path_join({ proj, ".gemini" })
+    for _, s in ipairs(helpers.discover_command_skills(proj_gemini, {
+      dir = "commands",
+      pattern = "%.toml$",
+      name_prefix = "/",
+      parse = "toml",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+  end
+
+  return skills
+end
+
 local recon_config = {
   home_dir = ".gemini",
 
@@ -327,6 +361,8 @@ local recon_config = {
 
   auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
+  session_fns = session_fns,
   post_collect = post_collect,
 }
 

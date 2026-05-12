@@ -17,11 +17,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use common::{AcpFrame, ClientDirectMessage, NodeDirectMessage};
+use common::acp_ext::EXT_PRAXIS_RECON;
+use common::{AcpFrame, ClientDirectMessage, NodeDirectMessage, ReconResult};
 use lapin::Channel;
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, OnceCell, RwLock};
 
+use crate::database::Database;
 use crate::messaging::{send_to_client, send_to_node};
 use crate::remote_nodes::RemoteNodeManager;
 
@@ -49,6 +51,14 @@ pub struct AcpNodeProxy {
     pending_new: RwLock<HashMap<PendingKey, String>>,
     pending_internal: RwLock<HashMap<PendingKey, oneshot::Sender<Value>>>,
     //
+    // Outstanding `_praxis/recon` requests, tracked so the response can be
+    // persisted into the recon_results table when it flows back through
+    // forward_to_client. Both external (CLI) and internal (`svc_*`) callers
+    // are recorded here so any successful recon updates the cache that
+    // ReconGet queries.
+    //
+    pending_recon: RwLock<HashMap<PendingKey, ReconMeta>>,
+    //
     // Buffers AgentMessageChunk text seen between request and response for
     // internal sessions where the caller wants the streamed reply body.
     // Keyed by client_id (each request uses a unique one).
@@ -60,12 +70,24 @@ pub struct AcpNodeProxy {
     // their bridges instead of the standard node queue.
     //
     remote_node_manager: OnceCell<Arc<RemoteNodeManager>>,
+    //
+    // Database handle used to persist recon results that flow back from
+    // nodes as `_praxis/recon` responses. Set once during startup.
+    //
+    database: OnceCell<Arc<Database>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct PendingKey {
     client_id: String,
     request_id: String,
+}
+
+#[derive(Clone, Debug)]
+struct ReconMeta {
+    node_id: String,
+    agent_short_name: String,
+    is_semantic: bool,
 }
 
 impl AcpNodeProxy {
@@ -79,6 +101,122 @@ impl AcpNodeProxy {
     //
     pub fn set_remote_node_manager(&self, manager: Arc<RemoteNodeManager>) {
         let _ = self.remote_node_manager.set(manager);
+    }
+
+    //
+    // Wire up the database so recon responses passing through the proxy
+    // can be persisted. Called once during startup.
+    //
+    pub fn set_database(&self, db: Arc<Database>) {
+        let _ = self.database.set(db);
+    }
+
+    //
+    // Inspect an outbound JSON-RPC frame; if it is a `_praxis/recon`
+    // request, remember (client_id, request_id) → (node_id, agent, semantic)
+    // so the response can be matched and persisted when it returns.
+    //
+    async fn track_outbound_recon(&self, client_id: &str, node_id: &str, json_rpc: &str) {
+        let Ok(value) = serde_json::from_str::<Value>(json_rpc) else {
+            return;
+        };
+        let Some(method) = value.get("method").and_then(|m| m.as_str()) else {
+            return;
+        };
+        if method != EXT_PRAXIS_RECON {
+            return;
+        }
+        let Some(id) = value.get("id") else {
+            return;
+        };
+        let Some(params) = value.get("params") else {
+            return;
+        };
+        let Some(agent_short_name) = params.get("agent_short_name").and_then(|v| v.as_str())
+        else {
+            return;
+        };
+        let is_semantic = params
+            .get("is_semantic")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let Some(key) = make_pending_key(client_id, id) else {
+            return;
+        };
+        self.pending_recon.write().await.insert(
+            key,
+            ReconMeta {
+                node_id: node_id.to_string(),
+                agent_short_name: agent_short_name.to_string(),
+                is_semantic,
+            },
+        );
+    }
+
+    //
+    // If `value` is the response to a tracked `_praxis/recon` request and
+    // carries a well-formed ReconResult, persist it into the recon_results
+    // table. Errors are logged but otherwise swallowed — persistence is a
+    // side-effect, never a reason to drop the response.
+    //
+    async fn persist_recon_response(&self, client_id: &str, value: &Value) {
+        let Some(id) = value.get("id") else {
+            return;
+        };
+        let Some(key) = make_pending_key(client_id, id) else {
+            return;
+        };
+        let Some(meta) = self.pending_recon.write().await.remove(&key) else {
+            return;
+        };
+        let Some(result) = value.get("result") else {
+            return;
+        };
+        if result.get("error").is_some() {
+            return;
+        }
+        let recon: ReconResult = match serde_json::from_value(result.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                common::log_warn!(
+                    "Could not parse recon response as ReconResult for node {} agent {}: {}",
+                    common::short_id(&meta.node_id),
+                    meta.agent_short_name,
+                    e
+                );
+                return;
+            }
+        };
+        let Some(db) = self.database.get() else {
+            return;
+        };
+        if let Err(e) = db
+            .upsert_recon_result(
+                &meta.node_id,
+                &meta.agent_short_name,
+                &recon,
+                meta.is_semantic,
+            )
+            .await
+        {
+            common::log_error!(
+                "Failed to persist recon result for node {} agent {}: {}",
+                common::short_id(&meta.node_id),
+                meta.agent_short_name,
+                e
+            );
+        } else {
+            common::log_info!(
+                "Persisted recon result for node {} agent {} ({} tools, {} configs, {} sessions)",
+                common::short_id(&meta.node_id),
+                meta.agent_short_name,
+                recon.tools.mcp_servers.len()
+                    + recon.tools.skills.len()
+                    + recon.tools.internal_tools.len(),
+                recon.config.items.len(),
+                recon.sessions.items.len()
+            );
+        }
     }
 
     pub async fn register_session(&self, session_id: String, node_id: String) {
@@ -126,6 +264,13 @@ impl AcpNodeProxy {
         client_id: &str,
         json_rpc: &str,
     ) -> Result<()> {
+        //
+        // Record outbound recon requests before dispatch so the matching
+        // response can be persisted on the way back, regardless of whether
+        // the node is local (RabbitMQ) or a remote bridge.
+        //
+        self.track_outbound_recon(client_id, node_id, json_rpc).await;
+
         //
         // Remote-node bridges don't have a RabbitMQ queue — they
         // listen for ACP frames via the manager. Route through it
@@ -431,6 +576,13 @@ impl AcpNodeProxy {
                     }
                 }
             }
+
+            //
+            // If this is a response to a tracked _praxis/recon request,
+            // persist the result so subsequent ReconGet queries (CLI, MCP)
+            // see fresh data.
+            //
+            self.persist_recon_response(client_id, value).await;
         }
 
         //

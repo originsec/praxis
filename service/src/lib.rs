@@ -318,6 +318,7 @@ async fn run_main_loop() -> Result<()> {
     ));
     let remote_node_manager = Arc::new(remote_nodes::RemoteNodeManager::new());
     acp_node_proxy.set_remote_node_manager(remote_node_manager.clone());
+    acp_node_proxy.set_database(database.clone());
     common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
 
     //

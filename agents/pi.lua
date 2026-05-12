@@ -158,6 +158,7 @@ local recon_config = {
 
   auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
+  session_fns = session_fns,
 }
 
 return {

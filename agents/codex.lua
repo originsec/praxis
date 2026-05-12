@@ -203,6 +203,35 @@ local session_fns = helpers.subprocess_session({
   end,
 })
 
+--
+-- Discover Codex prompts (~/.codex/prompts/*.md) as slash-command skills.
+-- Codex has no project-local prompt directory.
+--
+
+local function discover_skills(home, _project_paths)
+  local home_codex = praxis.path_join({ home, ".codex" })
+  return helpers.discover_command_skills(home_codex, {
+    dir = "prompts",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })
+end
+
+--
+-- Discover Codex prompts (~/.codex/prompts/*.md) as slash-command skills.
+--
+
+local function discover_skills(home, _project_paths)
+  local home_codex = praxis.path_join({ home, ".codex" })
+  return helpers.discover_command_skills(home_codex, {
+    dir = "prompts",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })
+end
+
 local recon_config = {
   home_dir = ".codex",
 
@@ -225,6 +254,8 @@ local recon_config = {
 
   auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
+  session_fns = session_fns,
 }
 
 return {
