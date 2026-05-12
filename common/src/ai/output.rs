@@ -35,7 +35,10 @@ pub fn fmt_section(title: &str) -> String {
 
 /// Format an iteration marker
 pub fn fmt_iteration(current: usize, total: usize) -> String {
-    format!("{} Iteration {}/{} {}\n", PREFIX_ITERATION, current, total, PREFIX_ITERATION)
+    format!(
+        "{} Iteration {}/{} {}\n",
+        PREFIX_ITERATION, current, total, PREFIX_ITERATION
+    )
 }
 
 /// Format the agent mode start header
@@ -113,11 +116,26 @@ mod tests {
 
     #[test]
     fn test_line_type_detection() {
-        assert_eq!(OutputLineType::detect(">>> Sending"), OutputLineType::Outgoing);
-        assert_eq!(OutputLineType::detect("<<< Response"), OutputLineType::Incoming);
+        assert_eq!(
+            OutputLineType::detect(">>> Sending"),
+            OutputLineType::Outgoing
+        );
+        assert_eq!(
+            OutputLineType::detect("<<< Response"),
+            OutputLineType::Incoming
+        );
         assert_eq!(OutputLineType::detect("!!! Error"), OutputLineType::Error);
-        assert_eq!(OutputLineType::detect("=== Header ==="), OutputLineType::Section);
-        assert_eq!(OutputLineType::detect("--- Iteration ---"), OutputLineType::Iteration);
-        assert_eq!(OutputLineType::detect("Regular text"), OutputLineType::Regular);
+        assert_eq!(
+            OutputLineType::detect("=== Header ==="),
+            OutputLineType::Section
+        );
+        assert_eq!(
+            OutputLineType::detect("--- Iteration ---"),
+            OutputLineType::Iteration
+        );
+        assert_eq!(
+            OutputLineType::detect("Regular text"),
+            OutputLineType::Regular
+        );
     }
 }

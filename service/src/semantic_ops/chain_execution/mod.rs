@@ -12,4 +12,4 @@ pub use implicit::{create_implicit_chain, is_implicit_chain};
 #[allow(unused_imports)]
 pub use state::{ChainExecutionRegistry, ChainExecutionState};
 #[allow(unused_imports)]
-pub use targeting::{resolve_targets, ResolvedTarget};
+pub use targeting::{ResolvedTarget, resolve_targets};

@@ -71,7 +71,7 @@ pub struct NodeInterceptManager {
     #[cfg(target_os = "linux")]
     tun_manager: Option<LinuxTunManager>,
     /// Channel to send intercepted traffic to main for forwarding to service
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
     /// Node ID for traffic entries
     node_id: String,
     /// Proxy port (when enabled)
@@ -114,10 +114,7 @@ pub struct NodeInterceptManager {
 
 impl NodeInterceptManager {
     /// Create a new node intercept manager
-    pub fn new(
-        node_id: String,
-        traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
-    ) -> Self {
+    pub fn new(node_id: String, traffic_tx: mpsc::Sender<InterceptedTrafficEntry>) -> Self {
         Self {
             is_enabled: false,
             method: None,
@@ -370,6 +367,10 @@ impl NodeInterceptManager {
 
         let proxy_port = proxy.port();
         self.proxy_port = Some(proxy_port);
+        self.ca = Some(Arc::clone(&ca));
+        self.proxy = Some(proxy);
+        self.method = Some(method);
+        self.is_enabled = true;
 
         //
         // Configure interception based on method.
@@ -382,8 +383,15 @@ impl NodeInterceptManager {
                 //
 
                 let proxy_addr = format!("127.0.0.1:{}", proxy_port);
-                let saved =
-                    enable_system_proxy(&proxy_addr).context("Failed to configure system proxy")?;
+                let saved = match enable_system_proxy(&proxy_addr)
+                    .context("Failed to configure system proxy")
+                {
+                    Ok(saved) => saved,
+                    Err(e) => {
+                        let _ = self.disable().await;
+                        return Err(e);
+                    }
+                };
 
                 intercept_state.proxy_modified = true;
                 intercept_state.saved_proxy_enable = Some(saved.proxy_enable);
@@ -400,7 +408,10 @@ impl NodeInterceptManager {
                 // Start wintun adapter with packet-level routing.
                 //
 
-                self.enable_vpn_mode(proxy_port).await?;
+                if let Err(e) = self.enable_vpn_mode(proxy_port).await {
+                    let _ = self.disable().await;
+                    return Err(e);
+                }
                 common::log_info!(
                     "Traffic interception enabled via VPN mode on port {}",
                     proxy_port
@@ -443,7 +454,10 @@ impl NodeInterceptManager {
                 // Start TPROXY-based interception (Linux only).
                 //
 
-                self.enable_tproxy_mode(proxy_port).await?;
+                if let Err(e) = self.enable_tproxy_mode(proxy_port).await {
+                    let _ = self.disable().await;
+                    return Err(e);
+                }
 
                 //
                 // Save TPROXY state for crash recovery.
@@ -470,11 +484,6 @@ impl NodeInterceptManager {
                 );
             }
         }
-
-        self.ca = Some(ca);
-        self.proxy = Some(proxy);
-        self.method = Some(method);
-        self.is_enabled = true;
 
         //
         // Set system-wide environment variables for interception

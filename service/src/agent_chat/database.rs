@@ -111,8 +111,10 @@ impl Database {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?.with_timezone(&Utc),
-                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?
+                            .with_timezone(&Utc),
+                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
@@ -125,8 +127,10 @@ impl Database {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?.with_timezone(&Utc),
-                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?
+                            .with_timezone(&Utc),
+                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
@@ -148,8 +152,10 @@ impl Database {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?.with_timezone(&Utc),
-                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?
+                            .with_timezone(&Utc),
+                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
@@ -162,8 +168,10 @@ impl Database {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?.with_timezone(&Utc),
-                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(3).as_str())?
+                            .with_timezone(&Utc),
+                        updated_at: DateTime::parse_from_rfc3339(row.get::<String, _>(4).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
@@ -249,7 +257,10 @@ impl Database {
 
     /// Get all agents for a AgentChat session
     #[allow(dead_code)]
-    pub async fn get_agent_chat_agents(&self, session_id: &str) -> Result<Vec<AgentChatAgentRecord>> {
+    pub async fn get_agent_chat_agents(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<AgentChatAgentRecord>> {
         let sql = "SELECT id, agent_chat_session_id, node_id, agent_short_name, nickname, precedence, current_channel_id, status, agent_session_id, created_at
                    FROM agent_chat_agents WHERE agent_chat_session_id = $1 ORDER BY precedence";
 
@@ -269,7 +280,8 @@ impl Database {
                         current_channel_id: row.get(6),
                         status: row.get(7),
                         agent_session_id: row.get(8),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(9).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(9).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }
@@ -286,7 +298,8 @@ impl Database {
                         current_channel_id: row.get(6),
                         status: row.get(7),
                         agent_session_id: row.get(8),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(9).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(9).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }
@@ -310,30 +323,54 @@ impl Database {
     }
 
     /// Update agent's current channel
-    pub async fn update_agent_chat_agent_channel(&self, id: &str, channel_id: Option<&str>) -> Result<()> {
+    pub async fn update_agent_chat_agent_channel(
+        &self,
+        id: &str,
+        channel_id: Option<&str>,
+    ) -> Result<()> {
         let sql = "UPDATE agent_chat_agents SET current_channel_id = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(channel_id).bind(id).execute(pool).await?;
+                sqlx::query(sql)
+                    .bind(channel_id)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
             }
             DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(channel_id).bind(id).execute(pool).await?;
+                sqlx::query(sql)
+                    .bind(channel_id)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
             }
         }
         Ok(())
     }
 
     /// Update agent's session ID (from the node's agent session)
-    pub async fn update_agent_chat_agent_session_id(&self, id: &str, agent_session_id: Option<&str>) -> Result<()> {
+    pub async fn update_agent_chat_agent_session_id(
+        &self,
+        id: &str,
+        agent_session_id: Option<&str>,
+    ) -> Result<()> {
         let sql = "UPDATE agent_chat_agents SET agent_session_id = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(agent_session_id).bind(id).execute(pool).await?;
+                sqlx::query(sql)
+                    .bind(agent_session_id)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
             }
             DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(agent_session_id).bind(id).execute(pool).await?;
+                sqlx::query(sql)
+                    .bind(agent_session_id)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
             }
         }
         Ok(())
@@ -346,10 +383,18 @@ impl Database {
 
             match &self.pool {
                 DatabasePool::Sqlite(pool) => {
-                    sqlx::query(sql).bind(i as i32).bind(agent_id).execute(pool).await?;
+                    sqlx::query(sql)
+                        .bind(i as i32)
+                        .bind(agent_id)
+                        .execute(pool)
+                        .await?;
                 }
                 DatabasePool::Postgres(pool) => {
-                    sqlx::query(sql).bind(i as i32).bind(agent_id).execute(pool).await?;
+                    sqlx::query(sql)
+                        .bind(i as i32)
+                        .bind(agent_id)
+                        .execute(pool)
+                        .await?;
                 }
             }
         }
@@ -361,12 +406,16 @@ impl Database {
         let sql = "DELETE FROM agent_chat_agents WHERE id = $1";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
         Ok(count > 0)
     }
@@ -414,7 +463,10 @@ impl Database {
 
     /// Get all channels for a session
     #[allow(dead_code)]
-    pub async fn get_agent_chat_channels(&self, session_id: &str) -> Result<Vec<AgentChatChannelRecord>> {
+    pub async fn get_agent_chat_channels(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<AgentChatChannelRecord>> {
         let sql = "SELECT id, agent_chat_session_id, name, topic, created_by, created_at
                    FROM agent_chat_channels WHERE agent_chat_session_id = $1 ORDER BY name";
 
@@ -430,7 +482,8 @@ impl Database {
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }
@@ -443,7 +496,8 @@ impl Database {
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }
@@ -453,13 +507,21 @@ impl Database {
 
     /// Get a channel by name in a session
     #[allow(dead_code)]
-    pub async fn get_agent_chat_channel_by_name(&self, session_id: &str, name: &str) -> Result<Option<AgentChatChannelRecord>> {
+    pub async fn get_agent_chat_channel_by_name(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<Option<AgentChatChannelRecord>> {
         let sql = "SELECT id, agent_chat_session_id, name, topic, created_by, created_at
                    FROM agent_chat_channels WHERE agent_chat_session_id = $1 AND name = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let row_opt = sqlx::query(sql).bind(session_id).bind(name).fetch_optional(pool).await?;
+                let row_opt = sqlx::query(sql)
+                    .bind(session_id)
+                    .bind(name)
+                    .fetch_optional(pool)
+                    .await?;
                 if let Some(row) = row_opt {
                     Ok(Some(AgentChatChannelRecord {
                         id: row.get(0),
@@ -467,14 +529,19 @@ impl Database {
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
                 }
             }
             DatabasePool::Postgres(pool) => {
-                let row_opt = sqlx::query(sql).bind(session_id).bind(name).fetch_optional(pool).await?;
+                let row_opt = sqlx::query(sql)
+                    .bind(session_id)
+                    .bind(name)
+                    .fetch_optional(pool)
+                    .await?;
                 if let Some(row) = row_opt {
                     Ok(Some(AgentChatChannelRecord {
                         id: row.get(0),
@@ -482,7 +549,8 @@ impl Database {
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
-                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?.with_timezone(&Utc),
+                        created_at: DateTime::parse_from_rfc3339(row.get::<String, _>(5).as_str())?
+                            .with_timezone(&Utc),
                     }))
                 } else {
                     Ok(None)
@@ -492,7 +560,11 @@ impl Database {
     }
 
     /// Update channel topic
-    pub async fn update_agent_chat_channel_topic(&self, id: &str, topic: Option<&str>) -> Result<()> {
+    pub async fn update_agent_chat_channel_topic(
+        &self,
+        id: &str,
+        topic: Option<&str>,
+    ) -> Result<()> {
         let sql = "UPDATE agent_chat_channels SET topic = $1 WHERE id = $2";
 
         match &self.pool {
@@ -600,7 +672,8 @@ impl Database {
                         recipient_nickname: row.get(4),
                         message_type: row.get(5),
                         content: row.get(6),
-                        timestamp: DateTime::parse_from_rfc3339(row.get::<String, _>(7).as_str())?.with_timezone(&Utc),
+                        timestamp: DateTime::parse_from_rfc3339(row.get::<String, _>(7).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }
@@ -628,7 +701,8 @@ impl Database {
                         recipient_nickname: row.get(4),
                         message_type: row.get(5),
                         content: row.get(6),
-                        timestamp: DateTime::parse_from_rfc3339(row.get::<String, _>(7).as_str())?.with_timezone(&Utc),
+                        timestamp: DateTime::parse_from_rfc3339(row.get::<String, _>(7).as_str())?
+                            .with_timezone(&Utc),
                     });
                 }
             }

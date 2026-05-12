@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use common::{SemanticOperationSpec, OperationDefinitionInfo};
+use common::{OperationDefinitionInfo, SemanticOperationSpec};
 use sqlx::Row;
 
 use super::{Database, DatabasePool, MAX_OPERATION_DEFINITIONS};
@@ -95,9 +95,15 @@ impl OperationDefinition {
             model_ref: Option<String>,
         }
 
-        fn default_timeout() -> u64 { 60 }
-        fn default_mode() -> String { "one-shot".to_string() }
-        fn default_agent_iterations() -> u32 { 5 }
+        fn default_timeout() -> u64 {
+            60
+        }
+        fn default_mode() -> String {
+            "one-shot".to_string()
+        }
+        fn default_agent_iterations() -> u32 {
+            5
+        }
 
         let parsed: JsonOp = serde_json::from_str(json_content)
             .map_err(|e| format!("Failed to parse JSON: {}", e))?;
@@ -114,9 +120,11 @@ impl OperationDefinition {
             }
         }
 
-        let category = parsed.category
+        let category = parsed
+            .category
             .ok_or_else(|| "JSON must contain 'category' field".to_string())?;
-        let short_name = parsed.short_name
+        let short_name = parsed
+            .short_name
             .ok_or_else(|| "JSON must contain 'short_name' field".to_string())?;
 
         let full_name = format!("{}::{}", category, short_name);
@@ -203,7 +211,10 @@ impl OperationDefinition {
 
 impl Database {
     /// Insert or update an operation definition
-    pub async fn upsert_operation_definition(&self, definition: &OperationDefinition) -> Result<()> {
+    pub async fn upsert_operation_definition(
+        &self,
+        definition: &OperationDefinition,
+    ) -> Result<()> {
         let sql = "INSERT INTO operation_definitions (full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              ON CONFLICT(full_name) DO UPDATE SET
@@ -276,7 +287,10 @@ impl Database {
     }
 
     /// Get an operation definition by full_name
-    pub async fn get_operation_definition(&self, full_name: &str) -> Result<Option<OperationDefinition>> {
+    pub async fn get_operation_definition(
+        &self,
+        full_name: &str,
+    ) -> Result<Option<OperationDefinition>> {
         let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
              FROM operation_definitions WHERE full_name = $1";
 
@@ -311,9 +325,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 let mut definitions = Vec::new();
                 for row in rows {
                     definitions.push(parse_definition_row_sqlite(&row)?);
@@ -321,9 +333,7 @@ impl Database {
                 Ok(definitions)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 let mut definitions = Vec::new();
                 for row in rows {
                     definitions.push(parse_definition_row_postgres(&row)?);
@@ -335,16 +345,16 @@ impl Database {
 
     /// List operation definitions by category
     #[allow(dead_code)]
-    pub async fn list_operation_definitions_by_category(&self, category: &str) -> Result<Vec<OperationDefinition>> {
+    pub async fn list_operation_definitions_by_category(
+        &self,
+        category: &str,
+    ) -> Result<Vec<OperationDefinition>> {
         let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
              FROM operation_definitions WHERE category = $1 ORDER BY short_name";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(category)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
                 let mut definitions = Vec::new();
                 for row in rows {
                     definitions.push(parse_definition_row_sqlite(&row)?);
@@ -352,10 +362,7 @@ impl Database {
                 Ok(definitions)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(category)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
                 let mut definitions = Vec::new();
                 for row in rows {
                     definitions.push(parse_definition_row_postgres(&row)?);
@@ -370,49 +377,46 @@ impl Database {
         let sql = "DELETE FROM operation_definitions WHERE full_name = $1";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(full_name)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(full_name)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(full_name)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(full_name)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count > 0)
     }
 
     /// Set the disabled flag on an operation definition
-    pub async fn set_operation_definition_disabled(&self, full_name: &str, disabled: bool) -> Result<bool> {
-        let sql = "UPDATE operation_definitions SET disabled = $1, updated_at = $2 WHERE full_name = $3";
+    pub async fn set_operation_definition_disabled(
+        &self,
+        full_name: &str,
+        disabled: bool,
+    ) -> Result<bool> {
+        let sql =
+            "UPDATE operation_definitions SET disabled = $1, updated_at = $2 WHERE full_name = $3";
         let now = chrono::Utc::now().to_rfc3339();
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(if disabled { 1i16 } else { 0i16 })
-                    .bind(&now)
-                    .bind(full_name)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(disabled)
-                    .bind(&now)
-                    .bind(full_name)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(if disabled { 1i16 } else { 0i16 })
+                .bind(&now)
+                .bind(full_name)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(disabled)
+                .bind(&now)
+                .bind(full_name)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count > 0)
@@ -452,20 +456,16 @@ impl Database {
             )";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)

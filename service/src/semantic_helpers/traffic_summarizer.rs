@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use common::{
-    InterceptedTrafficEntry, Provider, create_ai_client, execute_chat_completion,
-    build_message, Role,
+    InterceptedTrafficEntry, Provider, Role, build_message, create_ai_client,
+    execute_chat_completion,
 };
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::ServiceConfig;
@@ -38,19 +38,29 @@ pub async fn summarize_traffic(
             return SummarizationResult {
                 success: false,
                 summary: None,
-                error: Some("No LLM configured for Traffic Parser. Configure in Settings > LLM Providers.".to_string()),
+                error: Some(
+                    "No LLM configured for Traffic Parser. Configure in Settings > LLM Providers."
+                        .to_string(),
+                ),
             };
         }
     };
 
-    common::log_info!("Using traffic parser model: {} ({})", model_def.name, model_def.provider);
+    common::log_info!(
+        "Using traffic parser model: {} ({})",
+        model_def.name,
+        model_def.provider
+    );
     let provider = match Provider::from_str(&model_def.provider) {
         Some(p) => p,
         None => {
             return SummarizationResult {
                 success: false,
                 summary: None,
-                error: Some(format!("Invalid provider in model def: {}", model_def.provider)),
+                error: Some(format!(
+                    "Invalid provider in model def: {}",
+                    model_def.provider
+                )),
             };
         }
     };
@@ -83,8 +93,7 @@ pub async fn summarize_traffic(
         "Analyze the following intercepted traffic and provide a summary based on these instructions:\n\n\
         INSTRUCTIONS:\n{}\n\n\
         TRAFFIC DATA:\n{}",
-        summarization_prompt,
-        traffic_content
+        summarization_prompt, traffic_content
     );
 
     common::log_info!("=== Traffic Summarization Request ===");
@@ -129,7 +138,10 @@ fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
     // Basic info.
     //
     parts.push(format!("URL: {}", entry.url));
-    parts.push(format!("Method: {}", entry.method.as_deref().unwrap_or("GET")));
+    parts.push(format!(
+        "Method: {}",
+        entry.method.as_deref().unwrap_or("GET")
+    ));
     parts.push(format!("Host: {}", entry.host));
     parts.push(format!("Direction: {:?}", entry.direction));
     parts.push(format!("Timestamp: {}", entry.timestamp));
@@ -150,13 +162,20 @@ fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
     if let Some(ref body) = entry.request_body {
         if let Ok(body_str) = std::str::from_utf8(body) {
             let truncated = if body_str.len() > 4000 {
-                format!("{}... [truncated, {} bytes total]", &body_str[..4000], body_str.len())
+                format!(
+                    "{}... [truncated, {} bytes total]",
+                    &body_str[..4000],
+                    body_str.len()
+                )
             } else {
                 body_str.to_string()
             };
             parts.push(format!("\nRequest Body:\n{}", truncated));
         } else {
-            parts.push(format!("\nRequest Body: [Binary data, {} bytes]", body.len()));
+            parts.push(format!(
+                "\nRequest Body: [Binary data, {} bytes]",
+                body.len()
+            ));
         }
     }
 
@@ -183,13 +202,20 @@ fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
     if let Some(ref body) = entry.response_body {
         if let Ok(body_str) = std::str::from_utf8(body) {
             let truncated = if body_str.len() > 4000 {
-                format!("{}... [truncated, {} bytes total]", &body_str[..4000], body_str.len())
+                format!(
+                    "{}... [truncated, {} bytes total]",
+                    &body_str[..4000],
+                    body_str.len()
+                )
             } else {
                 body_str.to_string()
             };
             parts.push(format!("\nResponse Body:\n{}", truncated));
         } else {
-            parts.push(format!("\nResponse Body: [Binary data, {} bytes]", body.len()));
+            parts.push(format!(
+                "\nResponse Body: [Binary data, {} bytes]",
+                body.len()
+            ));
         }
     }
 

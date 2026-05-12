@@ -1,4 +1,3 @@
-
 #[tokio::main]
 async fn main() {
     use tracing_subscriber::EnvFilter;
@@ -14,9 +13,7 @@ async fn main() {
         .add_directive("hyper=info".parse().unwrap())
         .add_directive("rustls=info".parse().unwrap());
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     praxis_service::print_banner(&common::rabbitmq_url());
 

@@ -1,3 +1,3 @@
 pub mod registries;
 
-pub use registries::{NodeRegistry, ClientRegistry, PendingCommands};
+pub use registries::{ClientRegistry, NodeRegistry, PendingCommands};

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::database::Database;
-use common::{Provider, PraxisAgentConfig};
+use common::{PraxisAgentConfig, Provider};
 
 //
 // LLM model definitions config key (JSON array of model definitions).
@@ -129,7 +129,11 @@ impl ServiceConfig {
     }
 
     /// Set a configuration value (writes to database and updates cache)
-    pub async fn set(&mut self, key: impl Into<String>, value: impl Into<String>) -> anyhow::Result<()> {
+    pub async fn set(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> anyhow::Result<()> {
         let key = key.into();
         let value = value.into();
         self.db.set_config(&key, &value).await?;
@@ -207,7 +211,8 @@ impl ServiceConfig {
             .clone()
             .filter(|url| !url.trim().is_empty())
             .or_else(|| {
-                Provider::from_str(&model_def.provider).map(|provider| provider.base_url().to_string())
+                Provider::from_str(&model_def.provider)
+                    .map(|provider| provider.base_url().to_string())
             })?
             .trim_end_matches('/')
             .to_string();
@@ -276,5 +281,4 @@ impl ServiceConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(CLAUDE_CCRV2_DEFAULT_PORT)
     }
-
 }

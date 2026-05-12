@@ -2,9 +2,9 @@
 
 mod acp_node_proxy;
 mod acp_server;
+mod agent_chat;
 mod banner;
 mod claude_bridge;
-mod remote_nodes;
 mod config;
 mod conversions;
 mod database;
@@ -14,8 +14,8 @@ mod intercept_targets;
 mod log_query;
 mod mcp;
 mod messaging;
-mod agent_chat;
 mod orchestrator;
+mod remote_nodes;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
@@ -27,16 +27,18 @@ pub use common::rabbitmq_url;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 use common::{
-    publish_json_exchange, ClientBroadcastMessage, ClientSignalMessage,
-    NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
-    NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE,
+    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientSignalMessage,
+    NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE, NodeBroadcastMessage, NodeSignalMessage,
+    publish_json_exchange,
 };
 use futures_util::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions, QueuePurgeOptions},
+    Connection, ConnectionProperties, ExchangeKind,
+    options::{
+        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions,
+        QueuePurgeOptions,
+    },
     types::FieldTable,
-    ExchangeKind,
-    Connection, ConnectionProperties,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -49,16 +51,16 @@ pub use banner::print_banner;
 //
 // Import from internal modules.
 //
+use agent_chat::AgentChatManager;
+use config::service_config::APPLICATION_LOGS_ENABLED;
 use database::{Database, DatabaseConfig};
 use dispatch::ServiceContext;
 use handlers::{ClientMessageHandler, NodeMessageHandler};
-use agent_chat::AgentChatManager;
-use orchestrator::OrchestratorManager;
-use config::service_config::APPLICATION_LOGS_ENABLED;
-use semantic_ops::{SemanticOpsManager, ChainExecutor};
-use state::{NodeRegistry, ClientRegistry, PendingCommands};
-use tools::ToolkitManager;
 use messaging::broadcast_state_to_clients;
+use orchestrator::OrchestratorManager;
+use semantic_ops::{ChainExecutor, SemanticOpsManager};
+use state::{ClientRegistry, NodeRegistry, PendingCommands};
+use tools::ToolkitManager;
 
 const RABBITMQ_RETRY_SECS: u64 = 5;
 
@@ -75,7 +77,8 @@ async fn setup_rabbitmq() -> Connection {
             Err(e) => {
                 common::log_warn!(
                     "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
-                    e, RABBITMQ_RETRY_SECS
+                    e,
+                    RABBITMQ_RETRY_SECS
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
             }
@@ -91,10 +94,17 @@ pub async fn run() -> Result<()> {
                 //
                 // Connection lost, restart.
                 //
-                common::log_warn!("RabbitMQ connection lost. Restarting in {} seconds...", RABBITMQ_RETRY_SECS);
+                common::log_warn!(
+                    "RabbitMQ connection lost. Restarting in {} seconds...",
+                    RABBITMQ_RETRY_SECS
+                );
             }
             Err(e) => {
-                common::log_error!("Service error: {}. Restarting in {} seconds...", e, RABBITMQ_RETRY_SECS);
+                common::log_error!(
+                    "Service error: {}. Restarting in {} seconds...",
+                    e,
+                    RABBITMQ_RETRY_SECS
+                );
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
@@ -128,7 +138,11 @@ async fn run_main_loop() -> Result<()> {
     let purged = node_signal_channel
         .queue_purge(NODE_SIGNAL_QUEUE.into(), QueuePurgeOptions::default())
         .await?;
-    common::log_info!("Declared queue: {} (purged {} stale messages)", NODE_SIGNAL_QUEUE, purged);
+    common::log_info!(
+        "Declared queue: {} (purged {} stale messages)",
+        NODE_SIGNAL_QUEUE,
+        purged
+    );
 
     broadcast_channel
         .exchange_declare(
@@ -155,7 +169,11 @@ async fn run_main_loop() -> Result<()> {
     let purged = client_signal_channel
         .queue_purge(CLIENT_SIGNAL_QUEUE.into(), QueuePurgeOptions::default())
         .await?;
-    common::log_info!("Declared queue: {} (purged {} stale messages)", CLIENT_SIGNAL_QUEUE, purged);
+    common::log_info!(
+        "Declared queue: {} (purged {} stale messages)",
+        CLIENT_SIGNAL_QUEUE,
+        purged
+    );
 
     broadcast_channel
         .exchange_declare(
@@ -174,10 +192,18 @@ async fn run_main_loop() -> Result<()> {
     let node_registry = Arc::new(NodeRegistry::new());
     let client_registry = Arc::new(ClientRegistry::new());
     let pending_commands = Arc::new(PendingCommands::new());
-    let node_handler = Arc::new(NodeMessageHandler::new(publish_channel.clone(), broadcast_channel.clone(), node_registry.clone()));
+    let node_handler = Arc::new(NodeMessageHandler::new(
+        publish_channel.clone(),
+        broadcast_channel.clone(),
+        node_registry.clone(),
+    ));
 
     let client_publish_channel = connection.create_channel().await?;
-    let client_handler = Arc::new(ClientMessageHandler::new(client_publish_channel.clone(), client_registry.clone(), node_registry.clone()));
+    let client_handler = Arc::new(ClientMessageHandler::new(
+        client_publish_channel.clone(),
+        client_registry.clone(),
+        node_registry.clone(),
+    ));
 
     //
     // Initialize database with configuration from environment.
@@ -194,7 +220,10 @@ async fn run_main_loop() -> Result<()> {
     //
     {
         let current_version = EMBEDDED_LUA_SCRIPTS_VERSION;
-        let last_version = database.get_config("builtin_scripts_version").await.unwrap_or(None);
+        let last_version = database
+            .get_config("builtin_scripts_version")
+            .await
+            .unwrap_or(None);
         let should_update = last_version.as_deref() != Some(current_version);
 
         match database.list_lua_agent_scripts().await {
@@ -208,19 +237,43 @@ async fn run_main_loop() -> Result<()> {
                     match existing_by_name.get(name) {
                         None => {
                             let id = uuid::Uuid::new_v4().to_string();
-                            if let Err(e) = database.upsert_lua_agent_script(
-                                &id, name, content, false, true, Some(current_version),
-                            ).await {
-                                common::log_warn!("Failed to seed Lua agent script '{}': {}", name, e);
+                            if let Err(e) = database
+                                .upsert_lua_agent_script(
+                                    &id,
+                                    name,
+                                    content,
+                                    false,
+                                    true,
+                                    Some(current_version),
+                                )
+                                .await
+                            {
+                                common::log_warn!(
+                                    "Failed to seed Lua agent script '{}': {}",
+                                    name,
+                                    e
+                                );
                             } else {
                                 seeded += 1;
                             }
                         }
                         Some(s) if s.is_builtin && should_update => {
-                            if let Err(e) = database.upsert_lua_agent_script(
-                                &s.id, name, content, s.disabled, true, Some(current_version),
-                            ).await {
-                                common::log_warn!("Failed to update builtin script '{}': {}", name, e);
+                            if let Err(e) = database
+                                .upsert_lua_agent_script(
+                                    &s.id,
+                                    name,
+                                    content,
+                                    s.disabled,
+                                    true,
+                                    Some(current_version),
+                                )
+                                .await
+                            {
+                                common::log_warn!(
+                                    "Failed to update builtin script '{}': {}",
+                                    name,
+                                    e
+                                );
                             } else {
                                 updated += 1;
                             }
@@ -233,11 +286,17 @@ async fn run_main_loop() -> Result<()> {
                     common::log_info!("Seeded {} new default Lua agent script(s)", seeded);
                 }
                 if updated > 0 {
-                    common::log_info!("Updated {} builtin Lua agent script(s) to version {}", updated, current_version);
+                    common::log_info!(
+                        "Updated {} builtin Lua agent script(s) to version {}",
+                        updated,
+                        current_version
+                    );
                 }
 
                 if should_update {
-                    let _ = database.set_config("builtin_scripts_version", current_version).await;
+                    let _ = database
+                        .set_config("builtin_scripts_version", current_version)
+                        .await;
                 }
             }
             Err(e) => {
@@ -251,11 +310,17 @@ async fn run_main_loop() -> Result<()> {
     // a TOML document stored in service_config; existing customizations
     // are left untouched.
     //
-    match database.get_config(intercept_targets::SERVICE_CONFIG_KEY).await {
+    match database
+        .get_config(intercept_targets::SERVICE_CONFIG_KEY)
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => {
             if let Err(e) = database
-                .set_config(intercept_targets::SERVICE_CONFIG_KEY, intercept_targets::default_text())
+                .set_config(
+                    intercept_targets::SERVICE_CONFIG_KEY,
+                    intercept_targets::default_text(),
+                )
                 .await
             {
                 common::log_warn!("Failed to seed default intercept targets: {}", e);
@@ -274,10 +339,16 @@ async fn run_main_loop() -> Result<()> {
     //
     match database.mark_running_as_failed().await {
         Ok(failed_count) if failed_count > 0 => {
-            common::log_info!("Marked {} running operations as failed due to service restart", failed_count);
+            common::log_info!(
+                "Marked {} running operations as failed due to service restart",
+                failed_count
+            );
         }
         Err(e) => {
-            common::log_warn!("Failed to mark running operations as failed: {} (continuing anyway)", e);
+            common::log_warn!(
+                "Failed to mark running operations as failed: {} (continuing anyway)",
+                e
+            );
         }
         _ => {}
     }
@@ -288,15 +359,23 @@ async fn run_main_loop() -> Result<()> {
     //
     match database.mark_running_chain_executions_as_failed().await {
         Ok(failed_chains) if failed_chains > 0 => {
-            common::log_info!("Marked {} running chain executions as failed due to service restart", failed_chains);
+            common::log_info!(
+                "Marked {} running chain executions as failed due to service restart",
+                failed_chains
+            );
         }
         Err(e) => {
-            common::log_warn!("Failed to mark running chain executions as failed: {} (continuing anyway)", e);
+            common::log_warn!(
+                "Failed to mark running chain executions as failed: {} (continuing anyway)",
+                e
+            );
         }
         _ => {}
     }
 
-    let service_config = Arc::new(RwLock::new(config::ServiceConfig::new(database.clone()).await?));
+    let service_config = Arc::new(RwLock::new(
+        config::ServiceConfig::new(database.clone()).await?,
+    ));
     let event_logging_enabled = {
         let config = service_config.read().await;
         config.get_bool(APPLICATION_LOGS_ENABLED, false)
@@ -412,7 +491,7 @@ async fn run_main_loop() -> Result<()> {
     //
     // Initialize event logging system.
     //
-    let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::channel(1024);
     common::logging::init("service".to_string(), String::new(), event_log_tx);
 
     //
@@ -483,7 +562,8 @@ async fn run_main_loop() -> Result<()> {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
                             if common::logging::is_event_log_enabled() {
-                                if let Err(e) = database_for_web_logs.insert_event_log(&entry).await {
+                                if let Err(e) = database_for_web_logs.insert_event_log(&entry).await
+                                {
                                     common::log_error!("Failed to insert web event log: {}", e);
                                 }
                             }
@@ -512,7 +592,9 @@ async fn run_main_loop() -> Result<()> {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
                             if common::logging::is_event_log_enabled() {
-                                if let Err(e) = database_for_node_logs.insert_event_log(&entry).await {
+                                if let Err(e) =
+                                    database_for_node_logs.insert_event_log(&entry).await
+                                {
                                     common::log_error!("Failed to insert node event log: {}", e);
                                 }
                             }
@@ -534,12 +616,16 @@ async fn run_main_loop() -> Result<()> {
 
     common::log_info!("Started event log consumers for web and nodes");
 
-
     //
     // Broadcast ServiceOnline to all clients so they can re-register.
     //
     let service_online_message = ClientBroadcastMessage::ServiceOnline;
-    let _ = publish_json_exchange(&broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &service_online_message).await;
+    let _ = publish_json_exchange(
+        &broadcast_channel,
+        CLIENT_BROADCAST_EXCHANGE,
+        &service_online_message,
+    )
+    .await;
     common::log_info!("Broadcast ServiceOnline to clients");
 
     //
@@ -548,11 +634,21 @@ async fn run_main_loop() -> Result<()> {
     let client_logging_message = ClientBroadcastMessage::EventLoggingSet {
         enabled: event_logging_enabled,
     };
-    let _ = publish_json_exchange(&broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_logging_message).await;
+    let _ = publish_json_exchange(
+        &broadcast_channel,
+        CLIENT_BROADCAST_EXCHANGE,
+        &client_logging_message,
+    )
+    .await;
     let node_logging_message = NodeBroadcastMessage::EventLoggingSet {
         enabled: event_logging_enabled,
     };
-    let _ = publish_json_exchange(&broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_logging_message).await;
+    let _ = publish_json_exchange(
+        &broadcast_channel,
+        NODE_BROADCAST_EXCHANGE,
+        &node_logging_message,
+    )
+    .await;
 
     let mut node_signal_consumer = node_signal_channel
         .basic_consume(
@@ -685,7 +781,12 @@ async fn run_main_loop() -> Result<()> {
 
             for update in updates {
                 let message = ClientBroadcastMessage::SemanticOpUpdate(update);
-                let _ = publish_json_exchange(&broadcast_channel_ops, CLIENT_BROADCAST_EXCHANGE, &message).await;
+                let _ = publish_json_exchange(
+                    &broadcast_channel_ops,
+                    CLIENT_BROADCAST_EXCHANGE,
+                    &message,
+                )
+                .await;
             }
         }
     });
@@ -734,14 +835,20 @@ async fn run_main_loop() -> Result<()> {
             if config.is_claude_ccrv1_enabled() {
                 let port = config.get_claude_ccrv1_port();
                 let url = rabbitmq_url();
-                if let Err(e) = ccrv1_manager.start(&url, port, node_registry.clone(), tls_cfg.clone()).await {
+                if let Err(e) = ccrv1_manager
+                    .start(&url, port, node_registry.clone(), tls_cfg.clone())
+                    .await
+                {
                     common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
                 }
             }
             if config.is_claude_ccrv2_enabled() {
                 let port = config.get_claude_ccrv2_port();
                 let url = rabbitmq_url();
-                if let Err(e) = ccrv2_manager.start(&url, port, node_registry.clone(), tls_cfg.clone()).await {
+                if let Err(e) = ccrv2_manager
+                    .start(&url, port, node_registry.clone(), tls_cfg.clone())
+                    .await
+                {
                     common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
                 }
             }
@@ -806,7 +913,11 @@ async fn run_main_loop() -> Result<()> {
     // queues.
     //
 
-    common::log_info!("Waiting for messages on {} and {}...", NODE_SIGNAL_QUEUE, CLIENT_SIGNAL_QUEUE);
+    common::log_info!(
+        "Waiting for messages on {} and {}...",
+        NODE_SIGNAL_QUEUE,
+        CLIENT_SIGNAL_QUEUE
+    );
 
     loop {
         tokio::select! {

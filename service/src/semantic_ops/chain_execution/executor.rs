@@ -2,21 +2,24 @@ use anyhow::{Context, Result};
 use lapin::Channel;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock as TokioRwLock};
+use tokio::sync::{RwLock as TokioRwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use chrono::Utc;
 use common::{
-    publish_json_exchange, ai::{create_ai_client, execute_chat_completion, Message, Provider},
-    ChainExecutionStatus, ClientBroadcastMessage, ElementConfig, ElementContext,
-    SemanticOperationSpec, SemanticOpStatus, CLIENT_BROADCAST_EXCHANGE,
+    CLIENT_BROADCAST_EXCHANGE, ChainExecutionStatus, ClientBroadcastMessage, ElementConfig,
+    ElementContext, SemanticOpStatus, SemanticOperationSpec,
+    ai::{Message, Provider, create_ai_client, execute_chat_completion},
+    publish_json_exchange,
 };
 
 use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::Database;
-use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
+use crate::database::{
+    ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup,
+};
 use crate::semantic_ops::{close_session, create_session, execute_one_shot};
 use crate::tools::ToolkitManager;
 
@@ -203,7 +206,10 @@ impl ChainExecutor {
                 match result {
                     Ok(_) => {
                         state.mark_completed();
-                        common::log_info!("Chain execution {} completed successfully", &exec_id[..8]);
+                        common::log_info!(
+                            "Chain execution {} completed successfully",
+                            &exec_id[..8]
+                        );
                     }
                     Err(ref e) => {
                         if crate::semantic_ops::is_cancelled(e) {
@@ -211,11 +217,7 @@ impl ChainExecutor {
                             common::log_info!("Chain execution {} was cancelled", &exec_id[..8]);
                         } else {
                             state.mark_failed();
-                            common::log_error!(
-                                "Chain execution {} failed: {}",
-                                &exec_id[..8],
-                                e
-                            );
+                            common::log_error!("Chain execution {} failed: {}", &exec_id[..8], e);
                         }
                     }
                 }
@@ -411,12 +413,11 @@ impl ChainExecutor {
                         let max_polls = 1800;
                         for _ in 0..max_polls {
                             tokio::time::sleep(poll_interval).await;
-                            let still_running =
-                                self_clone.registry.list().iter().any(|e| {
-                                    &e.execution_id == id
-                                        && (e.status == common::ChainExecutionStatus::Running
-                                            || e.status == common::ChainExecutionStatus::Queued)
-                                });
+                            let still_running = self_clone.registry.list().iter().any(|e| {
+                                &e.execution_id == id
+                                    && (e.status == common::ChainExecutionStatus::Running
+                                        || e.status == common::ChainExecutionStatus::Queued)
+                            });
                             if !still_running {
                                 break;
                             }
@@ -583,8 +584,7 @@ impl ChainExecutor {
                     )
                     .await
                     .context("Failed to create session for session group")?;
-                    *active_session_snapshot.lock().unwrap() =
-                        Some((node_id.clone(), sid.clone()));
+                    *active_session_snapshot.lock().unwrap() = Some((node_id.clone(), sid.clone()));
                     active_session = Some(sid);
                     common::log_info!("Created session for session group {}", group_id);
                 }
@@ -780,153 +780,154 @@ impl ChainExecutor {
                 merged_input.len()
             );
 
-            let (result, active_port, semantic_success): (Result<String>, Option<u32>, Option<bool>) =
-                match &node.element {
-                    ChainElement::Trigger { .. } => {
-                        let trigger_output = initial_input.clone().unwrap_or_default();
-                        (Ok(trigger_output), None, None)
+            let (result, active_port, semantic_success): (
+                Result<String>,
+                Option<u32>,
+                Option<bool>,
+            ) = match &node.element {
+                ChainElement::Trigger { .. } => {
+                    let trigger_output = initial_input.clone().unwrap_or_default();
+                    (Ok(trigger_output), None, None)
+                }
+                ChainElement::Loop { max_iterations, .. } => {
+                    let counter = loop_counters.entry(element_id.clone()).or_insert(0);
+                    *counter += 1;
+                    if *counter <= *max_iterations {
+                        (Ok(merged_input.clone()), Some(0), None)
+                    } else {
+                        (Ok(merged_input.clone()), Some(u32::MAX), None)
                     }
-                    ChainElement::Loop { max_iterations, .. } => {
-                        let counter = loop_counters.entry(element_id.clone()).or_insert(0);
-                        *counter += 1;
-                        if *counter <= *max_iterations {
-                            (Ok(merged_input.clone()), Some(0), None)
-                        } else {
-                            (Ok(merged_input.clone()), Some(u32::MAX), None)
+                }
+                ChainElement::Operation {
+                    operation_name,
+                    model_ref,
+                    ..
+                } => {
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
                         }
-                    }
-                    ChainElement::Operation {
-                        operation_name,
-                        model_ref,
-                        ..
-                    } => {
-                        tokio::select! {
-                            _ = cancel_token.cancelled() => {
-                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                            }
-                            op_result = Self::execute_operation(
-                                &execution_id,
-                                &element_id,
-                                operation_name,
-                                model_ref,
-                                &merged_input,
-                                is_first_in_session,
-                                yolo_mode,
-                                &active_session,
-                                &working_dir,
-                                &node_id,
-                                &agent_short_name,
-                                &config,
-                                &rabbitmq_channel,
-                                &acp_node_proxy,
-                                database.clone(),
-                            ) => {
-                                match op_result {
-                                    Ok((output, sem_success)) => (Ok(output), None, sem_success),
-                                    Err(e) => (Err(e), None, None),
-                                }
-                            }
-                        }
-                    }
-                    ChainElement::Transform {
-                        prompt, model_ref, ..
-                    } => {
-                        tokio::select! {
-                            _ = cancel_token.cancelled() => {
-                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                            }
-                            result = Self::execute_transform(
-                                prompt,
-                                model_ref,
-                                &merged_input,
-                                &config,
-                            ) => {
-                                (result, None, None)
+                        op_result = Self::execute_operation(
+                            &execution_id,
+                            &element_id,
+                            operation_name,
+                            model_ref,
+                            &merged_input,
+                            is_first_in_session,
+                            yolo_mode,
+                            &active_session,
+                            &working_dir,
+                            &node_id,
+                            &agent_short_name,
+                            &config,
+                            &rabbitmq_channel,
+                            &acp_node_proxy,
+                            database.clone(),
+                        ) => {
+                            match op_result {
+                                Ok((output, sem_success)) => (Ok(output), None, sem_success),
+                                Err(e) => (Err(e), None, None),
                             }
                         }
                     }
-                    ChainElement::GenericPrompt {
-                        prompt,
-                        session_group,
-                        ..
-                    } => {
-                        tokio::select! {
-                            _ = cancel_token.cancelled() => {
-                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                            }
-                            result = Self::execute_generic_prompt(
-                                prompt,
-                                session_group,
-                                &merged_input,
-                                is_first_in_session,
-                                &active_session,
-                                yolo_mode,
-                                &working_dir,
-                                &node_id,
-                                &agent_short_name,
-                                &rabbitmq_channel,
-                                &acp_node_proxy,
-                                database.clone(),
-                                &config,
-                            ) => {
-                                (result, None, None)
-                            }
+                }
+                ChainElement::Transform {
+                    prompt, model_ref, ..
+                } => {
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = Self::execute_transform(
+                            prompt,
+                            model_ref,
+                            &merged_input,
+                            &config,
+                        ) => {
+                            (result, None, None)
                         }
                     }
-                    ChainElement::Memory { key, mode, .. } => {
-                        let mem_result = match mode {
-                            crate::database::MemoryMode::Store => database
-                                .set_memory(key, &merged_input)
-                                .await
-                                .map_err(|e| {
-                                    anyhow::anyhow!("Failed to store memory '{}': {}", key, e)
-                                })
-                                .map(|_| merged_input.clone()),
-                            crate::database::MemoryMode::Retrieve => database
-                                .get_memory(key)
-                                .await
-                                .map_err(|e| {
-                                    anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e)
-                                })
-                                .map(|v| v.unwrap_or_default()),
-                        };
-                        (mem_result, None, None)
+                }
+                ChainElement::GenericPrompt {
+                    prompt,
+                    session_group,
+                    ..
+                } => {
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = Self::execute_generic_prompt(
+                            prompt,
+                            session_group,
+                            &merged_input,
+                            is_first_in_session,
+                            &active_session,
+                            yolo_mode,
+                            &working_dir,
+                            &node_id,
+                            &agent_short_name,
+                            &rabbitmq_channel,
+                            &acp_node_proxy,
+                            database.clone(),
+                            &config,
+                        ) => {
+                            (result, None, None)
+                        }
                     }
-                    ChainElement::Tool {
-                        tool_name,
-                        tool_params,
-                        ..
-                    } => {
-                        let tool_future = async {
-                            if let Some(ref tm) = toolkit_manager {
-                                if let Some(tool) = tm.get_chain_tool(tool_name) {
-                                    tool.execute_chain(&merged_input, tool_params).await
-                                } else {
-                                    Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
-                                }
+                }
+                ChainElement::Memory { key, mode, .. } => {
+                    let mem_result = match mode {
+                        crate::database::MemoryMode::Store => database
+                            .set_memory(key, &merged_input)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
+                            .map(|_| merged_input.clone()),
+                        crate::database::MemoryMode::Retrieve => database
+                            .get_memory(key)
+                            .await
+                            .map_err(|e| {
+                                anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e)
+                            })
+                            .map(|v| v.unwrap_or_default()),
+                    };
+                    (mem_result, None, None)
+                }
+                ChainElement::Tool {
+                    tool_name,
+                    tool_params,
+                    ..
+                } => {
+                    let tool_future = async {
+                        if let Some(ref tm) = toolkit_manager {
+                            if let Some(tool) = tm.get_chain_tool(tool_name) {
+                                tool.execute_chain(&merged_input, tool_params).await
                             } else {
-                                Err(anyhow::anyhow!("ToolkitManager not available"))
+                                Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
                             }
-                        };
-                        tokio::select! {
-                            _ = cancel_token.cancelled() => {
-                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                            }
-                            result = tool_future => {
-                                (result, None, None)
-                            }
+                        } else {
+                            Err(anyhow::anyhow!("ToolkitManager not available"))
+                        }
+                    };
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = tool_future => {
+                            (result, None, None)
                         }
                     }
-                    ChainElement::Payload { payload_id, .. } => {
-                        let result = match database.get_payload(payload_id).await {
-                            Ok(Some(record)) => Ok(record.content),
-                            Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
-                            Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
-                        };
-                        (result, None, None)
-                    }
-                    ChainElement::Termination { .. } => (Ok(merged_input.clone()), None, None),
-                };
+                }
+                ChainElement::Payload { payload_id, .. } => {
+                    let result = match database.get_payload(payload_id).await {
+                        Ok(Some(record)) => Ok(record.content),
+                        Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
+                        Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
+                    };
+                    (result, None, None)
+                }
+                ChainElement::Termination { .. } => (Ok(merged_input.clone()), None, None),
+            };
 
             let (output, success) = match result {
                 Ok(output) => {
@@ -1069,9 +1070,7 @@ impl ChainExecutor {
             .await
             .ok()
             .flatten()
-            .ok_or_else(|| {
-                anyhow::anyhow!("Operation definition not found: {}", operation_name)
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Operation definition not found: {}", operation_name))?;
 
         let full_prompt = if active_session.is_none() || is_first_in_session {
             if merged_input.is_empty() {
@@ -1267,7 +1266,10 @@ impl ChainExecutor {
             operation_prompt: prompt_to_send,
             mode: "one-shot".to_string(),
             agent_iterations: 1,
-            yolo_mode: session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(yolo_mode),
+            yolo_mode: session_group
+                .as_ref()
+                .map(|sg| sg.yolo_mode)
+                .unwrap_or(yolo_mode),
             model_ref: None,
         };
 

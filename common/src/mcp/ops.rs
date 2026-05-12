@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::json;
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use crate::mcp::McpClient;
 use crate::{
     AgentFileType, AgentTool, ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
     ChainTriggerInfo, ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo,
-    SemanticOperationSpec, SemanticOpUpdate, SessionItem, SystemState, TargetSpec, TriggerConfig,
+    SemanticOpUpdate, SemanticOperationSpec, SessionItem, SystemState, TargetSpec, TriggerConfig,
 };
 
 //
@@ -21,8 +21,14 @@ pub struct OpAvailableResult {
 }
 
 pub enum OpRunResult {
-    Operation { id: String, name: String },
-    Chain { name: String, execution_id: Option<String> },
+    Operation {
+        id: String,
+        name: String,
+    },
+    Chain {
+        name: String,
+        execution_id: Option<String>,
+    },
 }
 
 pub enum OpInfoResult {
@@ -53,13 +59,14 @@ pub fn resolve_node_id(state: &SystemState, prefix: &str) -> Result<String> {
     state
         .nodes
         .iter()
-        .find(|n| {
-            n.node_id
-                .to_lowercase()
-                .starts_with(&prefix.to_lowercase())
-        })
+        .find(|n| n.node_id.to_lowercase().starts_with(&prefix.to_lowercase()))
         .map(|n| n.node_id.clone())
-        .ok_or_else(|| anyhow!("No node found matching '{}'. Use node_list to see connected nodes.", prefix))
+        .ok_or_else(|| {
+            anyhow!(
+                "No node found matching '{}'. Use node_list to see connected nodes.",
+                prefix
+            )
+        })
 }
 
 //
@@ -101,19 +108,28 @@ pub async fn get_definition(
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let ops = client.get_operation_definitions().await;
-    if let Some(op) = ops.iter().find(|d| d.full_name == name || d.short_name == name || d.name == name) {
+    if let Some(op) = ops
+        .iter()
+        .find(|d| d.full_name == name || d.short_name == name || d.name == name)
+    {
         return Ok(OpDefinitionResult::Operation(op.clone()));
     }
 
     let chains = client.get_chain_definitions().await;
-    if let Some(chain_info) = chains.iter().find(|c| c.name == name || c.id.starts_with(name)) {
+    if let Some(chain_info) = chains
+        .iter()
+        .find(|c| c.name == name || c.id.starts_with(name))
+    {
         client.request_chain(&chain_info.id).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         if let Some(chain_full) = client.get_current_chain().await {
             return Ok(OpDefinitionResult::Chain(chain_full));
         }
-        return Err(anyhow!("Chain '{}' found but failed to fetch full definition", name));
+        return Err(anyhow!(
+            "Chain '{}' found but failed to fetch full definition",
+            name
+        ));
     }
 
     Err(anyhow!(
@@ -140,11 +156,7 @@ pub async fn op_create(
 // Delete an operation definition by full name or short name.
 //
 
-pub async fn op_delete(
-    client: &(impl McpClient + Sync),
-    name: &str,
-) -> Result<String> {
-
+pub async fn op_delete(client: &(impl McpClient + Sync), name: &str) -> Result<String> {
     //
     // Resolve to full_name if a short name or display name was given.
     //
@@ -184,10 +196,9 @@ pub async fn run(
     agent: &str,
     working_dir: Option<String>,
 ) -> Result<OpRunResult> {
-    let state = client
-        .get_state()
-        .await
-        .ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let state = client.get_state().await.ok_or_else(|| {
+        anyhow!("No state available. The service may still be starting — try again in a moment.")
+    })?;
     let node_id = resolve_node_id(&state, node_prefix)?;
 
     //
@@ -201,8 +212,7 @@ pub async fn run(
     let operation = op_defs.iter().find(|op| {
         op.full_name.to_lowercase() == name.to_lowercase()
             || op.short_name.to_lowercase() == name.to_lowercase()
-            || format!("{}::{}", op.category, op.short_name).to_lowercase()
-                == name.to_lowercase()
+            || format!("{}::{}", op.category, op.short_name).to_lowercase() == name.to_lowercase()
     });
 
     if let Some(operation) = operation {
@@ -230,8 +240,7 @@ pub async fn run(
 
     let chain_defs = client.get_chain_definitions().await;
     let chain = chain_defs.iter().find(|c| {
-        c.id.to_lowercase()
-            .starts_with(&name.to_lowercase())
+        c.id.to_lowercase().starts_with(&name.to_lowercase())
             || c.name.to_lowercase() == name.to_lowercase()
     });
 
@@ -241,7 +250,12 @@ pub async fn run(
             let chain_name = chain.name.clone();
 
             client
-                .run_chain(chain_id.clone(), node_id.clone(), agent.to_string(), working_dir)
+                .run_chain(
+                    chain_id.clone(),
+                    node_id.clone(),
+                    agent.to_string(),
+                    working_dir,
+                )
                 .await?;
 
             //
@@ -264,7 +278,10 @@ pub async fn run(
                 execution_id,
             })
         }
-        None => Err(anyhow!("No operation or chain found matching '{}'. Use op_available to list what's available.", name)),
+        None => Err(anyhow!(
+            "No operation or chain found matching '{}'. Use op_available to list what's available.",
+            name
+        )),
     }
 }
 
@@ -273,11 +290,7 @@ pub async fn run(
 // operations first, then falls back to chain executions.
 //
 
-pub async fn get_info(
-    client: &(impl McpClient + Sync),
-    short_id: &str,
-) -> Result<OpInfoResult> {
-
+pub async fn get_info(client: &(impl McpClient + Sync), short_id: &str) -> Result<OpInfoResult> {
     //
     // Try semantic operations first.
     //
@@ -313,10 +326,7 @@ pub async fn get_info(
 // operations first, then falls back to chain executions.
 //
 
-pub async fn cancel(
-    client: &(impl McpClient + Sync),
-    short_id: &str,
-) -> Result<OpCancelResult> {
+pub async fn cancel(client: &(impl McpClient + Sync), short_id: &str) -> Result<OpCancelResult> {
     let ops = client.get_operations().await;
     if let Some(op) = ops.iter().find(|op| op.operation_id.starts_with(short_id)) {
         client.cancel_semantic_op(op.operation_id.clone()).await?;
@@ -373,12 +383,20 @@ pub async fn recon_list(
     agent: &str,
     section: Option<&str>,
 ) -> Result<ReconListResult> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let state = client.get_state().await.ok_or_else(|| {
+        anyhow!("No state available. The service may still be starting — try again in a moment.")
+    })?;
     let node_id = resolve_node_id(&state, node_prefix)?;
     let recon = client
         .get_stored_recon(&node_id, agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon for {}:{}. Run recon_run first to discover files and tools.", node_prefix, agent))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "No stored recon for {}:{}. Run recon_run first to discover files and tools.",
+                node_prefix,
+                agent
+            )
+        })?;
 
     let show_all = section.is_none() || section == Some("all");
 
@@ -432,20 +450,22 @@ async fn resolve_recon(
     agent: &str,
     file_type: AgentFileType,
 ) -> Result<ResolvedRecon> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let state = client.get_state().await.ok_or_else(|| {
+        anyhow!("No state available. The service may still be starting — try again in a moment.")
+    })?;
     let node_id = resolve_node_id(&state, node_prefix)?;
     let recon = client
         .get_stored_recon(&node_id, agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon data for agent '{}' on this node. Run recon_run first.", agent))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "No stored recon data for agent '{}' on this node. Run recon_run first.",
+                agent
+            )
+        })?;
 
     let paths: Vec<String> = match file_type {
-        AgentFileType::Config => recon
-            .config
-            .items
-            .iter()
-            .map(|c| c.path.clone())
-            .collect(),
+        AgentFileType::Config => recon.config.items.iter().map(|c| c.path.clone()).collect(),
         AgentFileType::Session => recon
             .sessions
             .items
@@ -461,7 +481,11 @@ fn has_glob_chars(path: &str) -> bool {
     path.contains('*') || path.contains('?') || path.contains('[')
 }
 
-fn validate_paths(recon_paths: &[String], paths: &[String], file_type: AgentFileType) -> Result<()> {
+fn validate_paths(
+    recon_paths: &[String],
+    paths: &[String],
+    file_type: AgentFileType,
+) -> Result<()> {
     let type_name = match file_type {
         AgentFileType::Config => "config",
         AgentFileType::Session => "session",
@@ -473,7 +497,8 @@ fn validate_paths(recon_paths: &[String], paths: &[String], file_type: AgentFile
         if !recon_paths.iter().any(|p| p == path) {
             return Err(anyhow!(
                 "Path '{}' not found in recon {} files. Use recon_list to see available files.",
-                path, type_name
+                path,
+                type_name
             ));
         }
     }
@@ -504,7 +529,16 @@ pub async fn recon_read_file(
 ) -> Result<ReadFileResult> {
     let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
     validate_paths(&resolved.paths, &[path.to_string()], file_type)?;
-    read_file_inner(client, &resolved.node_id, agent, file_type, path, line_start, line_end).await
+    read_file_inner(
+        client,
+        &resolved.node_id,
+        agent,
+        file_type,
+        path,
+        line_start,
+        line_end,
+    )
+    .await
 }
 
 async fn read_file_inner(
@@ -582,12 +616,24 @@ pub async fn recon_read_all(
     let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
 
     if resolved.paths.is_empty() {
-        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
+        return Err(anyhow!(
+            "No files found in recon data. Run recon_run to discover files."
+        ));
     }
 
     let mut results = Vec::new();
     for path in &resolved.paths {
-        match read_file_inner(client, &resolved.node_id, agent, file_type, path, line_start, line_end).await {
+        match read_file_inner(
+            client,
+            &resolved.node_id,
+            agent,
+            file_type,
+            path,
+            line_start,
+            line_end,
+        )
+        .await
+        {
             Ok(r) => results.push(r),
             Err(e) => results.push(ReadFileResult {
                 path: path.clone(),
@@ -672,7 +718,11 @@ async fn grep_files_inner(
         .map_err(|e| anyhow!("Failed to parse grep errors: {}", e))?
         .unwrap_or_default();
 
-    Ok(GrepFilesResult { pattern, results, errors })
+    Ok(GrepFilesResult {
+        pattern,
+        results,
+        errors,
+    })
 }
 
 //
@@ -690,15 +740,25 @@ pub async fn recon_grep_all(
     let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
 
     if resolved.paths.is_empty() {
-        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
+        return Err(anyhow!(
+            "No files found in recon data. Run recon_run to discover files."
+        ));
     }
 
     let mut result = grep_files_inner(
-        client, &resolved.node_id, agent, file_type, &resolved.paths, pattern,
-    ).await?;
+        client,
+        &resolved.node_id,
+        agent,
+        file_type,
+        &resolved.paths,
+        pattern,
+    )
+    .await?;
 
     // Filter to only files with matches
-    result.results.retain(|r| r.error.is_some() || !r.matches.is_empty());
+    result
+        .results
+        .retain(|r| r.error.is_some() || !r.matches.is_empty());
     Ok(result)
 }
 
@@ -736,7 +796,9 @@ pub async fn trigger_create(
         .ok_or_else(|| anyhow!("No chain found matching '{}'", chain_name))?;
     let chain_id = chain.id.clone();
 
-    client.create_chain_trigger(chain_id.clone(), trigger_config, target_spec).await?;
+    client
+        .create_chain_trigger(chain_id.clone(), trigger_config, target_spec)
+        .await?;
     Ok(chain_id)
 }
 

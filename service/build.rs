@@ -5,10 +5,7 @@ use std::path::Path;
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let scripts_dir = Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .join("agents");
+    let scripts_dir = Path::new(&manifest_dir).parent().unwrap().join("agents");
 
     println!("cargo:rerun-if-changed={}", scripts_dir.display());
 

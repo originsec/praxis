@@ -19,10 +19,10 @@ use async_trait::async_trait;
 use chrono::Utc;
 use common::{DiscoveredAgent, NodeCapability, NodeInformationUpdate};
 use futures_util::{SinkExt, StreamExt};
-use serde_json::{json, Value};
-use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
 use super::{RemoteNode, RemoteNodeContext};
@@ -181,8 +181,8 @@ async fn run_health_probe(node_id: String, ws_url: String, ctx: RemoteNodeContex
 
         if alive {
             ctx.node_registry.touch_timestamp(&node_id).await;
-            if let Err(e) = broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry)
-                .await
+            if let Err(e) =
+                broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await
             {
                 common::log_debug!("Codex bridge: health-probe broadcast failed: {}", e);
             }
@@ -576,19 +576,28 @@ async fn run_bridge(
         // Tear down outstanding state, fail in-flight requests.
         //
         for (_, turn) in state.active_turn_by_session.drain() {
-            let _ = send_acp_to_client(&ctx, &node_id, &turn.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &turn.client_id,
                 acp_error_response(turn.acp_id, -32000, "Codex connection lost"),
             )
             .await;
         }
         for (_, pending) in state.pending_turn_start.drain() {
-            let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &pending.client_id,
                 acp_error_response(pending.acp_id, -32000, "Codex connection lost"),
             )
             .await;
         }
         for (_, pending) in state.pending_thread_start.drain() {
-            let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &pending.client_id,
                 acp_error_response(pending.acp_id, -32000, "Codex connection lost"),
             )
             .await;
@@ -791,10 +800,7 @@ async fn handle_acp_frame(
                     "version": env!("CARGO_PKG_VERSION"),
                 },
             });
-            let _ = send_acp_to_client(&ctx, &node_id, client_id,
-                acp_response(acp_id, resp),
-            )
-            .await;
+            let _ = send_acp_to_client(&ctx, &node_id, client_id, acp_response(acp_id, resp)).await;
         }
 
         "session/new" => {
@@ -837,7 +843,10 @@ async fn handle_acp_frame(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let Some(session) = state.sessions.get(session_id) else {
-                let _ = send_acp_to_client(&ctx, &node_id, client_id,
+                let _ = send_acp_to_client(
+                    &ctx,
+                    &node_id,
+                    client_id,
                     acp_error_response(acp_id, -32000, "Unknown session"),
                 )
                 .await;
@@ -952,7 +961,10 @@ async fn handle_acp_frame(
                     })
                 })
                 .collect();
-            let _ = send_acp_to_client(&ctx, &node_id, client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                client_id,
                 acp_response(acp_id, json!({ "sessions": sessions })),
             )
             .await;
@@ -970,15 +982,16 @@ async fn handle_acp_frame(
             // Codex threads are kept open server-side. Just ack the
             // client-side close.
             //
-            let _ = send_acp_to_client(&ctx, &node_id, client_id,
-                acp_response(acp_id, json!({})),
-            )
-            .await;
+            let _ = send_acp_to_client(&ctx, &node_id, client_id, acp_response(acp_id, json!({})))
+                .await;
         }
 
         _ => {
             if !acp_id.is_null() {
-                let _ = send_acp_to_client(&ctx, &node_id, client_id,
+                let _ = send_acp_to_client(
+                    &ctx,
+                    &node_id,
+                    client_id,
                     acp_error_response(
                         acp_id,
                         -32601,
@@ -1057,7 +1070,10 @@ async fn handle_codex_frame(
     value: Value,
 ) -> Result<()> {
     let id_opt = value.get("id").and_then(|v| v.as_u64());
-    let method_opt = value.get("method").and_then(|m| m.as_str()).map(String::from);
+    let method_opt = value
+        .get("method")
+        .and_then(|m| m.as_str())
+        .map(String::from);
 
     match (id_opt, method_opt.as_deref()) {
         (Some(id), Some(method)) => {
@@ -1074,10 +1090,7 @@ async fn handle_codex_frame(
                 | "item/commandExecution/requestApproval"
                 | "item/fileChange/requestApproval"
                 | "item/permissions/requestApproval" => {
-                    forward_codex_approval(
-                        node_id, state, ws_tx, ctx, id, method, &value,
-                    )
-                    .await;
+                    forward_codex_approval(node_id, state, ws_tx, ctx, id, method, &value).await;
                 }
                 _ => {
                     send_codex(
@@ -1140,8 +1153,8 @@ async fn handle_codex_response(
                 if let Some(os) = os {
                     ctx.node_registry.set_os_details(node_id, os).await;
                 }
-                let _ = broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry)
-                    .await;
+                let _ =
+                    broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await;
             }
         }
         state.initialized = true;
@@ -1164,7 +1177,10 @@ async fn handle_codex_response(
                 .and_then(|v| v.as_str())
                 .unwrap_or("Codex thread/start failed")
                 .to_string();
-            let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &pending.client_id,
                 acp_error_response(pending.acp_id, -32000, &message),
             )
             .await;
@@ -1179,7 +1195,10 @@ async fn handle_codex_response(
             .unwrap_or("")
             .to_string();
         if thread_id.is_empty() {
-            let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &pending.client_id,
                 acp_error_response(pending.acp_id, -32000, "thread/start returned no id"),
             )
             .await;
@@ -1199,8 +1218,14 @@ async fn handle_codex_response(
             .register_session(pending.acp_session_id.clone(), node_id.to_string())
             .await;
 
-        let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
-            acp_response(pending.acp_id, json!({ "sessionId": pending.acp_session_id })),
+        let _ = send_acp_to_client(
+            &ctx,
+            &node_id,
+            &pending.client_id,
+            acp_response(
+                pending.acp_id,
+                json!({ "sessionId": pending.acp_session_id }),
+            ),
         )
         .await;
         return;
@@ -1222,7 +1247,10 @@ async fn handle_codex_response(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Codex turn/start failed")
                     .to_string();
-                let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+                let _ = send_acp_to_client(
+                    &ctx,
+                    &node_id,
+                    &pending.client_id,
                     acp_error_response(pending.acp_id, -32000, &message),
                 )
                 .await;
@@ -1323,7 +1351,10 @@ async fn handle_codex_notification(
                 return;
             }
             if let Some((acp_session_id, turn)) = lookup_active_turn(state, key.as_deref()) {
-                let _ = send_acp_to_client(&ctx, &node_id, &turn.client_id,
+                let _ = send_acp_to_client(
+                    &ctx,
+                    &node_id,
+                    &turn.client_id,
                     session_update_text(&acp_session_id, delta),
                 )
                 .await;
@@ -1348,7 +1379,10 @@ async fn handle_codex_notification(
                 return;
             }
             if let Some((acp_session_id, turn)) = lookup_active_turn(state, key.as_deref()) {
-                let _ = send_acp_to_client(&ctx, &node_id, &turn.client_id,
+                let _ = send_acp_to_client(
+                    &ctx,
+                    &node_id,
+                    &turn.client_id,
                     session_update_tool_result(&acp_session_id, "shell", delta, false),
                 )
                 .await;
@@ -1393,9 +1427,7 @@ async fn handle_codex_notification(
             let Some(pending) = state.pending_turn_start.remove(&pending_id) else {
                 return;
             };
-            state
-                .active_turn_by_session
-                .remove(&pending.acp_session_id);
+            state.active_turn_by_session.remove(&pending.acp_session_id);
             //
             // Clear the active turn id — any subsequent session/cancel
             // for this session is now a no-op.
@@ -1407,7 +1439,10 @@ async fn handle_codex_notification(
             let response = json!({
                 "stopReason": "end_turn",
             });
-            let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+            let _ = send_acp_to_client(
+                &ctx,
+                &node_id,
+                &pending.client_id,
                 acp_response(pending.acp_id, response),
             )
             .await;
@@ -1483,13 +1518,14 @@ async fn handle_codex_notification(
 
             if let Some(pending_id) = pending_id {
                 if let Some(pending) = state.pending_turn_start.remove(&pending_id) {
-                    state
-                        .active_turn_by_session
-                        .remove(&pending.acp_session_id);
+                    state.active_turn_by_session.remove(&pending.acp_session_id);
                     if let Some(session) = state.sessions.get_mut(&pending.acp_session_id) {
                         session.current_turn_id = None;
                     }
-                    let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
+                    let _ = send_acp_to_client(
+                        &ctx,
+                        &node_id,
+                        &pending.client_id,
                         acp_error_response(pending.acp_id, -32000, &full_message),
                     )
                     .await;
@@ -1609,7 +1645,10 @@ async fn forward_codex_approval(
         Ok(s) => s,
         Err(_) => return,
     };
-    let _ = send_acp_to_client(&ctx, &node_id, &turn.client_id,
+    let _ = send_acp_to_client(
+        &ctx,
+        &node_id,
+        &turn.client_id,
         common::ClientDirectMessage::AcpMessage { json_rpc },
     )
     .await;

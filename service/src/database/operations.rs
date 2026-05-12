@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use common::{SemanticOperationSpec, SemanticOpStatus, SemanticOpUpdate};
+use common::{SemanticOpStatus, SemanticOpUpdate, SemanticOperationSpec};
 use sqlx::Row;
 
 use super::{Database, DatabasePool, MAX_OPERATIONS};
@@ -139,7 +139,11 @@ impl Database {
     }
 
     /// Update queue position for an operation
-    pub async fn update_queue_position(&self, operation_id: &str, position: Option<usize>) -> Result<()> {
+    pub async fn update_queue_position(
+        &self,
+        operation_id: &str,
+        position: Option<usize>,
+    ) -> Result<()> {
         let sql = "UPDATE operations SET queue_position = $1 WHERE operation_id = $2";
 
         match &self.pool {
@@ -164,7 +168,8 @@ impl Database {
 
     /// Append text to the output field (for streaming progress)
     pub async fn append_output(&self, operation_id: &str, text: &str) -> Result<()> {
-        let sql = "UPDATE operations SET output = COALESCE(output, '') || $1 WHERE operation_id = $2";
+        let sql =
+            "UPDATE operations SET output = COALESCE(output, '') || $1 WHERE operation_id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -222,10 +227,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(limit as i64)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
                 let mut operations = Vec::new();
                 for row in rows {
                     operations.push(parse_operation_row_sqlite(&row)?);
@@ -233,10 +235,7 @@ impl Database {
                 Ok(operations)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(limit as i64)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
                 let mut operations = Vec::new();
                 for row in rows {
                     operations.push(parse_operation_row_postgres(&row)?);
@@ -254,10 +253,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(node_id)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(node_id).fetch_all(pool).await?;
                 let mut operations = Vec::new();
                 for row in rows {
                     operations.push(parse_operation_row_sqlite(&row)?);
@@ -265,10 +261,7 @@ impl Database {
                 Ok(operations)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(node_id)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(node_id).fetch_all(pool).await?;
                 let mut operations = Vec::new();
                 for row in rows {
                     operations.push(parse_operation_row_postgres(&row)?);
@@ -279,7 +272,10 @@ impl Database {
     }
 
     /// List operations by status
-    pub async fn list_operations_by_status(&self, status: SemanticOpStatus) -> Result<Vec<OperationRecord>> {
+    pub async fn list_operations_by_status(
+        &self,
+        status: SemanticOpStatus,
+    ) -> Result<Vec<OperationRecord>> {
         let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations WHERE status = $1 ORDER BY created_at DESC";
 
@@ -359,20 +355,16 @@ impl Database {
             )";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)
@@ -384,16 +376,10 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(operation_id)
-                    .execute(pool)
-                    .await?;
+                sqlx::query(sql).bind(operation_id).execute(pool).await?;
             }
             DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(operation_id)
-                    .execute(pool)
-                    .await?;
+                sqlx::query(sql).bind(operation_id).execute(pool).await?;
             }
         }
 
@@ -405,12 +391,8 @@ impl Database {
         let sql = "DELETE FROM operations WHERE status IN ('Completed', 'Failed', 'Cancelled')";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
         };
 
         Ok(count as usize)
@@ -425,20 +407,16 @@ impl Database {
              WHERE status = 'Running'";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count as usize)

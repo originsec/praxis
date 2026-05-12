@@ -12,37 +12,43 @@ impl Database {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let rows = sqlx::query(sql).fetch_all(pool).await?;
-                Ok(rows.into_iter().map(|row| {
-                    let disabled: bool = row.get(3);
-                    let is_builtin: bool = row.get(4);
-                    LuaAgentScriptInfo {
-                        id: row.get(0),
-                        name: row.get(1),
-                        script: row.get(2),
-                        disabled,
-                        is_builtin,
-                        version: row.get(5),
-                        created_at: row.get(6),
-                        updated_at: row.get(7),
-                    }
-                }).collect())
+                Ok(rows
+                    .into_iter()
+                    .map(|row| {
+                        let disabled: bool = row.get(3);
+                        let is_builtin: bool = row.get(4);
+                        LuaAgentScriptInfo {
+                            id: row.get(0),
+                            name: row.get(1),
+                            script: row.get(2),
+                            disabled,
+                            is_builtin,
+                            version: row.get(5),
+                            created_at: row.get(6),
+                            updated_at: row.get(7),
+                        }
+                    })
+                    .collect())
             }
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).fetch_all(pool).await?;
-                Ok(rows.into_iter().map(|row| {
-                    let disabled: i16 = row.get(3);
-                    let is_builtin: i16 = row.get(4);
-                    LuaAgentScriptInfo {
-                        id: row.get(0),
-                        name: row.get(1),
-                        script: row.get(2),
-                        disabled: disabled != 0,
-                        is_builtin: is_builtin != 0,
-                        version: row.get(5),
-                        created_at: row.get(6),
-                        updated_at: row.get(7),
-                    }
-                }).collect())
+                Ok(rows
+                    .into_iter()
+                    .map(|row| {
+                        let disabled: i16 = row.get(3);
+                        let is_builtin: i16 = row.get(4);
+                        LuaAgentScriptInfo {
+                            id: row.get(0),
+                            name: row.get(1),
+                            script: row.get(2),
+                            disabled: disabled != 0,
+                            is_builtin: is_builtin != 0,
+                            version: row.get(5),
+                            created_at: row.get(6),
+                            updated_at: row.get(7),
+                        }
+                    })
+                    .collect())
             }
         }
     }
@@ -144,41 +150,35 @@ impl Database {
     pub async fn set_lua_agent_script_disabled(&self, id: &str, disabled: bool) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(
-                    "UPDATE lua_agent_scripts SET disabled = ?, updated_at = ? WHERE id = ?"
-                )
-                .bind(disabled)
-                .bind(&now)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(
-                    "UPDATE lua_agent_scripts SET disabled = $1, updated_at = $2 WHERE id = $3"
-                )
-                .bind(if disabled { 1i16 } else { 0i16 })
-                .bind(&now)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(
+                "UPDATE lua_agent_scripts SET disabled = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(disabled)
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(
+                "UPDATE lua_agent_scripts SET disabled = $1, updated_at = $2 WHERE id = $3",
+            )
+            .bind(if disabled { 1i16 } else { 0i16 })
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected(),
         };
         Ok(rows_affected > 0)
     }
 
     pub async fn delete_lua_agent_script(&self, id: &str) -> Result<bool> {
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query("DELETE FROM lua_agent_scripts WHERE id = ?")
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query("DELETE FROM lua_agent_scripts WHERE id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
             DatabasePool::Postgres(pool) => {
                 sqlx::query("DELETE FROM lua_agent_scripts WHERE id = $1")
                     .bind(id)
@@ -192,18 +192,14 @@ impl Database {
 
     pub async fn clear_lua_agent_scripts(&self) -> Result<u64> {
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query("DELETE FROM lua_agent_scripts")
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query("DELETE FROM lua_agent_scripts")
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query("DELETE FROM lua_agent_scripts")
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query("DELETE FROM lua_agent_scripts")
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
         Ok(rows_affected)
     }
@@ -218,15 +214,11 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query_scalar::<_, String>(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query_scalar::<_, String>(sql).fetch_all(pool).await?;
                 Ok(rows)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query_scalar::<_, String>(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query_scalar::<_, String>(sql).fetch_all(pool).await?;
                 Ok(rows)
             }
         }

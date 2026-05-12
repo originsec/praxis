@@ -2,8 +2,8 @@
 //! Unified logging - sends log entries to both tracing and optionally to a centralized event log.
 //!
 
-use chrono::Utc;
 use crate::ApplicationLogEntry;
+use chrono::Utc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
@@ -11,14 +11,14 @@ use tokio::sync::mpsc;
 //
 // Global channel for sending log events.
 //
-static EVENT_LOG_TX: OnceLock<mpsc::UnboundedSender<ApplicationLogEntry>> = OnceLock::new();
+static EVENT_LOG_TX: OnceLock<mpsc::Sender<ApplicationLogEntry>> = OnceLock::new();
 static SOURCE: OnceLock<String> = OnceLock::new();
 static SOURCE_ID: OnceLock<String> = OnceLock::new();
 static EVENT_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Initialize the event log sender. Call this once during startup.
 /// source is the category ("node", "service", "web"), source_id is the instance identifier.
-pub fn init(source: String, source_id: String, tx: mpsc::UnboundedSender<ApplicationLogEntry>) {
+pub fn init(source: String, source_id: String, tx: mpsc::Sender<ApplicationLogEntry>) {
     let _ = SOURCE.set(source);
     let _ = SOURCE_ID.set(source_id);
     let _ = EVENT_LOG_TX.set(tx);
@@ -54,7 +54,7 @@ pub fn send_event(level: &str, target: &str, message: String) {
         //
         // Fire-and-forget - don't block on logging.
         //
-        let _ = tx.send(entry);
+        let _ = tx.try_send(entry);
     }
 }
 

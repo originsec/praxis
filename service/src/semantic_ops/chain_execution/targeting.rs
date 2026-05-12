@@ -37,7 +37,9 @@ pub async fn resolve_targets(
             // triggering node, include it anyway.
             //
             if !(spec.include_triggering_node
-                && triggering_node_id.map(|tid| tid == node.id).unwrap_or(false))
+                && triggering_node_id
+                    .map(|tid| tid == node.id)
+                    .unwrap_or(false))
             {
                 continue;
             }
@@ -47,7 +49,11 @@ pub async fn resolve_targets(
         // Filter by OS substring.
         //
         if let Some(ref filter) = spec.os_filter {
-            if !node.os_details.to_lowercase().contains(&filter.to_lowercase()) {
+            if !node
+                .os_details
+                .to_lowercase()
+                .contains(&filter.to_lowercase())
+            {
                 continue;
             }
         }

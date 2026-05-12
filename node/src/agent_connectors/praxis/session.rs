@@ -14,10 +14,10 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-use crate::agent_connectors::traits::{AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession, SessionTransactContext};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are Praxis, an autonomous agent running on the target system. You have access to a run_command tool that lets you execute shell commands. Use it carefully and only when necessary.";
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 10;
@@ -64,7 +64,11 @@ impl PraxisAgentSession {
             .unwrap_or_else(|p| p.into_inner().clone())
     }
 
-    async fn transact_async(&self, prompt: &str) -> Result<String> {
+    async fn transact_async(
+        &self,
+        prompt: &str,
+        update_tx: Option<Sender<SessionUpdateKind>>,
+    ) -> Result<String> {
         let cancel = self.current_cancel();
 
         let provider = Provider::from_str(&self.config.provider)
@@ -121,14 +125,6 @@ impl PraxisAgentSession {
                 .unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECS),
         );
 
-        //
-        // Pull the SessionUpdateKind sender registered by the ACP handler.
-        // None means a non-streaming caller invoked transact directly; the
-        // session still completes, the caller just gets the final text.
-        //
-        let update_tx: Option<UnboundedSender<SessionUpdateKind>> =
-            crate::acp::take_update_sender(&self.handle);
-
         for _ in 0..max_iters {
             if cancel.load(Ordering::SeqCst) {
                 return Err(anyhow!("transaction cancelled"));
@@ -155,7 +151,7 @@ impl PraxisAgentSession {
                 if !delta.content.is_empty() {
                     full_text.push_str(&delta.content);
                     if let Some(tx) = update_tx.as_ref() {
-                        let _ = tx.send(SessionUpdateKind::TextChunk {
+                        let _ = tx.try_send(SessionUpdateKind::TextChunk {
                             text: delta.content,
                         });
                     }
@@ -170,7 +166,7 @@ impl PraxisAgentSession {
                 Some((tool_name, tool_args, _response_text)) => {
                     let tool_id = format!("praxis-{}", Uuid::new_v4());
                     if let Some(tx) = update_tx.as_ref() {
-                        let _ = tx.send(SessionUpdateKind::ToolCall {
+                        let _ = tx.try_send(SessionUpdateKind::ToolCall {
                             tool_name: tool_name.clone(),
                             tool_id: tool_id.clone(),
                             input: serde_json::to_string(&tool_args).unwrap_or_default(),
@@ -211,7 +207,7 @@ impl PraxisAgentSession {
                     };
 
                     if let Some(tx) = update_tx.as_ref() {
-                        let _ = tx.send(SessionUpdateKind::ToolResult {
+                        let _ = tx.try_send(SessionUpdateKind::ToolResult {
                             tool_id,
                             output: output.clone(),
                             is_error,
@@ -269,7 +265,15 @@ impl AgentSession for PraxisAgentSession {
         self.current_cancel().store(false, Ordering::SeqCst);
         let handle = tokio::runtime::Handle::try_current()
             .map_err(|e| anyhow!("tokio runtime unavailable for PraxisAgent: {}", e))?;
-        handle.block_on(self.transact_async(prompt))
+        handle.block_on(self.transact_async(prompt, None))
+    }
+
+    fn transact_with_context(&self, prompt: &str, ctx: SessionTransactContext) -> Result<String> {
+        self.set_cancel_flag(ctx.cancel_flag);
+        self.current_cancel().store(false, Ordering::SeqCst);
+        let handle = tokio::runtime::Handle::try_current()
+            .map_err(|e| anyhow!("tokio runtime unavailable for PraxisAgent: {}", e))?;
+        handle.block_on(self.transact_async(prompt, ctx.update_tx))
     }
 
     fn close(&self) {

@@ -33,11 +33,11 @@ pub struct OutboundFrame {
     pub json_rpc: String,
 }
 
-pub type OutboundSender = mpsc::UnboundedSender<OutboundFrame>;
-pub type OutboundReceiver = mpsc::UnboundedReceiver<OutboundFrame>;
+pub type OutboundSender = mpsc::Sender<OutboundFrame>;
+pub type OutboundReceiver = mpsc::Receiver<OutboundFrame>;
 
 pub fn outbound_channel() -> (OutboundSender, OutboundReceiver) {
-    mpsc::unbounded_channel()
+    mpsc::channel(1024)
 }
 
 //
@@ -318,7 +318,7 @@ impl NodeAcpServer {
             truncate_id(client_id),
             common::truncate_str(&json_rpc, 400),
         );
-        let _ = self.outbound.send(OutboundFrame {
+        let _ = self.outbound.try_send(OutboundFrame {
             client_id: client_id.to_string(),
             json_rpc,
         });

@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 use super::factory::AgentFactory;
 use super::lua::{self, LuaSource};
@@ -44,11 +44,7 @@ impl AgentRegistry {
     // are provided.
     //
 
-    pub fn rebuild(
-        &mut self,
-        factory: &AgentFactory,
-        lua_scripts: &[String],
-    ) -> usize {
+    pub fn rebuild(&mut self, factory: &AgentFactory, lua_scripts: &[String]) -> usize {
         self.agents.clear();
         self.lua_agents.clear();
 

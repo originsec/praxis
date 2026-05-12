@@ -5,13 +5,13 @@ pub type Options = HashMap<String, OptionLiteral>;
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     TabularExpression(TabularExpression),
-    Let(String, LetExpression)
+    Let(String, LetExpression),
 }
 
 #[derive(Debug, PartialEq)]
 pub struct TabularExpression {
     pub source: Source,
-    pub operators: Vec<Operator>
+    pub operators: Vec<Operator>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -22,7 +22,7 @@ pub enum Source {
     Print(Vec<(Option<String>, Expr)>),
     Range(String, Expr, Expr, Expr),
     Reference(String),
-    Union(Options, Vec<Source>)
+    Union(Options, Vec<Source>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -65,7 +65,7 @@ pub enum Operator {
     Take(u32),
     Top(u32, Expr, bool, bool),
     Union(Options, Vec<Source>),
-    Where(Expr)
+    Where(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,7 +86,7 @@ pub enum Expr {
     Greater(Box<Expr>, Box<Expr>),
     LessOrEqual(Box<Expr>, Box<Expr>),
     GreaterOrEqual(Box<Expr>, Box<Expr>),
-    Func(String, Vec<Expr>)
+    Func(String, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,7 +99,7 @@ pub enum Type {
     Long,
     Real,
     String,
-    Timespan
+    Timespan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,7 +113,7 @@ pub enum Literal {
     Long(Option<i64>),
     Real(Option<f32>),
     String(String),
-    Timespan(Option<i64>)
+    Timespan(Option<i64>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,7 +121,7 @@ pub enum OptionLiteral {
     Bool(bool),
     Long(i64),
     String(String),
-    Identifier(String)
+    Identifier(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,13 +146,13 @@ pub enum Dynamic {
     Long(Option<i64>),
     Real(Option<f32>),
     String(String),
-    Timespan(Option<i64>)
+    Timespan(Option<i64>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum FindProjection {
     ProjectSmart,
-    Project(Vec<String>)
+    Project(Vec<String>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -165,5 +165,5 @@ pub enum PatternToken {
 #[derive(Debug, PartialEq)]
 pub enum LetExpression {
     Tabular(TabularExpression),
-    Scalar(Expr)
+    Scalar(Expr),
 }

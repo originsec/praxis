@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use common::{SemanticParserRequest, SemanticParserResponse};
 use semantic_parser::{ParserConfig, Provider, SemanticParser};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::ServiceConfig;
@@ -27,7 +27,10 @@ pub async fn handle_semantic_parser_request(
                 request_id: request.request_id.clone(),
                 success: false,
                 json: None,
-                error: Some("No LLM configured for Semantic Parser. Configure in Settings > LLM Providers.".to_string()),
+                error: Some(
+                    "No LLM configured for Semantic Parser. Configure in Settings > LLM Providers."
+                        .to_string(),
+                ),
             };
         }
     };
@@ -39,7 +42,10 @@ pub async fn handle_semantic_parser_request(
                 request_id: request.request_id.clone(),
                 success: false,
                 json: None,
-                error: Some(format!("Invalid provider in model definition: {}", model_def.provider)),
+                error: Some(format!(
+                    "Invalid provider in model definition: {}",
+                    model_def.provider
+                )),
             };
         }
     };
@@ -80,7 +86,10 @@ pub async fn handle_semantic_parser_request(
     // Execute the parse operation.
     //
 
-    match parser.parse(&request.text, &request.instruction, &request.schema).await {
+    match parser
+        .parse(&request.text, &request.instruction, &request.schema)
+        .await
+    {
         Ok(json) => SemanticParserResponse {
             request_id: request.request_id.clone(),
             success: true,

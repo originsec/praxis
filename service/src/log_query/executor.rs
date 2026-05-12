@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 use tokio::sync::RwLock;
 
@@ -8,8 +8,8 @@ use super::parser::ast::{Expr, JoinKey, Literal, Operator, Source, Statement, Ta
 use super::parser::parser::parse;
 use super::sql::{build_sql_where, materialize_sql_table};
 
-use crate::config::service_config::{LOG_QUERY_ROW_LIMIT, LOG_QUERY_ROW_LIMIT_DEFAULT};
 use crate::config::ServiceConfig;
+use crate::config::service_config::{LOG_QUERY_ROW_LIMIT, LOG_QUERY_ROW_LIMIT_DEFAULT};
 use crate::database::Database;
 use crate::state::NodeRegistry;
 
@@ -40,7 +40,9 @@ pub async fn execute_log_query(
     }
 
     if statements.len() > 1 {
-        return Err(anyhow!("Multiple statements not supported; use a single query"));
+        return Err(anyhow!(
+            "Multiple statements not supported; use a single query"
+        ));
     }
 
     let tabular = match &statements[0] {
@@ -82,9 +84,8 @@ pub async fn execute_log_query(
             .unwrap_or(LOG_QUERY_ROW_LIMIT_DEFAULT)
     };
 
-    let (columns, mut rows) = materialize_table(
-        table, database, node_registry, &tabular.operators, row_cap,
-    ).await?;
+    let (columns, mut rows) =
+        materialize_table(table, database, node_registry, &tabular.operators, row_cap).await?;
 
     //
     // Apply pipeline operators sequentially. Operators whose predicates were
@@ -126,7 +127,9 @@ pub async fn execute_log_query(
                     .iter()
                     .map(|(_, expr)| {
                         if let Expr::Ident(name) = expr {
-                            current_columns.iter().position(|c| c.eq_ignore_ascii_case(name))
+                            current_columns
+                                .iter()
+                                .position(|c| c.eq_ignore_ascii_case(name))
                         } else {
                             None
                         }
@@ -138,10 +141,7 @@ pub async fn execute_log_query(
                     .map(|row| {
                         indices
                             .iter()
-                            .map(|idx| {
-                                idx.and_then(|i| row.get(i).cloned())
-                                    .unwrap_or(Value::Null)
-                            })
+                            .map(|idx| idx.and_then(|i| row.get(i).cloned()).unwrap_or(Value::Null))
                             .collect()
                     })
                     .collect();
@@ -156,10 +156,11 @@ pub async fn execute_log_query(
 
             Operator::Sort(col_names) => {
                 if let Some(col_name) = col_names.first() {
-                    if let Some(idx) = current_columns.iter().position(|c| c.eq_ignore_ascii_case(col_name)) {
-                        rows.sort_by(|a, b| {
-                            cmp_values(a.get(idx), b.get(idx))
-                        });
+                    if let Some(idx) = current_columns
+                        .iter()
+                        .position(|c| c.eq_ignore_ascii_case(col_name))
+                    {
+                        rows.sort_by(|a, b| cmp_values(a.get(idx), b.get(idx)));
                     }
                 }
             }
@@ -167,7 +168,11 @@ pub async fn execute_log_query(
             Operator::Extend(extensions) => {
                 for (alias, expr) in extensions {
                     let col_name = alias.clone().unwrap_or_else(|| {
-                        if let Expr::Ident(n) = expr { n.clone() } else { "extended".to_string() }
+                        if let Expr::Ident(n) = expr {
+                            n.clone()
+                        } else {
+                            "extended".to_string()
+                        }
                     });
                     current_columns.push(col_name);
                     for row in &mut rows {
@@ -187,7 +192,9 @@ pub async fn execute_log_query(
                 let indices: Vec<usize> = col_names
                     .iter()
                     .filter_map(|name| {
-                        current_columns.iter().position(|c| c.eq_ignore_ascii_case(name))
+                        current_columns
+                            .iter()
+                            .position(|c| c.eq_ignore_ascii_case(name))
                     })
                     .collect();
 
@@ -212,7 +219,9 @@ pub async fn execute_log_query(
                 let remove_indices: std::collections::HashSet<usize> = col_names
                     .iter()
                     .filter_map(|name| {
-                        current_columns.iter().position(|c| c.eq_ignore_ascii_case(name))
+                        current_columns
+                            .iter()
+                            .position(|c| c.eq_ignore_ascii_case(name))
                     })
                     .collect();
 
@@ -220,16 +229,27 @@ pub async fn execute_log_query(
                     .filter(|i| !remove_indices.contains(i))
                     .collect();
 
-                current_columns = keep_indices.iter().map(|&i| current_columns[i].clone()).collect();
+                current_columns = keep_indices
+                    .iter()
+                    .map(|&i| current_columns[i].clone())
+                    .collect();
                 rows = rows
                     .into_iter()
-                    .map(|row| keep_indices.iter().map(|&i| row.get(i).cloned().unwrap_or(Value::Null)).collect())
+                    .map(|row| {
+                        keep_indices
+                            .iter()
+                            .map(|&i| row.get(i).cloned().unwrap_or(Value::Null))
+                            .collect()
+                    })
                     .collect();
             }
 
             Operator::Top(n, sort_expr, asc, nulls_last) => {
                 if let Expr::Ident(col_name) = sort_expr {
-                    if let Some(idx) = current_columns.iter().position(|c| c.eq_ignore_ascii_case(col_name)) {
+                    if let Some(idx) = current_columns
+                        .iter()
+                        .position(|c| c.eq_ignore_ascii_case(col_name))
+                    {
                         rows.sort_by(|a, b| {
                             let cmp = cmp_values(a.get(idx), b.get(idx));
                             if *asc { cmp } else { cmp.reverse() }
@@ -242,19 +262,24 @@ pub async fn execute_log_query(
             }
 
             Operator::Join(_options, right_expr, join_keys) => {
-                let (right_columns, right_rows) = materialize_tabular_expression(
-                    right_expr, database, node_registry, row_cap,
-                ).await?;
+                let (right_columns, right_rows) =
+                    materialize_tabular_expression(right_expr, database, node_registry, row_cap)
+                        .await?;
 
                 apply_join(
-                    &mut current_columns, &mut rows,
-                    &right_columns, &right_rows,
+                    &mut current_columns,
+                    &mut rows,
+                    &right_columns,
+                    &right_rows,
                     join_keys,
                 );
             }
 
             other => {
-                return Err(anyhow!("Unsupported operator: {:?}", std::mem::discriminant(other)));
+                return Err(anyhow!(
+                    "Unsupported operator: {:?}",
+                    std::mem::discriminant(other)
+                ));
             }
         }
     }
@@ -289,13 +314,14 @@ async fn materialize_table(
     row_cap: usize,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     if let Some(config) = table.sql_config() {
-
         //
         // Build a column name mapper from KQL names to SQL expressions.
         //
 
         let col_map = |kql_name: &str| -> Option<String> {
-            config.columns.iter()
+            config
+                .columns
+                .iter()
                 .find(|c| c.kql_name.eq_ignore_ascii_case(kql_name))
                 .map(|c| c.sql_expr.to_string())
         };
@@ -327,7 +353,8 @@ async fn materialize_table(
         match build_sql_where(&where_exprs, &col_map, 0) {
             Ok((where_clause, params)) => {
                 let limit = take_limit.unwrap_or(row_cap).min(row_cap);
-                return materialize_sql_table(database, &config, &where_clause, &params, limit).await;
+                return materialize_sql_table(database, &config, &where_clause, &params, limit)
+                    .await;
             }
             Err(_) => {
                 //
@@ -368,15 +395,18 @@ async fn materialize_tabular_expression(
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     let table_name = match &expr.source {
         Source::Reference(name) => name.clone(),
-        _ => return Err(anyhow!("Join: only table references are supported as right-side source")),
+        _ => {
+            return Err(anyhow!(
+                "Join: only table references are supported as right-side source"
+            ));
+        }
     };
 
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!("Join: unknown table '{}'", table_name))?;
 
-    let (mut columns, mut rows) = materialize_table(
-        table, database, node_registry, &expr.operators, row_cap,
-    ).await?;
+    let (mut columns, mut rows) =
+        materialize_table(table, database, node_registry, &expr.operators, row_cap).await?;
 
     //
     // Apply any operators on the right side (e.g. where filters).
@@ -398,7 +428,11 @@ async fn materialize_tabular_expression(
                     .iter()
                     .map(|(alias, e)| {
                         alias.clone().unwrap_or_else(|| {
-                            if let Expr::Ident(name) = e { name.clone() } else { "?".to_string() }
+                            if let Expr::Ident(name) = e {
+                                name.clone()
+                            } else {
+                                "?".to_string()
+                            }
                         })
                     })
                     .collect();
@@ -415,9 +449,10 @@ async fn materialize_tabular_expression(
                 rows = rows
                     .into_iter()
                     .map(|row| {
-                        indices.iter().map(|idx| {
-                            idx.and_then(|i| row.get(i).cloned()).unwrap_or(Value::Null)
-                        }).collect()
+                        indices
+                            .iter()
+                            .map(|idx| idx.and_then(|i| row.get(i).cloned()).unwrap_or(Value::Null))
+                            .collect()
                     })
                     .collect();
                 columns = proj_names;
@@ -445,11 +480,19 @@ fn apply_join(
 ) {
     let left_key_indices: Vec<usize> = join_keys
         .iter()
-        .filter_map(|k| left_columns.iter().position(|c| c.eq_ignore_ascii_case(&k.left)))
+        .filter_map(|k| {
+            left_columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(&k.left))
+        })
         .collect();
     let right_key_indices: Vec<usize> = join_keys
         .iter()
-        .filter_map(|k| right_columns.iter().position(|c| c.eq_ignore_ascii_case(&k.right)))
+        .filter_map(|k| {
+            right_columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(&k.right))
+        })
         .collect();
 
     if left_key_indices.is_empty() || left_key_indices.len() != right_key_indices.len() {
@@ -461,10 +504,8 @@ fn apply_join(
     // exist on the left).
     //
 
-    let left_names_lower: std::collections::HashSet<String> = left_columns
-        .iter()
-        .map(|c| c.to_lowercase())
-        .collect();
+    let left_names_lower: std::collections::HashSet<String> =
+        left_columns.iter().map(|c| c.to_lowercase()).collect();
 
     let right_col_mapping: Vec<(usize, String)> = right_columns
         .iter()
@@ -504,9 +545,7 @@ fn apply_join(
                 let right_row = &right_rows[right_idx];
                 let mut merged = left_row.clone();
                 for (col_idx, _) in &right_col_mapping {
-                    merged.push(
-                        right_row.get(*col_idx).cloned().unwrap_or(Value::Null)
-                    );
+                    merged.push(right_row.get(*col_idx).cloned().unwrap_or(Value::Null));
                 }
                 joined_rows.push(merged);
             }
@@ -579,14 +618,12 @@ fn eval_where_expr(expr: &Expr, columns: &[String], row: &[Value]) -> bool {
 
 fn eval_expr(expr: &Expr, columns: &[String], row: &[Value]) -> Value {
     match expr {
-        Expr::Ident(name) => {
-            columns
-                .iter()
-                .position(|c| c.eq_ignore_ascii_case(name))
-                .and_then(|i| row.get(i))
-                .cloned()
-                .unwrap_or(Value::Null)
-        }
+        Expr::Ident(name) => columns
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(name))
+            .and_then(|i| row.get(i))
+            .cloned()
+            .unwrap_or(Value::Null),
 
         Expr::Literal(lit) => literal_to_value(lit),
 
@@ -805,16 +842,12 @@ fn literal_to_value(lit: &Literal) -> Value {
         Literal::String(s) => Value::String(s.clone()),
         Literal::Int(Some(n)) => Value::Number((*n).into()),
         Literal::Long(Some(n)) => Value::Number((*n).into()),
-        Literal::Real(Some(n)) => {
-            serde_json::Number::from_f64(*n as f64)
-                .map(Value::Number)
-                .unwrap_or(Value::Null)
-        }
-        Literal::Decimal(Some(n)) => {
-            serde_json::Number::from_f64(*n)
-                .map(Value::Number)
-                .unwrap_or(Value::Null)
-        }
+        Literal::Real(Some(n)) => serde_json::Number::from_f64(*n as f64)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        Literal::Decimal(Some(n)) => serde_json::Number::from_f64(*n)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         Literal::Bool(Some(b)) => Value::Bool(*b),
         Literal::Bool(None) => Value::Null,
         _ => Value::Null,
@@ -844,12 +877,11 @@ fn cmp_values(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Ordering {
         (None, None) | (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,
         (None | Some(Value::Null), _) => Ordering::Less,
         (_, None | Some(Value::Null)) => Ordering::Greater,
-        (Some(Value::Number(a)), Some(Value::Number(b))) => {
-            a.as_f64()
-                .unwrap_or(0.0)
-                .partial_cmp(&b.as_f64().unwrap_or(0.0))
-                .unwrap_or(Ordering::Equal)
-        }
+        (Some(Value::Number(a)), Some(Value::Number(b))) => a
+            .as_f64()
+            .unwrap_or(0.0)
+            .partial_cmp(&b.as_f64().unwrap_or(0.0))
+            .unwrap_or(Ordering::Equal),
         (Some(Value::String(a)), Some(Value::String(b))) => a.cmp(b),
         (Some(Value::Bool(a)), Some(Value::Bool(b))) => a.cmp(b),
         _ => Ordering::Equal,
@@ -910,7 +942,11 @@ fn apply_summarize(
     let group_names: Vec<String> = group_by
         .iter()
         .filter_map(|e| {
-            if let Expr::Ident(name) = e { Some(name.clone()) } else { None }
+            if let Expr::Ident(name) = e {
+                Some(name.clone())
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -933,9 +969,7 @@ fn apply_summarize(
 
     let agg_names: Vec<String> = aggregations
         .iter()
-        .map(|(alias, expr)| {
-            alias.clone().unwrap_or_else(|| format_agg_name(expr))
-        })
+        .map(|(alias, expr)| alias.clone().unwrap_or_else(|| format_agg_name(expr)))
         .collect();
 
     //
@@ -999,117 +1033,115 @@ fn format_agg_name(expr: &Expr) -> String {
 
 fn compute_aggregation(expr: &Expr, columns: &[String], group_rows: &[Vec<Value>]) -> Value {
     match expr {
-        Expr::Func(name, args) => {
-            match name.to_lowercase().as_str() {
-                "count" => Value::Number(group_rows.len().into()),
+        Expr::Func(name, args) => match name.to_lowercase().as_str() {
+            "count" => Value::Number(group_rows.len().into()),
 
-                "sum" => {
-                    if let Some(Expr::Ident(col)) = args.first() {
-                        let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
-                        if let Some(idx) = idx {
-                            let sum: f64 = group_rows
-                                .iter()
-                                .filter_map(|r| r.get(idx).and_then(value_to_f64))
-                                .sum();
-                            if sum.fract() == 0.0 {
-                                Value::Number((sum as i64).into())
-                            } else {
-                                serde_json::Number::from_f64(sum)
-                                    .map(Value::Number)
-                                    .unwrap_or(Value::Null)
-                            }
+            "sum" => {
+                if let Some(Expr::Ident(col)) = args.first() {
+                    let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
+                    if let Some(idx) = idx {
+                        let sum: f64 = group_rows
+                            .iter()
+                            .filter_map(|r| r.get(idx).and_then(value_to_f64))
+                            .sum();
+                        if sum.fract() == 0.0 {
+                            Value::Number((sum as i64).into())
                         } else {
-                            Value::Null
-                        }
-                    } else {
-                        Value::Null
-                    }
-                }
-
-                "avg" => {
-                    if let Some(Expr::Ident(col)) = args.first() {
-                        let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
-                        if let Some(idx) = idx {
-                            let vals: Vec<f64> = group_rows
-                                .iter()
-                                .filter_map(|r| r.get(idx).and_then(value_to_f64))
-                                .collect();
-                            if vals.is_empty() {
-                                Value::Null
-                            } else {
-                                let avg = vals.iter().sum::<f64>() / vals.len() as f64;
-                                serde_json::Number::from_f64(avg)
-                                    .map(Value::Number)
-                                    .unwrap_or(Value::Null)
-                            }
-                        } else {
-                            Value::Null
-                        }
-                    } else {
-                        Value::Null
-                    }
-                }
-
-                "min" => {
-                    if let Some(Expr::Ident(col)) = args.first() {
-                        let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
-                        if let Some(idx) = idx {
-                            group_rows
-                                .iter()
-                                .filter_map(|r| r.get(idx))
-                                .filter(|v| !v.is_null())
-                                .min_by(|a, b| cmp_values(Some(a), Some(b)))
-                                .cloned()
+                            serde_json::Number::from_f64(sum)
+                                .map(Value::Number)
                                 .unwrap_or(Value::Null)
-                        } else {
-                            Value::Null
                         }
                     } else {
                         Value::Null
                     }
+                } else {
+                    Value::Null
                 }
-
-                "max" => {
-                    if let Some(Expr::Ident(col)) = args.first() {
-                        let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
-                        if let Some(idx) = idx {
-                            group_rows
-                                .iter()
-                                .filter_map(|r| r.get(idx))
-                                .filter(|v| !v.is_null())
-                                .max_by(|a, b| cmp_values(Some(a), Some(b)))
-                                .cloned()
-                                .unwrap_or(Value::Null)
-                        } else {
-                            Value::Null
-                        }
-                    } else {
-                        Value::Null
-                    }
-                }
-
-                "dcount" => {
-                    if let Some(Expr::Ident(col)) = args.first() {
-                        let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
-                        if let Some(idx) = idx {
-                            let distinct: std::collections::HashSet<String> = group_rows
-                                .iter()
-                                .filter_map(|r| r.get(idx))
-                                .filter(|v| !v.is_null())
-                                .map(|v| v.to_string())
-                                .collect();
-                            Value::Number(distinct.len().into())
-                        } else {
-                            Value::Null
-                        }
-                    } else {
-                        Value::Null
-                    }
-                }
-
-                _ => Value::Null,
             }
-        }
+
+            "avg" => {
+                if let Some(Expr::Ident(col)) = args.first() {
+                    let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
+                    if let Some(idx) = idx {
+                        let vals: Vec<f64> = group_rows
+                            .iter()
+                            .filter_map(|r| r.get(idx).and_then(value_to_f64))
+                            .collect();
+                        if vals.is_empty() {
+                            Value::Null
+                        } else {
+                            let avg = vals.iter().sum::<f64>() / vals.len() as f64;
+                            serde_json::Number::from_f64(avg)
+                                .map(Value::Number)
+                                .unwrap_or(Value::Null)
+                        }
+                    } else {
+                        Value::Null
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+
+            "min" => {
+                if let Some(Expr::Ident(col)) = args.first() {
+                    let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
+                    if let Some(idx) = idx {
+                        group_rows
+                            .iter()
+                            .filter_map(|r| r.get(idx))
+                            .filter(|v| !v.is_null())
+                            .min_by(|a, b| cmp_values(Some(a), Some(b)))
+                            .cloned()
+                            .unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+
+            "max" => {
+                if let Some(Expr::Ident(col)) = args.first() {
+                    let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
+                    if let Some(idx) = idx {
+                        group_rows
+                            .iter()
+                            .filter_map(|r| r.get(idx))
+                            .filter(|v| !v.is_null())
+                            .max_by(|a, b| cmp_values(Some(a), Some(b)))
+                            .cloned()
+                            .unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+
+            "dcount" => {
+                if let Some(Expr::Ident(col)) = args.first() {
+                    let idx = columns.iter().position(|c| c.eq_ignore_ascii_case(col));
+                    if let Some(idx) = idx {
+                        let distinct: std::collections::HashSet<String> = group_rows
+                            .iter()
+                            .filter_map(|r| r.get(idx))
+                            .filter(|v| !v.is_null())
+                            .map(|v| v.to_string())
+                            .collect();
+                        Value::Number(distinct.len().into())
+                    } else {
+                        Value::Null
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+
+            _ => Value::Null,
+        },
         _ => Value::Null,
     }
 }

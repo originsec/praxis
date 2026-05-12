@@ -165,7 +165,10 @@ impl Database {
 
     /// Get a single chain execution by ID
     #[allow(dead_code)]
-    pub async fn get_chain_execution(&self, execution_id: &str) -> Result<Option<ChainExecutionRecord>> {
+    pub async fn get_chain_execution(
+        &self,
+        execution_id: &str,
+    ) -> Result<Option<ChainExecutionRecord>> {
         let sql = "SELECT execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at
              FROM chain_executions WHERE execution_id = $1";
 
@@ -200,10 +203,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(limit as i64)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
                 let mut executions = Vec::new();
                 for row in rows {
                     executions.push(parse_chain_execution_row_sqlite(&row)?);
@@ -211,10 +211,7 @@ impl Database {
                 Ok(executions)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(limit as i64)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
                 let mut executions = Vec::new();
                 for row in rows {
                     executions.push(parse_chain_execution_row_postgres(&row)?);
@@ -226,7 +223,10 @@ impl Database {
 
     /// List chain executions by status
     #[allow(dead_code)]
-    pub async fn list_chain_executions_by_status(&self, status: ChainExecutionStatus) -> Result<Vec<ChainExecutionRecord>> {
+    pub async fn list_chain_executions_by_status(
+        &self,
+        status: ChainExecutionStatus,
+    ) -> Result<Vec<ChainExecutionRecord>> {
         let sql = "SELECT execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at
              FROM chain_executions WHERE status = $1 ORDER BY created_at DESC";
 
@@ -295,20 +295,16 @@ impl Database {
             )";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)
@@ -320,16 +316,10 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
+                sqlx::query(sql).bind(execution_id).execute(pool).await?;
             }
             DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
+                sqlx::query(sql).bind(execution_id).execute(pool).await?;
             }
         }
 
@@ -338,15 +328,12 @@ impl Database {
 
     /// Clear all finished chain executions (completed, failed, cancelled)
     pub async fn clear_finished_chain_executions(&self) -> Result<usize> {
-        let sql = "DELETE FROM chain_executions WHERE status IN ('Completed', 'Failed', 'Cancelled')";
+        let sql =
+            "DELETE FROM chain_executions WHERE status IN ('Completed', 'Failed', 'Cancelled')";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
         };
 
         Ok(count as usize)
@@ -360,20 +347,16 @@ impl Database {
              WHERE status IN ('Running', 'Queued')";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count as usize)

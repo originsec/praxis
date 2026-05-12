@@ -112,20 +112,16 @@ impl Database {
 
     pub async fn delete_remote_node(&self, id: &str) -> Result<bool> {
         let affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query("DELETE FROM remote_nodes WHERE id = ?")
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query("DELETE FROM remote_nodes WHERE id = $1")
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query("DELETE FROM remote_nodes WHERE id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query("DELETE FROM remote_nodes WHERE id = $1")
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
         Ok(affected > 0)
     }

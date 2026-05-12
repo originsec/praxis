@@ -64,7 +64,10 @@ pub fn create_implicit_chain(
     ChainDefinition {
         id: chain_id,
         name: format!("[Implicit] {}", operation_display_name),
-        description: format!("Implicit chain for standalone operation: {}", operation_name),
+        description: format!(
+            "Implicit chain for standalone operation: {}",
+            operation_name
+        ),
         category: "implicit".to_string(),
         elements,
         connections,

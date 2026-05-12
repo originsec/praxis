@@ -1,17 +1,17 @@
 mod message_encoder;
 mod session_poisoning;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use common::acp_ext::{EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_SESSION_CONTENT};
 use common::{
-    AgentFileType, ReconResult, TargetSpec, ToolConfigField, ToolConfigOption,
-    ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk, ToolkitDiffLine, ToolkitDiffLineKind,
+    AgentFileType, ReconResult, TargetSpec, ToolConfigField, ToolConfigOption, ToolkitApplyItem,
+    ToolkitApplyOutcome, ToolkitDiffHunk, ToolkitDiffLine, ToolkitDiffLineKind,
     ToolkitExecuteResult, ToolkitModelOption, ToolkitReconTarget, ToolkitTargetPreview,
     ToolkitTargetRef, ToolkitToolInfo,
 };
 use lapin::Channel;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -42,9 +42,15 @@ struct MessageEncoderTool;
 
 #[async_trait::async_trait]
 impl ToolkitTool for MessageEncoderTool {
-    fn name(&self) -> &str { MESSAGE_ENCODER_TOOL }
-    fn display_name(&self) -> &str { "Message Encoder" }
-    fn description(&self) -> &str { "Encode text payloads using selected encoding profile." }
+    fn name(&self) -> &str {
+        MESSAGE_ENCODER_TOOL
+    }
+    fn display_name(&self) -> &str {
+        "Message Encoder"
+    }
+    fn description(&self) -> &str {
+        "Encode text payloads using selected encoding profile."
+    }
 
     fn config_schema(&self) -> Vec<ToolConfigField> {
         vec![ToolConfigField {
@@ -54,20 +60,45 @@ impl ToolkitTool for MessageEncoderTool {
             required: true,
             default_value: Some("base64".to_string()),
             options: Some(vec![
-                ToolConfigOption { value: "base64".to_string(), label: "Base64".to_string() },
-                ToolConfigOption { value: "hex".to_string(), label: "Hex".to_string() },
-                ToolConfigOption { value: "rot13".to_string(), label: "ROT13".to_string() },
-                ToolConfigOption { value: "morse".to_string(), label: "Morse Code".to_string() },
-                ToolConfigOption { value: "fullwidth".to_string(), label: "Fullwidth Unicode".to_string() },
-                ToolConfigOption { value: "unicode_tags".to_string(), label: "Unicode Tags (ASCII Smuggling)".to_string() },
-                ToolConfigOption { value: "braille_us_type2".to_string(), label: "Braille (US Type 2)".to_string() },
-                ToolConfigOption { value: "upside_down".to_string(), label: "Upside Down".to_string() },
+                ToolConfigOption {
+                    value: "base64".to_string(),
+                    label: "Base64".to_string(),
+                },
+                ToolConfigOption {
+                    value: "hex".to_string(),
+                    label: "Hex".to_string(),
+                },
+                ToolConfigOption {
+                    value: "rot13".to_string(),
+                    label: "ROT13".to_string(),
+                },
+                ToolConfigOption {
+                    value: "morse".to_string(),
+                    label: "Morse Code".to_string(),
+                },
+                ToolConfigOption {
+                    value: "fullwidth".to_string(),
+                    label: "Fullwidth Unicode".to_string(),
+                },
+                ToolConfigOption {
+                    value: "unicode_tags".to_string(),
+                    label: "Unicode Tags (ASCII Smuggling)".to_string(),
+                },
+                ToolConfigOption {
+                    value: "braille_us_type2".to_string(),
+                    label: "Braille (US Type 2)".to_string(),
+                },
+                ToolConfigOption {
+                    value: "upside_down".to_string(),
+                    label: "Upside Down".to_string(),
+                },
             ]),
         }]
     }
 
     async fn execute_chain(&self, input: &str, params: &serde_json::Value) -> Result<String> {
-        let encoding = params.get("encoding")
+        let encoding = params
+            .get("encoding")
             .and_then(|v| v.as_str())
             .unwrap_or("base64");
         message_encoder::encode_text(input, encoding)
@@ -91,9 +122,7 @@ impl ToolkitManager {
         publish_channel: Channel,
         acp_node_proxy: Arc<AcpNodeProxy>,
     ) -> Self {
-        let chain_tools: Vec<Box<dyn ToolkitTool>> = vec![
-            Box::new(MessageEncoderTool),
-        ];
+        let chain_tools: Vec<Box<dyn ToolkitTool>> = vec![Box::new(MessageEncoderTool)];
         Self {
             database,
             service_config,
@@ -105,18 +134,23 @@ impl ToolkitManager {
     }
 
     pub fn get_chain_tool(&self, name: &str) -> Option<&dyn ToolkitTool> {
-        self.chain_tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
+        self.chain_tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(|t| t.as_ref())
     }
 
     pub async fn list_tools_and_models(&self) -> (Vec<ToolkitToolInfo>, Vec<ToolkitModelOption>) {
-        let tools: Vec<ToolkitToolInfo> = self.chain_tools.iter().map(|t| {
-            ToolkitToolInfo {
+        let tools: Vec<ToolkitToolInfo> = self
+            .chain_tools
+            .iter()
+            .map(|t| ToolkitToolInfo {
                 tool_name: t.name().to_string(),
                 display_name: t.display_name().to_string(),
                 description: t.description().to_string(),
                 config_schema: t.config_schema(),
-            }
-        }).collect();
+            })
+            .collect();
 
         let models = {
             let cfg = self.service_config.read().await;
@@ -133,7 +167,11 @@ impl ToolkitManager {
         (tools, models)
     }
 
-    pub async fn recon(&self, tool_name: &str, target_spec: &TargetSpec) -> Result<Vec<ToolkitReconTarget>> {
+    pub async fn recon(
+        &self,
+        tool_name: &str,
+        target_spec: &TargetSpec,
+    ) -> Result<Vec<ToolkitReconTarget>> {
         if tool_name == MESSAGE_ENCODER_TOOL {
             return Ok(Vec::new());
         }
@@ -236,7 +274,10 @@ impl ToolkitManager {
                     &target.agent_short_name,
                     &target.session_id
                 );
-                let preview = match self.build_poisoning_preview(&target, &model_ref, max_tokens, progress_tx.as_ref()).await {
+                let preview = match self
+                    .build_poisoning_preview(&target, &model_ref, max_tokens, progress_tx.as_ref())
+                    .await
+                {
                     Ok((original, content)) => {
                         let diff_hunks = build_diff_hunks(&original, &content, 3);
                         ToolkitTargetPreview {
@@ -376,7 +417,8 @@ impl ToolkitManager {
             progress_tx,
         )
         .await?;
-        let transformed = session_poisoning::strip_whitespace_only_changes(&session_content, &raw_transformed);
+        let transformed =
+            session_poisoning::strip_whitespace_only_changes(&session_content, &raw_transformed);
         Ok((session_content, transformed))
     }
 
@@ -590,7 +632,11 @@ async fn resolve_targets(spec: &TargetSpec, node_registry: &NodeRegistry) -> Vec
             continue;
         }
         if let Some(filter) = &spec.os_filter {
-            if !node.os_details.to_lowercase().contains(&filter.to_lowercase()) {
+            if !node
+                .os_details
+                .to_lowercase()
+                .contains(&filter.to_lowercase())
+            {
                 continue;
             }
         }
@@ -602,7 +648,9 @@ async fn resolve_targets(spec: &TargetSpec, node_registry: &NodeRegistry) -> Vec
             if !agent.available {
                 continue;
             }
-            if !spec.agent_short_names.is_empty() && !spec.agent_short_names.contains(&agent.short_name) {
+            if !spec.agent_short_names.is_empty()
+                && !spec.agent_short_names.contains(&agent.short_name)
+            {
                 continue;
             }
             out.push(ResolvedTarget {

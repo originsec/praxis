@@ -33,8 +33,8 @@ pub fn default_text() -> &'static str {
 //
 
 pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
-    let parsed: IndexMap<String, RawTarget> = toml::from_str(text)
-        .map_err(|e| format!("TOML parse error: {}", e))?;
+    let parsed: IndexMap<String, RawTarget> =
+        toml::from_str(text).map_err(|e| format!("TOML parse error: {}", e))?;
 
     let mut out = Vec::with_capacity(parsed.len());
     for (short_name, raw) in parsed {
@@ -42,7 +42,8 @@ pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
         if short_name.is_empty() {
             return Err("Empty [section] name; each target needs a short_name header.".to_string());
         }
-        let domains: Vec<String> = raw.domains
+        let domains: Vec<String> = raw
+            .domains
             .into_iter()
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty())
@@ -53,7 +54,8 @@ pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
                 short_name
             ));
         }
-        let url_pattern = raw.url_pattern
+        let url_pattern = raw
+            .url_pattern
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty());
         //

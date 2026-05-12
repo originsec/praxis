@@ -1,4 +1,4 @@
-use portable_pty::{MasterPty, PtySize};
+use portable_pty::{Child, MasterPty, PtySize};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -13,8 +13,10 @@ pub struct TerminalSession {
     pub terminal_id: String,
     pub client_id: String,
     pub(super) master: Box<dyn MasterPty + Send>,
+    pub(super) child: Option<Box<dyn Child + Send + Sync>>,
     pub(super) writer: Box<dyn Write + Send>,
     pub(super) shutdown_tx: Option<mpsc::Sender<()>>,
+    pub(super) reader_thread: Option<std::thread::JoinHandle<()>>,
     pub(super) scrollback: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -38,6 +40,19 @@ impl TerminalSession {
     pub fn close(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.try_send(());
+        }
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Some(handle) = self.reader_thread.take() {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while !handle.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
         }
     }
 

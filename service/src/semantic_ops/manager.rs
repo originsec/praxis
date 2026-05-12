@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use common::{SemanticOperationSpec, SemanticOpStatus, SemanticOpUpdate};
+use common::{SemanticOpStatus, SemanticOpUpdate, SemanticOperationSpec};
 use lapin::Channel;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
-use tokio::sync::{oneshot, RwLock as TokioRwLock};
+use tokio::sync::{RwLock as TokioRwLock, oneshot};
 use uuid::Uuid;
 
 use crate::acp_node_proxy::AcpNodeProxy;
@@ -108,9 +108,7 @@ impl SemanticOpsManager {
             .database
             .get_operation_definition(&operation_name)
             .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!("Operation definition not found: {}", operation_name)
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Operation definition not found: {}", operation_name))?;
         let spec = definition.to_spec();
 
         let operation_id = Uuid::new_v4().to_string();
@@ -461,7 +459,11 @@ impl SemanticOpsManager {
 
         let (status, summary_text, result_text) = match result {
             Ok((summary, result_data)) => {
-                let summary_opt = if summary.is_empty() { None } else { Some(summary) };
+                let summary_opt = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
                 let result_opt = if result_data.is_empty() {
                     None
                 } else {

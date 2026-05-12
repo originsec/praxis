@@ -8,8 +8,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::state::NodeRegistry;
 use super::{BridgeSession, Transport};
+use crate::state::NodeRegistry;
 
 pub struct WsTransport<S, R> {
     tx: S,
@@ -23,7 +23,11 @@ where
     R: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin + Send,
 {
     pub fn new(tx: S, rx: R) -> Self {
-        Self { tx, rx, buf: VecDeque::new() }
+        Self {
+            tx,
+            rx,
+            buf: VecDeque::new(),
+        }
     }
 }
 
@@ -35,7 +39,8 @@ where
 {
     async fn send(&mut self, msg: &Value) -> Result<()> {
         let text = format!("{}\n", msg);
-        self.tx.send(Message::Text(text.into()))
+        self.tx
+            .send(Message::Text(text.into()))
             .await
             .map_err(|e| anyhow::anyhow!("WS send error: {}", e))
     }

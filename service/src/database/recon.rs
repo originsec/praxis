@@ -117,7 +117,10 @@ impl Database {
     }
 
     #[allow(dead_code)]
-    pub async fn get_recon_results_for_node(&self, node_id: &str) -> Result<Vec<StoredReconResult>> {
+    pub async fn get_recon_results_for_node(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<StoredReconResult>> {
         let sql = "SELECT id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json,
                 performed_at, created_at

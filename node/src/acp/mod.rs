@@ -79,7 +79,7 @@ where
 use common::{PermissionDecision, SessionUpdateKind};
 
 static ACP_UPDATE_SENDERS: Lazy<
-    Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>>>,
+    Mutex<HashMap<String, tokio::sync::mpsc::Sender<SessionUpdateKind>>>,
 > = Lazy::new(|| Mutex::new(HashMap::new()));
 
 static ACP_PERMISSION_RECEIVERS: Lazy<
@@ -87,19 +87,14 @@ static ACP_PERMISSION_RECEIVERS: Lazy<
 > = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[allow(dead_code)]
-pub fn register_update_sender(
-    handle: &str,
-    tx: tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
-) {
+pub fn register_update_sender(handle: &str, tx: tokio::sync::mpsc::Sender<SessionUpdateKind>) {
     ACP_UPDATE_SENDERS
         .lock()
         .unwrap()
         .insert(handle.to_string(), tx);
 }
 
-pub fn take_update_sender(
-    handle: &str,
-) -> Option<tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>> {
+pub fn take_update_sender(handle: &str) -> Option<tokio::sync::mpsc::Sender<SessionUpdateKind>> {
     ACP_UPDATE_SENDERS.lock().unwrap().remove(handle)
 }
 

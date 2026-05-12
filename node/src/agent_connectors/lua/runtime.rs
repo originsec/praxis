@@ -235,11 +235,7 @@ pub fn vm_fingerprint_details(lua: &Lua) -> Result<FingerprintDetails> {
     parse_fingerprint_details(value)
 }
 
-pub fn vm_recon(
-    lua: &Lua,
-    is_semantic: bool,
-    process_path: Option<&str>,
-) -> Result<ReconResult> {
+pub fn vm_recon(lua: &Lua, is_semantic: bool, process_path: Option<&str>) -> Result<ReconResult> {
     let table = connector_table(lua)?;
     let func: Function = table
         .get("recon")
@@ -765,7 +761,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                     let update_tx = match update_tx {
                         Some(tx) => tx,
                         None => {
-                            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                            let (tx, rx) = tokio::sync::mpsc::channel(1024);
                             fallback_tx = tx;
                             _fallback_rx = rx;
                             fallback_tx.clone()

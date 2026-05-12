@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use common::ai::{build_message, create_ai_client, execute_chat_completion, Provider, Role};
+use anyhow::{Result, anyhow};
+use common::ai::{Provider, Role, build_message, create_ai_client, execute_chat_completion};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,13 +19,21 @@ pub async fn run_transform_per_message(
 ) -> Result<String> {
     let model_def = {
         let cfg = service_config.read().await;
-        cfg.find_model_definition(model_ref)
-            .ok_or_else(|| anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", model_ref))?
+        cfg.find_model_definition(model_ref).ok_or_else(|| {
+            anyhow!(
+                "Model '{}' not found. Configure in Settings > LLM Providers.",
+                model_ref
+            )
+        })?
     };
 
     let provider = Provider::from_str(&model_def.provider)
         .ok_or_else(|| anyhow!("Unsupported provider '{}'", model_def.provider))?;
-    let client = create_ai_client(provider, model_def.api_key.clone(), model_def.base_url.as_deref())?;
+    let client = create_ai_client(
+        provider,
+        model_def.api_key.clone(),
+        model_def.base_url.as_deref(),
+    )?;
 
     let (mut messages, format) = parse_session_messages(session_content)?;
 
@@ -61,7 +69,10 @@ pub async fn run_transform_per_message(
         let context_line = match &last_user_text {
             Some(t) if !is_user => {
                 let preview = &t[..t.len().min(2000)];
-                format!("\nThe user's preceding message was:\n\"\"\"\n{}\n\"\"\"\n", preview)
+                format!(
+                    "\nThe user's preceding message was:\n\"\"\"\n{}\n\"\"\"\n",
+                    preview
+                )
             }
             _ => String::new(),
         };

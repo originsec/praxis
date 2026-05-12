@@ -28,15 +28,27 @@ impl Database {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(sql)
-                    .bind(&id).bind(chain_id).bind(&config_json).bind(&spec_json)
-                    .bind(&next_fire_str).bind(&now_str).bind(&now_str)
-                    .execute(pool).await?;
+                    .bind(&id)
+                    .bind(chain_id)
+                    .bind(&config_json)
+                    .bind(&spec_json)
+                    .bind(&next_fire_str)
+                    .bind(&now_str)
+                    .bind(&now_str)
+                    .execute(pool)
+                    .await?;
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(sql)
-                    .bind(&id).bind(chain_id).bind(&config_json).bind(&spec_json)
-                    .bind(&next_fire_str).bind(&now_str).bind(&now_str)
-                    .execute(pool).await?;
+                    .bind(&id)
+                    .bind(chain_id)
+                    .bind(&config_json)
+                    .bind(&spec_json)
+                    .bind(&next_fire_str)
+                    .bind(&now_str)
+                    .bind(&now_str)
+                    .execute(pool)
+                    .await?;
             }
         }
 
@@ -78,10 +90,8 @@ impl Database {
         // Recompute next_fire_at if trigger config changed or re-enabled.
         //
         if trigger_config.is_some() || enabled == Some(true) {
-            trigger.next_fire_at = compute_next_fire_at(
-                &trigger.trigger_config,
-                trigger.last_fired_at.as_ref(),
-            );
+            trigger.next_fire_at =
+                compute_next_fire_at(&trigger.trigger_config, trigger.last_fired_at.as_ref());
         }
 
         let now_str = Utc::now().to_rfc3339();
@@ -95,15 +105,25 @@ impl Database {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(sql)
-                    .bind(&config_json).bind(&spec_json).bind(enabled_int)
-                    .bind(&next_fire_str).bind(&now_str).bind(trigger_id)
-                    .execute(pool).await?;
+                    .bind(&config_json)
+                    .bind(&spec_json)
+                    .bind(enabled_int)
+                    .bind(&next_fire_str)
+                    .bind(&now_str)
+                    .bind(trigger_id)
+                    .execute(pool)
+                    .await?;
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(sql)
-                    .bind(&config_json).bind(&spec_json).bind(enabled_int)
-                    .bind(&next_fire_str).bind(&now_str).bind(trigger_id)
-                    .execute(pool).await?;
+                    .bind(&config_json)
+                    .bind(&spec_json)
+                    .bind(enabled_int)
+                    .bind(&next_fire_str)
+                    .bind(&now_str)
+                    .bind(trigger_id)
+                    .execute(pool)
+                    .await?;
             }
         }
 
@@ -114,12 +134,16 @@ impl Database {
     pub async fn delete_chain_trigger(&self, trigger_id: &str) -> Result<bool> {
         let sql = "DELETE FROM chain_triggers WHERE id = $1";
         let rows = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(trigger_id).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(trigger_id).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(trigger_id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(trigger_id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
         Ok(rows > 0)
     }
@@ -128,12 +152,16 @@ impl Database {
     pub async fn delete_chain_triggers_for_chain(&self, chain_id: &str) -> Result<u64> {
         let sql = "DELETE FROM chain_triggers WHERE chain_id = $1";
         let rows = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(chain_id).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(chain_id).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(chain_id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(chain_id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
         Ok(rows)
     }
@@ -143,13 +171,21 @@ impl Database {
         let sql = "SELECT id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at FROM chain_triggers WHERE id = $1";
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                match sqlx::query(sql).bind(trigger_id).fetch_optional(pool).await? {
+                match sqlx::query(sql)
+                    .bind(trigger_id)
+                    .fetch_optional(pool)
+                    .await?
+                {
                     Some(row) => Ok(Some(parse_trigger_row_sqlite(&row)?)),
                     None => Ok(None),
                 }
             }
             DatabasePool::Postgres(pool) => {
-                match sqlx::query(sql).bind(trigger_id).fetch_optional(pool).await? {
+                match sqlx::query(sql)
+                    .bind(trigger_id)
+                    .fetch_optional(pool)
+                    .await?
+                {
                     Some(row) => Ok(Some(parse_trigger_row_postgres(&row)?)),
                     None => Ok(None),
                 }
@@ -158,7 +194,10 @@ impl Database {
     }
 
     /// List all triggers for a specific chain
-    pub async fn list_chain_triggers_for_chain(&self, chain_id: &str) -> Result<Vec<ChainTriggerInfo>> {
+    pub async fn list_chain_triggers_for_chain(
+        &self,
+        chain_id: &str,
+    ) -> Result<Vec<ChainTriggerInfo>> {
         let sql = "SELECT id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at FROM chain_triggers WHERE chain_id = $1 ORDER BY created_at";
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -204,7 +243,10 @@ impl Database {
     }
 
     /// List enabled triggers by config type (JSON LIKE match)
-    pub async fn list_enabled_triggers_by_type(&self, type_name: &str) -> Result<Vec<ChainTriggerInfo>> {
+    pub async fn list_enabled_triggers_by_type(
+        &self,
+        type_name: &str,
+    ) -> Result<Vec<ChainTriggerInfo>> {
         let like = format!("%\"type\":\"{}\"%%", type_name);
         let sql = "SELECT id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at FROM chain_triggers WHERE enabled = 1 AND trigger_config LIKE $1";
         match &self.pool {
@@ -238,15 +280,23 @@ impl Database {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(sql)
-                    .bind(&now_str).bind(&next_fire_str).bind(enabled_int)
-                    .bind(&now_str).bind(trigger_id)
-                    .execute(pool).await?;
+                    .bind(&now_str)
+                    .bind(&next_fire_str)
+                    .bind(enabled_int)
+                    .bind(&now_str)
+                    .bind(trigger_id)
+                    .execute(pool)
+                    .await?;
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(sql)
-                    .bind(&now_str).bind(&next_fire_str).bind(enabled_int)
-                    .bind(&now_str).bind(trigger_id)
-                    .execute(pool).await?;
+                    .bind(&now_str)
+                    .bind(&next_fire_str)
+                    .bind(enabled_int)
+                    .bind(&now_str)
+                    .bind(trigger_id)
+                    .execute(pool)
+                    .await?;
             }
         }
         Ok(())
@@ -256,12 +306,16 @@ impl Database {
     pub async fn count_chain_triggers(&self, chain_id: &str) -> Result<usize> {
         let sql = "SELECT COUNT(*) as cnt FROM chain_triggers WHERE chain_id = $1 AND enabled = 1";
         let count: i64 = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(chain_id).fetch_one(pool).await?.get("cnt")
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(chain_id).fetch_one(pool).await?.get("cnt")
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(chain_id)
+                .fetch_one(pool)
+                .await?
+                .get("cnt"),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(chain_id)
+                .fetch_one(pool)
+                .await?
+                .get("cnt"),
         };
         Ok(count as usize)
     }
@@ -280,8 +334,16 @@ fn parse_trigger_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<ChainTrigge
         trigger_config: serde_json::from_str(&config_json)?,
         target_spec: serde_json::from_str(&spec_json)?,
         enabled: enabled_int != 0,
-        last_fired_at: last_fired_str.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
-        next_fire_at: next_fire_str.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
+        last_fired_at: last_fired_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
+        next_fire_at: next_fire_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
     })
 }
 
@@ -298,8 +360,16 @@ fn parse_trigger_row_postgres(row: &sqlx::postgres::PgRow) -> Result<ChainTrigge
         trigger_config: serde_json::from_str(&config_json)?,
         target_spec: serde_json::from_str(&spec_json)?,
         enabled: enabled_int != 0,
-        last_fired_at: last_fired_str.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
-        next_fire_at: next_fire_str.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
+        last_fired_at: last_fired_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
+        next_fire_at: next_fire_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }),
     })
 }
 
@@ -309,24 +379,27 @@ pub fn compute_next_fire_at(
     last_fired: Option<&chrono::DateTime<Utc>>,
 ) -> Option<chrono::DateTime<Utc>> {
     match config {
-        TriggerConfig::Scheduled { schedule, .. } => {
-            match schedule {
-                ScheduleSpec::DailyAt { hour, minute } => {
-                    let now = Utc::now();
-                    let today = now.date_naive()
-                        .and_hms_opt(*hour as u32, *minute as u32, 0)
-                        .map(|dt| dt.and_utc());
+        TriggerConfig::Scheduled { schedule, .. } => match schedule {
+            ScheduleSpec::DailyAt { hour, minute } => {
+                let now = Utc::now();
+                let today = now
+                    .date_naive()
+                    .and_hms_opt(*hour as u32, *minute as u32, 0)
+                    .map(|dt| dt.and_utc());
 
-                    today.map(|t| {
-                        if t > now { t } else { t + chrono::Duration::days(1) }
-                    })
-                }
-                ScheduleSpec::Interval { minutes } => {
-                    let base = last_fired.cloned().unwrap_or_else(Utc::now);
-                    Some(base + chrono::Duration::minutes(*minutes as i64))
-                }
+                today.map(|t| {
+                    if t > now {
+                        t
+                    } else {
+                        t + chrono::Duration::days(1)
+                    }
+                })
             }
-        }
+            ScheduleSpec::Interval { minutes } => {
+                let base = last_fired.cloned().unwrap_or_else(Utc::now);
+                Some(base + chrono::Duration::minutes(*minutes as i64))
+            }
+        },
         TriggerConfig::InterceptMatch { .. } | TriggerConfig::NewNode => None,
     }
 }

@@ -55,7 +55,10 @@ pub fn format_message_delivery(
         }
         output.push_str("--- DIRECT MESSAGES ---\n");
         for (timestamp, sender, content) in direct_messages {
-            output.push_str(&format!("[{}] DM from <{}>: {}\n", timestamp, sender, content));
+            output.push_str(&format!(
+                "[{}] DM from <{}>: {}\n",
+                timestamp, sender, content
+            ));
         }
     }
 

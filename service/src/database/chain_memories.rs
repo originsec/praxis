@@ -60,20 +60,16 @@ impl Database {
         let sql = "DELETE FROM chain_memories WHERE key = $1";
 
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(key)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(key)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(rows_affected > 0)

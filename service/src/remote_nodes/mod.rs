@@ -144,7 +144,12 @@ impl RemoteNodeManager {
         ctx: RemoteNodeContext,
     ) -> Result<(), String> {
         let bridge: Arc<dyn RemoteNode> = match kind {
-            "codex" => Arc::new(codex::CodexAppServer::start(node_id.clone(), url, token, ctx)),
+            "codex" => Arc::new(codex::CodexAppServer::start(
+                node_id.clone(),
+                url,
+                token,
+                ctx,
+            )),
             other => return Err(format!("Unknown remote-node kind: {}", other)),
         };
         self.nodes.write().await.insert(node_id, bridge);

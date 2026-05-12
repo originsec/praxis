@@ -1,12 +1,12 @@
 //! Node message dispatch handlers.
 
 use anyhow::Result;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use common::{
-    node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
-    ClientDirectMessage, NodeSignalMessage, TrafficMatch, TrafficMatchWithDetails,
-    CLIENT_BROADCAST_EXCHANGE,
+    CLIENT_BROADCAST_EXCHANGE, ClientBroadcastMessage, ClientDirectMessage, NodeSignalMessage,
+    TrafficMatch, TrafficMatchWithDetails, node_semantic_queue_name, publish_json,
+    publish_json_exchange,
 };
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
@@ -57,7 +57,10 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             let intercept_targets = match ctx.database.get_enabled_intercept_targets().await {
                 Ok(targets) => targets,
                 Err(e) => {
-                    common::log_error!("Failed to load intercept targets for registration ack: {}", e);
+                    common::log_error!(
+                        "Failed to load intercept targets for registration ack: {}",
+                        e
+                    );
                     Vec::new()
                 }
             };
@@ -113,8 +116,15 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             // Also broadcast to clients so web UI reflects the state.
             //
 
-            let client_message = ClientBroadcastMessage::EventLoggingSet { enabled: event_logging_enabled };
-            let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
+            let client_message = ClientBroadcastMessage::EventLoggingSet {
+                enabled: event_logging_enabled,
+            };
+            let _ = publish_json_exchange(
+                &ctx.broadcast_channel,
+                CLIENT_BROADCAST_EXCHANGE,
+                &client_message,
+            )
+            .await;
         }
 
         NodeSignalMessage::InformationUpdate(update) => {
@@ -176,20 +186,19 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 {
                     common::log_error!(
                         "Failed to send command response to client {}: {}",
-                        pending.client_id, e
+                        pending.client_id,
+                        e
                     );
                 }
                 common::log_info!(
                     "Forwarded command response {} to client {}",
-                    response.command_id, pending.client_id
+                    response.command_id,
+                    pending.client_id
                 );
 
                 if should_broadcast_state {
-                    if let Err(e) = broadcast_state_to_clients(
-                        &ctx.broadcast_channel,
-                        &ctx.node_registry,
-                    )
-                    .await
+                    if let Err(e) =
+                        broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await
                     {
                         common::log_error!("Failed to broadcast state after session change: {}", e);
                     }
@@ -216,12 +225,17 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 output.client_id.get(..8).unwrap_or(&output.client_id)
             );
             let client_message = ClientDirectMessage::TerminalOutput(output.clone());
-            if let Err(e) =
-                send_to_client(&ctx.client_publish_channel, &output.client_id, client_message).await
+            if let Err(e) = send_to_client(
+                &ctx.client_publish_channel,
+                &output.client_id,
+                client_message,
+            )
+            .await
             {
                 common::log_error!(
                     "Failed to send terminal output to client {}: {}",
-                    output.client_id, e
+                    output.client_id,
+                    e
                 );
             }
         }
@@ -247,11 +261,13 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 // Send to the dedicated semantic queue to avoid deadlocks.
                 //
                 let semantic_queue = node_semantic_queue_name(&node_id_clone);
-                if let Err(e) = publish_json(&publish_channel_clone, &semantic_queue, &response).await
+                if let Err(e) =
+                    publish_json(&publish_channel_clone, &semantic_queue, &response).await
                 {
                     common::log_error!(
                         "Failed to send semantic parser response to node {}: {}",
-                        node_id_clone, e
+                        node_id_clone,
+                        e
                     );
                 }
             });
@@ -299,20 +315,26 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                             //
                             if !matches.is_empty() {
                                 if let Some(ref trigger_engine) = ctx.trigger_engine {
-                                    let matched_rule_ids: Vec<i64> = matches.iter().map(|(_, r)| r.id).collect();
+                                    let matched_rule_ids: Vec<i64> =
+                                        matches.iter().map(|(_, r)| r.id).collect();
                                     let te = trigger_engine.clone();
                                     let trigger_node_id = entry.node_id.clone();
                                     let match_context = format!(
                                         "Intercept match on URL: {}\nMatched rules: {}",
                                         entry.url,
-                                        matches.iter().map(|(_, r)| r.name.as_str()).collect::<Vec<_>>().join(", ")
+                                        matches
+                                            .iter()
+                                            .map(|(_, r)| r.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
                                     );
                                     tokio::spawn(async move {
                                         te.fire_intercept_match_triggers(
                                             &matched_rule_ids,
                                             &trigger_node_id,
                                             &match_context,
-                                        ).await;
+                                        )
+                                        .await;
                                     });
                                 }
                             }
@@ -329,12 +351,11 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                                     matched_at: Utc::now(),
                                     summary: None,
                                 };
-                                ctx.intercept_broadcaster.push_match(
-                                    TrafficMatchWithDetails {
+                                ctx.intercept_broadcaster
+                                    .push_match(TrafficMatchWithDetails {
                                         match_info: match_info.clone(),
                                         traffic: entry.clone(),
-                                    },
-                                );
+                                    });
 
                                 if let Some(ref prompt) = rule.summarization_prompt {
                                     let db = ctx.database.clone();
@@ -360,8 +381,9 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                                         .await;
                                         if result.success {
                                             if let Some(summary) = result.summary {
-                                                if let Err(e) =
-                                                    db.update_match_summary(match_id, &summary).await
+                                                if let Err(e) = db
+                                                    .update_match_summary(match_id, &summary)
+                                                    .await
                                                 {
                                                     common::log_error!(
                                                         "Failed to update match summary: {}",
@@ -383,7 +405,8 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                                         } else if let Some(err) = result.error {
                                             common::log_warn!(
                                                 "Summarization failed for match {}: {}",
-                                                match_id, err
+                                                match_id,
+                                                err
                                             );
                                         }
                                     });
@@ -420,10 +443,16 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             // Broadcast status to all clients.
             //
             let message = ClientBroadcastMessage::InterceptStatusUpdate(status);
-            let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
+            let _ =
+                publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message)
+                    .await;
         }
 
-        NodeSignalMessage::Acp { node_id, client_id, json_rpc } => {
+        NodeSignalMessage::Acp {
+            node_id,
+            client_id,
+            json_rpc,
+        } => {
             if let Err(e) = ctx
                 .acp_node_proxy
                 .forward_to_client(&ctx.client_publish_channel, &node_id, &client_id, &json_rpc)

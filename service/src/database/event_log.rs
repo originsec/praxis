@@ -290,20 +290,16 @@ impl Database {
         let deleted = if let Some(source_id) = source_id {
             let sql = "DELETE FROM event_log WHERE source = $1";
             match &self.pool {
-                DatabasePool::Sqlite(pool) => {
-                    sqlx::query(sql)
-                        .bind(source_id)
-                        .execute(pool)
-                        .await?
-                        .rows_affected()
-                }
-                DatabasePool::Postgres(pool) => {
-                    sqlx::query(sql)
-                        .bind(source_id)
-                        .execute(pool)
-                        .await?
-                        .rows_affected()
-                }
+                DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                    .bind(source_id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected(),
+                DatabasePool::Postgres(pool) => sqlx::query(sql)
+                    .bind(source_id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected(),
             }
         } else {
             let sql = "DELETE FROM event_log";

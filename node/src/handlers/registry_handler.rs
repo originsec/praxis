@@ -24,7 +24,9 @@ pub async fn handle_agent_registry_update(
             "PRAXIS_IGNORE_SERVICE_AGENTS set, ignoring service registry update ({} scripts skipped); rebuilt native/embedded agents",
             scripts.len()
         );
-        return NodeCommandResult::AgentRegistry(AgentRegistryCommandResult::Updated { agent_count });
+        return NodeCommandResult::AgentRegistry(AgentRegistryCommandResult::Updated {
+            agent_count,
+        });
     }
 
     let agent_count = {
