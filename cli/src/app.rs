@@ -1716,13 +1716,13 @@ impl App {
                     let counts = {
                         let recon = self.nodes.recon.as_ref().unwrap();
                         [
-                            recon.recon_result.as_ref().map_or(0, |r| r.config.len()),
+                            recon.recon_result.as_ref().map_or(0, |r| r.config.items.len()),
                             recon.recon_result.as_ref().map_or(0, |r| {
                                 r.tools.mcp_servers.len()
                                     + r.tools.skills.len()
                                     + r.tools.internal_tools.len()
                             }),
-                            recon.recon_result.as_ref().map_or(0, |r| r.sessions.len()),
+                            recon.recon_result.as_ref().map_or(0, |r| r.sessions.items.len()),
                         ]
                     };
                     if let Some(new_tab) =
@@ -1776,12 +1776,12 @@ impl App {
                             let (lines_per_item, max_items) = match recon.active_tab {
                                 ReconTab::Config => (
                                     2usize,
-                                    recon.recon_result.as_ref().map_or(0, |r| r.config.len()),
+                                    recon.recon_result.as_ref().map_or(0, |r| r.config.items.len()),
                                 ),
                                 ReconTab::Tools => (1usize, 3usize),
                                 ReconTab::Sessions => (
                                     3usize,
-                                    recon.recon_result.as_ref().map_or(0, |r| r.sessions.len()),
+                                    recon.recon_result.as_ref().map_or(0, |r| r.sessions.items.len()),
                                 ),
                             };
                             let visible_items = (inner_h as usize / lines_per_item).max(1);
