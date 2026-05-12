@@ -204,7 +204,7 @@ Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 
 Common actions:
 - Create new operations inline (`Ctrl+N` on the Library tab)
-- Create new chains via the chain builder (`Ctrl+Alt+N` on the Library tab, or click `^⌥n new chain` in the hint bar)
+- Create new chains via the chain builder (`Ctrl+Alt+N` on the Library tab, or click `^! newchain` in the hint bar)
 - Edit an existing op or chain (`Ctrl+E` with the row selected — opens the op form for ops, the chain builder for chains)
 - Run operations and chains with node/agent selection and YOLO mode (`Ctrl+R`)
 - Delete the selected op or chain (`Ctrl+D`)
