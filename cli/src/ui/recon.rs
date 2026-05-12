@@ -180,3 +180,55 @@ pub fn common_two_pane_layout(area: Rect, split_percent: u16) -> (Rect, Rect) {
     .split(area);
     (chunks[0], chunks[1])
 }
+
+//
+// Hit-test for the tab bar. Returns which tab is under `mouse_col` given
+// the tab bar's left edge and the per-tab counts (mirroring the widths
+// produced by render_tab_bar via chrome::tab + chrome::tab_sep).
+//
+
+pub fn tab_at(tab_bar_x: u16, mouse_col: u16, counts: [usize; 3]) -> Option<ReconTab> {
+    let labels = ["Config", "Tools", "Sessions"];
+    let tabs = [ReconTab::Config, ReconTab::Tools, ReconTab::Sessions];
+    let mut x = tab_bar_x;
+    for i in 0..3 {
+        let label_w = labels[i].chars().count() as u16 + 2;
+        let count_w = counts[i].to_string().len() as u16 + 1;
+        let total = label_w + count_w;
+        if mouse_col >= x && mouse_col < x + total {
+            return Some(tabs[i]);
+        }
+        x += total;
+        if i < 2 {
+            x += 5; // tab_sep "  ·  "
+        }
+    }
+    None
+}
+
+//
+// Layout of the recon overlay's vertical sections within the area that
+// nodes::render hands to render_recon. Mirrors the Layout::vertical
+// split in render_recon — keep these in sync.
+//
+
+pub struct ReconAreas {
+    pub tabs: Rect,
+    pub content: Rect,
+}
+
+pub fn recon_areas(area: Rect) -> ReconAreas {
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Length(1), // divider
+        Constraint::Length(1), // tabs
+        Constraint::Length(1), // spacer
+        Constraint::Min(1),    // content
+        Constraint::Length(1), // hints
+    ])
+    .split(area);
+    ReconAreas {
+        tabs: chunks[2],
+        content: chunks[4],
+    }
+}
