@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     if overlay.recon_result.is_none() {
@@ -187,18 +187,9 @@ fn parse_session_content(content: &Option<String>) -> Vec<Line<'static>> {
                     }
                     match serde_json::from_str::<Value>(line) {
                         Ok(Value::Object(obj)) => {
-                            let role = obj
-                                .get("role")
-                                .or_else(|| obj.get("type"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            let content = obj
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            parsed.push(ParsedMessage { role, content });
+                            if let Some(msg) = extract_message(&obj) {
+                                parsed.push(msg);
+                            }
                         }
                         _ => {
                             all_json = false;
@@ -219,18 +210,9 @@ fn parse_session_content(content: &Option<String>) -> Vec<Line<'static>> {
             let mut parsed: Vec<ParsedMessage> = Vec::new();
             for msg in messages {
                 if let Value::Object(m) = msg {
-                    let role = m
-                        .get("role")
-                        .or_else(|| m.get("type"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let content = m
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    parsed.push(ParsedMessage { role, content });
+                    if let Some(p) = extract_message(m) {
+                        parsed.push(p);
+                    }
                 }
             }
             if !parsed.is_empty() {
@@ -245,6 +227,121 @@ fn parse_session_content(content: &Option<String>) -> Vec<Line<'static>> {
         .collect()
 }
 
+//
+// Pull role and content out of a single session-file entry. Entries vary by
+// agent: Claude Code nests `{role, content}` under `message` (and wraps tool
+// calls / thinking inside content blocks). Codex nests them under `payload`.
+// Older flat formats place `role` and `content` at the top level. Content
+// itself can be a string, an array of content blocks, or absent. Returns
+// `None` for pure-metadata entries that carry nothing renderable.
+//
+fn extract_message(obj: &Map<String, Value>) -> Option<ParsedMessage> {
+    let nested = obj
+        .get("message")
+        .or_else(|| obj.get("payload"))
+        .and_then(|v| v.as_object());
+
+    let role = nested
+        .and_then(|m| m.get("role"))
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("role").and_then(|v| v.as_str()))
+        .or_else(|| obj.get("type").and_then(|v| v.as_str()))
+        .unwrap_or("unknown")
+        .to_string();
+
+    let content_val = nested
+        .and_then(|m| m.get("content"))
+        .or_else(|| obj.get("content"))
+        .or_else(|| obj.get("summary"))
+        .or_else(|| obj.get("text"));
+
+    let content = render_content_value(content_val);
+
+    if content.is_empty() && !is_renderable_role(&role) {
+        return None;
+    }
+
+    Some(ParsedMessage { role, content })
+}
+
+fn is_renderable_role(role: &str) -> bool {
+    matches!(
+        role,
+        "user" | "human" | "assistant" | "model" | "gemini" | "system" | "summary"
+    )
+}
+
+fn render_content_value(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(arr)) => {
+            let mut parts: Vec<String> = Vec::new();
+            for block in arr {
+                match block {
+                    Value::String(s) => parts.push(s.clone()),
+                    Value::Object(b) => {
+                        if let Some(rendered) = render_content_block(b) {
+                            if !rendered.is_empty() {
+                                parts.push(rendered);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            parts.join("\n")
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_content_block(b: &Map<String, Value>) -> Option<String> {
+    let block_type = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    if let Some(t) = b.get("text").and_then(|v| v.as_str()) {
+        return Some(t.to_string());
+    }
+
+    match block_type {
+        "thinking" => b
+            .get("thinking")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("[thinking] {}", s)),
+        "tool_use" | "function_call" => {
+            let name = b
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("tool");
+            Some(format!("[tool_use: {}]", name))
+        }
+        "tool_result" | "function_call_output" => {
+            let inner = b.get("content").or_else(|| b.get("output"));
+            let body = match inner {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|ib| {
+                        ib.as_object()
+                            .and_then(|m| m.get("text"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => String::new(),
+            };
+            if body.is_empty() {
+                Some("[tool_result]".to_string())
+            } else {
+                Some(format!("[tool_result] {}", body))
+            }
+        }
+        "" => None,
+        other => Some(format!("[{}]", other)),
+    }
+}
+
 fn format_parsed_messages(messages: &[ParsedMessage]) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
@@ -256,6 +353,8 @@ fn format_parsed_messages(messages: &[ParsedMessage]) -> Vec<Line<'static>> {
                 ratatui::style::Color::Rgb(180, 130, 220),
             ),
             "system" => ("SYS", DIM),
+            "summary" => ("SUMMARY", MUTED),
+            "tool" | "tool_use" | "tool_result" => ("TOOL", MUTED),
             _ => ("?", MUTED),
         };
 
@@ -263,11 +362,18 @@ fn format_parsed_messages(messages: &[ParsedMessage]) -> Vec<Line<'static>> {
             crate::ui::chrome::pill(role_label, role_color),
         ]));
 
-        for content_line in msg.content.lines() {
+        if msg.content.is_empty() {
             lines.push(Line::from(Span::styled(
-                format!("   {}", content_line),
-                Style::default().fg(TEXT),
+                "   (no content)".to_string(),
+                Style::default().fg(DIM),
             )));
+        } else {
+            for content_line in msg.content.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("   {}", content_line),
+                    Style::default().fg(TEXT),
+                )));
+            }
         }
 
         lines.push(Line::from(""));
