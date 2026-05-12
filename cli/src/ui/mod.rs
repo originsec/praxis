@@ -1,3 +1,4 @@
+pub mod chain_form;
 pub mod chrome;
 pub mod common;
 pub mod intercept;
@@ -57,6 +58,9 @@ pub fn render(f: &mut Frame, app: &App) {
                 popup::render_run_options(f, chunks[2], opts);
             } else if let Some(ref tform) = app.trigger_form {
                 popup::render_trigger_form(f, chunks[2], tform);
+            } else if let Some(ref cform) = app.chain_form {
+                let hit = chain_form::render_chain_form(f, chunks[2], cform);
+                *app.chain_form_hits.borrow_mut() = hit;
             } else {
                 operations::render(f, chunks[2], &app.operations);
             }

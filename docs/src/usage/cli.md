@@ -203,9 +203,26 @@ Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 - **Triggers** — automated chain firing rules
 
 Common actions:
-- Create new operations inline
-- Run operations with node/agent selection and YOLO mode
+- Create new operations inline (`Ctrl+N` on the Library tab)
+- Create new chains via the chain builder (`Ctrl+Alt+N` on the Library tab, or click `^⌥n new chain` in the hint bar)
+- Edit an existing op or chain (`Ctrl+E` with the row selected — opens the op form for ops, the chain builder for chains)
+- Run operations and chains with node/agent selection and YOLO mode (`Ctrl+R`)
+- Delete the selected op or chain (`Ctrl+D`)
 - Create, edit, enable/disable and delete chain triggers
+
+#### Library tab — chain builder
+
+The chain builder is a structured form modal for assembling a chain from its
+elements (Trigger, Operation, Transform, Generic Prompt, Memory, Loop, Tool,
+Payload, Termination) and the connections between them. It is mouse-friendly:
+
+- Header fields — click `Name`, `Category`, `Timeout`, or `Description` to focus and type.
+- Elements panel — click an element row to select it; click `[+ Add Element]` to pick an element kind.
+- Properties panel — click a property row to focus; the `Kind` row cycles on click and `Operation` rows open the op-name picker.
+- Connections panel — click a row to edit it; click `[+ Add Connection]` to add a new connection. The connection editor picks `from`/`to` elements, ports, and an optional `on success` / `on failure` condition.
+- Buttons — click `Save` to submit (creates or updates depending on whether you opened the form for editing) or `Cancel` (or press `Esc`) to discard.
+
+Keyboard equivalents are also available: `Tab`/`Shift+Tab` cycle sections, `↑/↓` move within a list, `a` adds a new element/connection (depending on focused section), `d` deletes the selected row, `←/→` cycles toggles, `Ctrl+S` saves, and `Esc` cancels. Newly created chains are seeded with a connected `Trigger → Termination` pair so you can extend the scaffold rather than build from scratch.
 
 #### Triggers tab
 

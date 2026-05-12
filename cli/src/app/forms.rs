@@ -174,6 +174,231 @@ pub enum TriggerFormSection {
     IncludeTriggering,
 }
 
+//
+// Chain builder form. Owns the in-progress chain definition (header fields,
+// element list, connection list) plus all UI state (focused section, which
+// element/connection row is selected, and an optional overlay for the
+// element-kind picker or connection editor). Submission emits a
+// `ChainCreate` or `ChainUpdate` signal.
+//
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ChainFormSection {
+    Header,
+    Elements,
+    Properties,
+    Connections,
+    Buttons,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ElementKind {
+    Trigger,
+    Operation,
+    Transform,
+    GenericPrompt,
+    Memory,
+    Loop,
+    Tool,
+    Payload,
+    Termination,
+}
+
+impl ElementKind {
+    pub const ALL: [ElementKind; 9] = [
+        ElementKind::Trigger,
+        ElementKind::Operation,
+        ElementKind::Transform,
+        ElementKind::GenericPrompt,
+        ElementKind::Memory,
+        ElementKind::Loop,
+        ElementKind::Tool,
+        ElementKind::Payload,
+        ElementKind::Termination,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ElementKind::Trigger => "Trigger",
+            ElementKind::Operation => "Operation",
+            ElementKind::Transform => "Transform",
+            ElementKind::GenericPrompt => "Generic Prompt",
+            ElementKind::Memory => "Memory",
+            ElementKind::Loop => "Loop",
+            ElementKind::Tool => "Tool",
+            ElementKind::Payload => "Payload",
+            ElementKind::Termination => "Termination",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            ElementKind::Trigger => "TRG",
+            ElementKind::Operation => "OP",
+            ElementKind::Transform => "TXR",
+            ElementKind::GenericPrompt => "GP",
+            ElementKind::Memory => "MEM",
+            ElementKind::Loop => "LP",
+            ElementKind::Tool => "TL",
+            ElementKind::Payload => "PL",
+            ElementKind::Termination => "TRM",
+        }
+    }
+
+    pub fn id_prefix(self) -> &'static str {
+        match self {
+            ElementKind::Trigger => "trigger",
+            ElementKind::Operation => "op",
+            ElementKind::Transform => "transform",
+            ElementKind::GenericPrompt => "prompt",
+            ElementKind::Memory => "mem",
+            ElementKind::Loop => "loop",
+            ElementKind::Tool => "tool",
+            ElementKind::Payload => "payload",
+            ElementKind::Termination => "term",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ChainElementDraft {
+    pub id: String,
+    pub kind: ElementKind,
+    //
+    // Per-kind fields. Only those relevant to `kind` are read at submit
+    // time. Stored as strings for simple in-form editing.
+    //
+    pub op_name: String,
+    pub model_ref: String,
+    pub prompt: String,
+    pub memory_key: String,
+    pub memory_mode: u8,
+    pub max_iterations: String,
+    pub tool_name: String,
+    pub tool_params: String,
+    pub payload_id: String,
+}
+
+impl ChainElementDraft {
+    pub fn new(id: String, kind: ElementKind) -> Self {
+        Self {
+            id,
+            kind,
+            op_name: String::new(),
+            model_ref: String::new(),
+            prompt: String::new(),
+            memory_key: String::new(),
+            memory_mode: 0,
+            max_iterations: "10".to_string(),
+            tool_name: String::new(),
+            tool_params: "{}".to_string(),
+            payload_id: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ConditionKind {
+    None,
+    OnSuccess,
+    OnFailure,
+}
+
+#[derive(Clone)]
+pub struct ConnectionDraft {
+    pub id: String,
+    pub from_element: String,
+    pub to_element: String,
+    pub from_port: u32,
+    pub to_port: u32,
+    pub condition: ConditionKind,
+}
+
+//
+// Overlay used while picking what kind of element to add, or while filling
+// in a new connection between elements. Held on the form so the renderer
+// and event handler can switch into a focused editor mode.
+//
+
+pub enum ChainFormEditor {
+    PickElementKind {
+        cursor: usize,
+    },
+    EditConnection {
+        editing_idx: Option<usize>,
+        from_idx: usize,
+        to_idx: usize,
+        from_port: String,
+        to_port: String,
+        condition: ConditionKind,
+        focus: u8, // 0=from 1=to 2=from_port 3=to_port 4=condition 5=save 6=cancel
+    },
+    PickOpName {
+        cursor: usize,
+        filter: String,
+    },
+}
+
+pub struct ChainForm {
+    pub editing_id: Option<String>,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub timeout: String,
+    pub elements: Vec<ChainElementDraft>,
+    pub connections: Vec<ConnectionDraft>,
+    pub element_selected: usize,
+    pub connection_selected: usize,
+    pub section: ChainFormSection,
+    pub focused_header_field: u8, // 0=name 1=category 2=timeout 3=description
+    pub focused_prop_field: u8,
+    //
+    // Snapshot of currently known op full_names. Used by the operation
+    // picker overlay so the user can pick a real op name rather than typing
+    // it free-form.
+    //
+    pub available_op_names: Vec<String>,
+    pub element_id_seq: u32,
+    pub editor: Option<ChainFormEditor>,
+    pub error: Option<String>,
+}
+
+impl ChainForm {
+    pub fn new(available_op_names: Vec<String>) -> Self {
+        Self {
+            editing_id: None,
+            name: String::new(),
+            category: "custom".to_string(),
+            description: String::new(),
+            timeout: String::new(),
+            elements: Vec::new(),
+            connections: Vec::new(),
+            element_selected: 0,
+            connection_selected: 0,
+            section: ChainFormSection::Header,
+            focused_header_field: 0,
+            focused_prop_field: 0,
+            available_op_names,
+            element_id_seq: 0,
+            editor: None,
+            error: None,
+        }
+    }
+
+    pub fn next_element_id(&mut self, kind: ElementKind) -> String {
+        self.element_id_seq += 1;
+        format!("{}_{}", kind.id_prefix(), self.element_id_seq)
+    }
+
+    pub fn selected_element(&self) -> Option<&ChainElementDraft> {
+        self.elements.get(self.element_selected)
+    }
+
+    pub fn selected_element_mut(&mut self) -> Option<&mut ChainElementDraft> {
+        self.elements.get_mut(self.element_selected)
+    }
+}
+
 impl TriggerForm {
     //
     // Section ordering depends on the trigger type. Scheduled has a few

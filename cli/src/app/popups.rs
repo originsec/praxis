@@ -44,6 +44,7 @@ pub enum ConfirmKind {
         method: Option<common::InterceptMethod>,
     },
     DeleteTrigger(String), // trigger_id
+    DeleteChain(String),   // chain_id
     Info,
 }
 
@@ -228,6 +229,17 @@ impl App {
                 if let Err(e) = result {
                     self.intercept.set_error(format!("Intercept toggle: {}", e));
                 }
+            }
+            ConfirmKind::DeleteChain(chain_id) => {
+                if let Err(e) = self.client.delete_chain_def(chain_id).await {
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session.messages.push(ConversationEntry::Error(format!(
+                            "Delete chain failed: {}",
+                            e
+                        )));
+                    }
+                }
+                self.refresh_library_after(Duration::from_millis(300));
             }
             ConfirmKind::DeleteTrigger(trigger_id) => {
                 let _ = self.client.delete_chain_trigger(trigger_id.clone()).await;

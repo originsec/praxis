@@ -1,4 +1,5 @@
 mod agent_scripts;
+mod chain_form;
 mod forms;
 mod input;
 pub mod intercept;
@@ -56,6 +57,7 @@ pub struct App {
     pub connected: bool,
     pub popup: Option<Popup>,
     pub new_op_form: Option<NewOpForm>,
+    pub chain_form: Option<ChainForm>,
     pub run_options: Option<RunOptions>,
     pub trigger_form: Option<TriggerForm>,
     pub add_remote_node_form: Option<AddRemoteNodeForm>,
@@ -66,6 +68,11 @@ pub struct App {
     pub terminal_paused: Arc<std::sync::atomic::AtomicBool>,
     pub terminal_resume: Arc<tokio::sync::Notify>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
+    //
+    // Hit-test geometry stashed by the chain form renderer so the mouse
+    // handler can map clicks to actions without re-deriving the layout.
+    //
+    pub chain_form_hits: std::cell::RefCell<crate::ui::chain_form::ChainFormHitMap>,
 }
 
 
@@ -384,6 +391,7 @@ impl App {
             connected: true,
             popup: None,
             new_op_form: None,
+            chain_form: None,
             run_options: None,
             trigger_form: None,
             add_remote_node_form: None,
@@ -394,6 +402,7 @@ impl App {
             terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_resume: Arc::new(tokio::sync::Notify::new()),
             last_click: None,
+            chain_form_hits: std::cell::RefCell::new(Default::default()),
         }
     }
 
@@ -820,6 +829,10 @@ impl App {
                 }
                 self.active_window == Window::LogQuery
             }
+            AppEvent::ChainLoadedForEdit { chain } => {
+                self.open_edit_chain_form_for(chain);
+                true
+            }
             AppEvent::Tick => {
                 //
                 // Every ~3 seconds while the Executions tab is open, re-pull
@@ -1042,6 +1055,14 @@ impl App {
         //
         if self.new_op_form.is_some() {
             self.handle_new_op_form_key(key).await;
+            return;
+        }
+
+        //
+        // Chain builder form intercepts all keys.
+        //
+        if self.chain_form.is_some() {
+            self.handle_chain_form_key(key).await;
             return;
         }
 
@@ -2053,6 +2074,14 @@ impl App {
                     }
                 }
             }
+            return;
+        }
+
+        //
+        // ChainForm popup mouse handling.
+        //
+        if self.chain_form.is_some() {
+            self.handle_chain_form_mouse(mouse).await;
             return;
         }
 
