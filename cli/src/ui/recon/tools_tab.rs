@@ -1,7 +1,7 @@
 use crate::app::{ReconOverlay, ReconTab};
 use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -59,22 +59,17 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let mut lines: Vec<Line> = Vec::new();
     for (idx, (name, count)) in categories.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Tools && overlay.selected_left == idx;
-        let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
-        let name_style = if is_selected {
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT_BRIGHT).bg(bg)
-        };
-        let count_style = Style::default().fg(DIM).bg(bg);
+        let mut name_style = Style::default().fg(TEXT_BRIGHT);
+        let mut count_style = Style::default().fg(DIM);
+        let mut prefix_style = Style::default().fg(if is_selected { ACCENT } else { MUTED });
+        if is_selected {
+            name_style = name_style.bg(BG_SELECTED).add_modifier(Modifier::BOLD);
+            count_style = count_style.bg(BG_SELECTED);
+            prefix_style = prefix_style.bg(BG_SELECTED);
+        }
 
         let prefix = if is_selected { "\u{276f} " } else { "  " };
-        let prefix_style = Style::default()
-            .fg(if is_selected { ACCENT } else { MUTED })
-            .bg(bg);
         lines.push(Line::from(vec![
             Span::styled(prefix.to_string(), prefix_style),
             Span::styled(format!("{} ", name), name_style),

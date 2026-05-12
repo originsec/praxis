@@ -1,7 +1,7 @@
 use crate::app::{ReconOverlay, ReconTab};
 use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -66,22 +66,17 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let mut lines: Vec<Line> = Vec::new();
     for (idx, session) in result.sessions.items.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Sessions && overlay.selected_left == idx;
-        let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
-        let id_style = if is_selected {
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT_BRIGHT).bg(bg)
-        };
-        let meta_style = Style::default().fg(DIM).bg(bg);
+        let mut id_style = Style::default().fg(TEXT_BRIGHT);
+        let mut meta_style = Style::default().fg(DIM);
+        let mut prefix_style = Style::default().fg(if is_selected { ACCENT } else { MUTED });
+        if is_selected {
+            id_style = id_style.bg(BG_SELECTED).add_modifier(Modifier::BOLD);
+            meta_style = meta_style.bg(BG_SELECTED);
+            prefix_style = prefix_style.bg(BG_SELECTED);
+        }
 
         let prefix = if is_selected { "\u{276f} " } else { "  " };
-        let prefix_style = Style::default()
-            .fg(if is_selected { ACCENT } else { MUTED })
-            .bg(bg);
         let short_id = if session.session_id.len() > 12 {
             format!("{}…", &session.session_id[..12])
         } else {
