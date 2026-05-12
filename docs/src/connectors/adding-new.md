@@ -131,7 +131,8 @@ local recon_config = {
 
 Key points:
 - `recon` receives a context object: `recon = function(ctx) ... end`
-- Semantic vs non-semantic recon is driven by `ctx.is_semantic` inside helpers
+- The result must be shaped as `{ config = { items, project_paths }, tools = { mcp_servers, skills, internal_tools }, sessions = { items } }`. `helpers.run_standard_recon` handles this for the standard pipeline
+- Semantic recon (driven by `ctx.is_semantic`) populates `tools.internal_tools` by interrogating the agent through `config.session_fns`
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 - **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
 
@@ -438,9 +439,9 @@ local function do_recon(ctx)
   end
 
   return {
-    tools = { internal_tools = internal_tools, mcp_servers = {}, skills = {} },
-    project_paths = {},
-    metadata = nil,
+    config = { items = {}, project_paths = {} },
+    tools = { mcp_servers = {}, skills = {}, internal_tools = internal_tools },
+    sessions = { items = {} },
   }
 end
 
@@ -721,20 +722,19 @@ impl AgentRecon for ExampleAIAgent {
         let mut result = ReconResult::default();
 
         // Discover configuration files
-        if let Some(config) = discover_config() {
-            result.config.push(config);
+        if let Some(item) = discover_config() {
+            result.config.items.push(item);
         }
 
-        // Discover tools/plugins
+        // Discover tools/plugins (MCP servers + skills)
         result.tools = discover_tools();
 
         // Discover session history
-        result.sessions = discover_sessions();
+        result.sessions.items = discover_sessions();
 
-        // For semantic recon, use LLM to extract more info
+        // Optional: populate internal_tools via semantic enrichment
         if is_semantic {
-            // Request semantic parsing from service
-            // ...
+            // result.tools.internal_tools = ...;
         }
 
         Some(result)
@@ -904,8 +904,8 @@ pub mod exampleai;  // Add this line
 
 ### Recon
 
-- Start with static discovery
-- Add semantic recon for deeper analysis
+- Start with file-based discovery (the standard pipeline in `helpers.run_standard_recon`)
+- Use the shared parsers (`parse_mcp_from_json`, `parse_mcp_from_toml`) when possible
 - Cache results where appropriate
 
 ### Testing

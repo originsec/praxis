@@ -213,8 +213,8 @@ impl AcpNodeProxy {
                 recon.tools.mcp_servers.len()
                     + recon.tools.skills.len()
                     + recon.tools.internal_tools.len(),
-                recon.config.len(),
-                recon.sessions.len()
+                recon.config.items.len(),
+                recon.sessions.items.len()
             );
         }
     }

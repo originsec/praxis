@@ -5,7 +5,10 @@ pub use session::DummySession;
 
 use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
-use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconResult, ReconTools};
+use common::{
+    AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconResult, ReconSessions,
+    ReconTools,
+};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -216,45 +219,33 @@ impl AgentRecon for DummyAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!("Performing recon (is_semantic={})", is_semantic);
 
-        let mut tools = ReconTools::default();
+        let mut tools = ReconTools {
+            mcp_servers: self.get_demo_mcp_servers(),
+            skills: self.get_demo_skills(),
+            internal_tools: Vec::new(),
+        };
 
-        //
-        // MCP servers - always included.
-        //
-        tools.mcp_servers = self.get_demo_mcp_servers();
-
-        //
-        // Skills - always included (static discovery).
-        //
-        tools.skills = self.get_demo_skills();
-
-        //
-        // Internal tools - only with semantic recon.
-        //
         if is_semantic {
-            common::log_info!("Including internal tools in semantic recon");
             tools.internal_tools = self.get_demo_internal_tools();
         }
 
-        //
-        // Config - always included (contents fetched on-demand).
-        //
-        let config = self.get_demo_config();
+        let config = ReconConfig {
+            items: self.get_demo_config(),
+            project_paths: Vec::new(),
+        };
 
         common::log_info!(
             "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items",
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
-            config.len()
+            config.items.len()
         );
 
         Some(ReconResult {
             tools,
             config,
-            sessions: Vec::new(),
-            project_paths: Vec::new(),
-            metadata: None,
+            sessions: ReconSessions::default(),
         })
     }
 }

@@ -52,19 +52,13 @@ impl Agent for PraxisAgent {
 #[async_trait]
 impl AgentRecon for PraxisAgent {
     async fn perform_recon(&self, _is_semantic: bool) -> Option<ReconResult> {
-        let mut tools = ReconTools::default();
-        tools.internal_tools.push(AgentTool {
+        let mut result = ReconResult::default();
+        result.tools = ReconTools::default();
+        result.tools.internal_tools.push(AgentTool {
             name: "run_command".to_string(),
             description: "Execute a shell command on the target system".to_string(),
             context_path: None,
         });
-
-        Some(ReconResult {
-            tools,
-            config: Vec::new(),
-            sessions: Vec::new(),
-            project_paths: Vec::new(),
-            metadata: None,
-        })
+        Some(result)
     }
 }

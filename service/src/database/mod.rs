@@ -448,6 +448,33 @@ impl Database {
         //
         self.migrate_intercept_targets_to_toml().await;
 
+        //
+        // Migration: drop the recon-result columns that used to back the
+        // auto-discovered keys/secrets metadata and the standalone project
+        // paths list. Project paths are now nested inside config_json.
+        // is_semantic still exists — it gates internal_tools discovery.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN metadata_json")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN project_paths_json")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN IF EXISTS metadata_json")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query(
+                    "ALTER TABLE recon_results DROP COLUMN IF EXISTS project_paths_json",
+                )
+                .execute(pool)
+                .await;
+            }
+        }
+
         Ok(())
     }
 

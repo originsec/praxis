@@ -41,13 +41,13 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 
 fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
     let block = focused_titled_panel(
-        &format!(" Sessions ({}) ", result.sessions.len()),
+        &format!(" Sessions ({}) ", result.sessions.items.len()),
         !overlay.right_pane_focused,
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if result.sessions.is_empty() {
+    if result.sessions.items.is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(" No sessions discovered", Style::default().fg(DIM)))),
             inner,
@@ -64,7 +64,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, session) in result.sessions.iter().enumerate().skip(scroll_offset).take(visible_items) {
+    for (idx, session) in result.sessions.items.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Sessions && overlay.selected_left == idx;
         let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
@@ -112,7 +112,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
 
 fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
     let selected_idx = overlay.selected_left;
-    let Some(session) = result.sessions.get(selected_idx) else {
+    let Some(session) = result.sessions.items.get(selected_idx) else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(" Select a session", Style::default().fg(DIM)))),
             area,

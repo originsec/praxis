@@ -15,8 +15,8 @@ use crate::state::NodeRegistry;
 
 use super::tables::{
     VirtualTable, materialize_agent_logs, materialize_node_logs, materialize_recon_logs,
-    materialize_recon_metadata_logs, materialize_recon_session_logs,
-    materialize_recon_tool_logs, materialize_toolkit_actions_log, resolve_table,
+    materialize_recon_session_logs, materialize_recon_tool_logs, materialize_toolkit_actions_log,
+    resolve_table,
 };
 
 pub struct LogQueryResult {
@@ -61,7 +61,7 @@ pub async fn execute_log_query(
 
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!(
-            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, ReconMetadataLogs, EventLogs, ToolkitActionsLog, OperationLogs, ChainExecutionLogs",
+            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, EventLogs, ToolkitActionsLog, OperationLogs, ChainExecutionLogs",
             table_name
         ))?;
 
@@ -350,7 +350,6 @@ async fn materialize_table(
         VirtualTable::ReconLogs => materialize_recon_logs(database).await,
         VirtualTable::ReconToolLogs => materialize_recon_tool_logs(database).await,
         VirtualTable::ReconSessionLogs => materialize_recon_session_logs(database).await,
-        VirtualTable::ReconMetadataLogs => materialize_recon_metadata_logs(database).await,
         VirtualTable::ToolkitActionsLog => materialize_toolkit_actions_log(database).await,
         _ => Err(anyhow!("Table has no materializer")),
     }

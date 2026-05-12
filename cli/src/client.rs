@@ -302,7 +302,7 @@ impl Client {
                 ..
             } => {
                 if let Some(ref recon) = recon_result {
-                    state.cached_project_paths = recon.project_paths.clone();
+                    state.cached_project_paths = recon.config.project_paths.clone();
                     state.recon_cache.insert(
                         (node_id.clone(), agent_short_name.clone()),
                         recon.clone(),

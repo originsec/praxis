@@ -3,14 +3,7 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Codex CLI"
 local AGENT_SHORT_NAME = "codex"
 
-local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
-  if result.success then
-    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
-    return string.lower(result.stdout or ""):find("codex") ~= nil, version
-  end
-  return false, nil
-end
+local verify_binary = helpers.make_verify_version_flag({ name_match = "codex" })
 
 local function pick_path()
   return helpers.find_executable({
@@ -44,10 +37,6 @@ local function pick_path()
   })
 end
 
-local function has_auth_env_vars(homes)
-  return helpers.has_any_env_var({ "OPENAI_API_KEY" }, homes)
-end
-
 local function has_auth_in_auth_json(path)
   local content = praxis.read_file(path)
   if not content then
@@ -57,27 +46,11 @@ local function has_auth_in_auth_json(path)
   return parsed ~= nil and parsed.auth_mode ~= nil
 end
 
-local function path_has_valid_auth(path, user_homes)
-  if has_auth_env_vars({}) then
-    return true
-  end
-
-  local auth_json = praxis.path_join({ path, ".codex", "auth.json" })
-  if has_auth_in_auth_json(auth_json) then
-    return true
-  end
-
-  for _, home in ipairs(user_homes or {}) do
-    if helpers.starts_with(path, home) then
-      local home_auth = praxis.path_join({ home, ".codex", "auth.json" })
-      if has_auth_in_auth_json(home_auth) then
-        return true
-      end
-    end
-  end
-
-  return false
-end
+local auth_check = helpers.auth_via_env_or_files({
+  env_vars = { "OPENAI_API_KEY" },
+  auth_files = { ".codex/auth.json" },
+  file_check = has_auth_in_auth_json,
+})
 
 --
 -- Extract project paths from config.toml [projects."<path>"] sections.
@@ -105,196 +78,148 @@ local function extract_project_paths_from_config(home)
 end
 
 --
--- Discover sessions from ~/.codex/sessions/ and ~/.codex/archived_sessions/.
+-- Codex session files are JSONL with rich per-line metadata. We parse the
+-- file to pull out the canonical session_id, count only response_item lines,
+-- and capture the most recent timestamp. Falls back to filename-derived
+-- defaults if parsing yields nothing.
 --
 
-local function discover_sessions_in_dir(home, dir)
-  local sessions = {}
-  if not praxis.path_is_dir(dir) then
-    return sessions
+local function parse_codex_session(file_path)
+  local content = praxis.read_file(file_path)
+  if not content then
+    return {}
   end
 
-  local context_path = home
-  local files = praxis.walk_files(dir, 5) or {}
+  local session_id = nil
+  local message_count = 0
+  local last_timestamp = nil
 
-  for _, file_path in ipairs(files) do
-    if not helpers.ends_with(file_path, ".jsonl") then
-      goto continue
-    end
-
-    local content = praxis.read_file(file_path)
-    if not content then
-      goto continue
-    end
-
-    local session_id = nil
-    local message_count = 0
-    local last_timestamp = nil
-
-    for line in content:gmatch("[^\n]+") do
-      if line:match("^%s*$") then
-        goto next_line
-      end
-
+  for line in content:gmatch("[^\n]+") do
+    if not line:match("^%s*$") then
       local parsed = helpers.parse_json(line)
-      if not parsed then
-        goto next_line
-      end
-
-      if session_id == nil then
-        if parsed.type == "session_meta" and type(parsed.payload) == "table" then
-          session_id = parsed.payload.id
-        elseif type(parsed.session_id) == "string" then
-          session_id = parsed.session_id
+      if parsed then
+        if session_id == nil then
+          if parsed.type == "session_meta" and type(parsed.payload) == "table" then
+            session_id = parsed.payload.id
+          elseif type(parsed.session_id) == "string" then
+            session_id = parsed.session_id
+          end
+        end
+        if parsed.type == "response_item" then
+          message_count = message_count + 1
+        end
+        if type(parsed.timestamp) == "string" and parsed.timestamp ~= "" then
+          last_timestamp = parsed.timestamp
         end
       end
-
-      if parsed.type == "response_item" then
-        message_count = message_count + 1
-      end
-
-      if type(parsed.timestamp) == "string" and parsed.timestamp ~= "" then
-        last_timestamp = parsed.timestamp
-      end
-
-      ::next_line::
     end
-
-    table.insert(sessions, {
-      session_id = session_id or "unknown",
-      context_path = context_path,
-      session_file = file_path,
-      last_modified = last_timestamp or "",
-      message_count = message_count,
-      content = nil,
-    })
-
-    ::continue::
   end
 
-  return sessions
+  return {
+    session_id = session_id,
+    message_count = message_count,
+    last_modified = last_timestamp,
+  }
 end
 
 local function discover_sessions_for_home(home)
   local sessions = {}
-  local codex_dir = praxis.path_join({ home, ".codex" })
 
-  local s1 = discover_sessions_in_dir(home, praxis.path_join({ codex_dir, "sessions" }))
-  for _, s in ipairs(s1) do table.insert(sessions, s) end
+  local function append(opts)
+    local discovered = helpers.discover_jsonl_sessions(home, opts)
+    for _, s in ipairs(discovered) do
+      table.insert(sessions, s)
+    end
+  end
 
-  local s2 = discover_sessions_in_dir(home, praxis.path_join({ codex_dir, "archived_sessions" }))
-  for _, s in ipairs(s2) do table.insert(sessions, s) end
+  append({
+    sessions_relpath = ".codex/sessions",
+    context_path = function(h, _name) return h end,
+    parse_session = parse_codex_session,
+  })
+  append({
+    sessions_relpath = ".codex/archived_sessions",
+    context_path = function(h, _name) return h end,
+    parse_session = parse_codex_session,
+  })
 
   return sessions
 end
 
-local function run_create_session(ctx)
-  local working_dir = ctx.working_dir
-  if type(working_dir) ~= "string" or working_dir == "" then
-    local homes = helpers.user_homes_with_dir(".codex")
-    working_dir = homes[1]
-  end
+local session_fns = helpers.subprocess_session({
+  home_dir = ".codex",
+  error_label = "Codex command failed",
+  initial_state = function(_ctx)
+    return { has_first_prompt = false }
+  end,
+  on_response = function(state, _prompt, _stdout)
+    state.has_first_prompt = true
+  end,
+  build_invocation = function(state, prompt)
+    local args = {}
+    local is_resume = state.has_first_prompt
 
-  return {
-    handle = praxis.uuid_v4(),
-    process_path = ctx.process_path,
-    working_dir = working_dir,
-    yolo_mode = ctx.yolo_mode == true,
-    prompt_timeout_secs = ctx.prompt_timeout_secs,
-    has_first_prompt = false,
-  }
-end
+    if is_resume then
+      table.insert(args, "exec")
+      table.insert(args, "resume")
+      table.insert(args, "--last")
+    else
+      table.insert(args, "exec")
+    end
 
-local function run_session_transact(state, prompt)
-  local args = {}
-
-  local is_resume = state.has_first_prompt
-  if is_resume then
-    table.insert(args, "exec")
-    table.insert(args, "resume")
-    table.insert(args, "--last")
-  else
-    table.insert(args, "exec")
-  end
-
-  --
-  -- Common flags.
-  --
-
-  table.insert(args, "--config")
-  table.insert(args, "history.persistence=none")
-  table.insert(args, "--config")
-  table.insert(args, "network_access=true")
-  table.insert(args, "--skip-git-repo-check")
-
-  if state.yolo_mode then
-    table.insert(args, "--dangerously-bypass-approvals-and-sandbox")
-  end
-
-  --
-  -- Flags only for first exec (not resume).
-  --
-
-  if not is_resume then
-    table.insert(args, "--color")
-    table.insert(args, "never")
+    table.insert(args, "--config")
+    table.insert(args, "history.persistence=none")
+    table.insert(args, "--config")
+    table.insert(args, "network_access=true")
+    table.insert(args, "--skip-git-repo-check")
 
     if state.yolo_mode then
-      if praxis.os_name() == "windows" then
-        table.insert(args, "--add-dir")
-        table.insert(args, "C:\\")
-      else
-        table.insert(args, "--add-dir")
-        table.insert(args, "/")
+      table.insert(args, "--dangerously-bypass-approvals-and-sandbox")
+    end
+
+    if not is_resume then
+      table.insert(args, "--color")
+      table.insert(args, "never")
+
+      if state.yolo_mode then
+        if praxis.os_name() == "windows" then
+          table.insert(args, "--add-dir")
+          table.insert(args, "C:\\")
+        else
+          table.insert(args, "--add-dir")
+          table.insert(args, "/")
+        end
+      end
+
+      if type(state.working_dir) == "string" and state.working_dir ~= "" then
+        table.insert(args, "--cd")
+        table.insert(args, state.working_dir)
       end
     end
 
-    local wd = state.working_dir
-    if type(wd) == "string" and wd ~= "" then
-      table.insert(args, "--cd")
-      table.insert(args, wd)
-    end
-  end
+    table.insert(args, "-")
 
-  --
-  -- Use "-" to read prompt from stdin.
-  --
-
-  table.insert(args, "-")
-
-  local wd = state.working_dir
-  local spec = {
-    program = state.process_path,
-    args = args,
-    stdin = prompt,
-    timeout_secs = state.prompt_timeout_secs or 1800,
-  }
-  if type(wd) == "string" and wd ~= "" then
-    spec.cwd = wd
-  end
-
-  local result = praxis.command_run_handle(spec, state.handle)
-  if not result.success then
-    error("Codex command failed: " .. tostring(result.stderr or "unknown error"))
-  end
-
-  if not is_resume then
-    state.has_first_prompt = true
-  end
-
-  return {
-    response = result.stdout or "",
-    state = state,
-  }
-end
-
-local function run_session_close(state)
-  -- Codex sessions don't need explicit cleanup
-end
+    return { args = args, stdin = prompt }
+  end,
+})
 
 --
 -- Discover Codex prompts (~/.codex/prompts/*.md) as slash-command skills.
 -- Codex has no project-local prompt directory.
+--
+
+local function discover_skills(home, _project_paths)
+  local home_codex = praxis.path_join({ home, ".codex" })
+  return helpers.discover_command_skills(home_codex, {
+    dir = "prompts",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })
+end
+
+--
+-- Discover Codex prompts (~/.codex/prompts/*.md) as slash-command skills.
 --
 
 local function discover_skills(home, _project_paths)
@@ -327,15 +252,10 @@ local recon_config = {
     default = helpers.parse_mcp_from_toml,
   },
 
-  auth_check = path_has_valid_auth,
+  auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
   skill_discovery = discover_skills,
-
-  session_fns = {
-    create = run_create_session,
-    transact = run_session_transact,
-    close = run_session_close,
-  },
+  session_fns = session_fns,
 }
 
 return {
@@ -356,14 +276,14 @@ return {
   end,
 
   create_session = function(ctx)
-    return run_create_session(ctx)
+    return session_fns.create(ctx)
   end,
 
   session_transact = function(_ctx, state, prompt)
-    return run_session_transact(state, prompt)
+    return session_fns.transact(state, prompt)
   end,
 
   session_close = function(_ctx, state)
-    run_session_close(state)
+    session_fns.close(state)
   end,
 }

@@ -3,14 +3,7 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Cursor Agent"
 local AGENT_SHORT_NAME = "cursor"
 
-local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
-  if result.success then
-    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
-    return true, version
-  end
-  return false, nil
-end
+local verify_binary = helpers.make_verify_version_flag({})
 
 local function pick_path()
   return helpers.find_executable({

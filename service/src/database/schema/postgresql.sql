@@ -179,8 +179,6 @@ CREATE TABLE IF NOT EXISTS recon_results (
     tools_json TEXT NOT NULL,
     config_json TEXT NOT NULL,
     sessions_json TEXT NOT NULL,
-    project_paths_json TEXT NOT NULL,
-    metadata_json TEXT,
     performed_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     CONSTRAINT idx_recon_unique_agent UNIQUE (node_id, agent_short_name)

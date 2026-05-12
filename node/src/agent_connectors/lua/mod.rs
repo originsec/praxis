@@ -258,11 +258,7 @@ impl AgentRecon for LuaAgent {
                     return None;
                 }
             };
-            Some(runtime::vm_recon(
-                &lua,
-                is_semantic,
-                process_path.as_deref(),
-            ))
+            Some(runtime::vm_recon(&lua, is_semantic, process_path.as_deref()))
         })
         .await
         {

@@ -36,24 +36,18 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 
     render_left_pane(f, left, overlay, result);
     render_right_pane(f, right, overlay, result);
-
-    if let Some(ref metadata) = result.metadata {
-        if !metadata.is_empty() {
-            render_metadata_line(f, area, metadata);
-        }
-    }
 }
 
 fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
     let block = focused_titled_panel(
-        &format!(" Config Files ({}) ", result.config.len()),
+        &format!(" Config Files ({}) ", result.config.items.len()),
         !overlay.right_pane_focused,
     );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if result.config.is_empty() {
+    if result.config.items.is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(" No config files", Style::default().fg(DIM)))),
             inner,
@@ -69,7 +63,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, item) in result.config.iter().enumerate().skip(scroll_offset).take(visible_items) {
+    for (idx, item) in result.config.items.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Config && overlay.selected_left == idx;
         let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
@@ -109,7 +103,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
 
 fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
     let selected_idx = overlay.selected_left;
-    let Some(item) = result.config.get(selected_idx) else {
+    let Some(item) = result.config.items.get(selected_idx) else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(" Select a file", Style::default().fg(DIM)))),
             area,
@@ -159,43 +153,3 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
     }
 }
 
-fn render_metadata_line(f: &mut Frame, area: Rect, metadata: &common::ReconMetadata) {
-    let mut spans: Vec<Span> = Vec::new();
-
-    if let Some(ref ids) = metadata.user_identities {
-        if !ids.is_empty() {
-            spans.push(Span::styled("Identities: ", Style::default().fg(MUTED)));
-            for (i, id) in ids.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled(", ", Style::default().fg(DIM)));
-                }
-                spans.push(Span::styled(id.clone(), Style::default().fg(ACCENT)));
-            }
-        }
-    }
-
-    if let Some(ref keys) = metadata.api_keys {
-        if !keys.is_empty() {
-            if !spans.is_empty() {
-                spans.push(Span::styled("  |  ", Style::default().fg(DIM)));
-            }
-            spans.push(Span::styled("API Keys: ", Style::default().fg(MUTED)));
-            for (i, key) in keys.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled(", ", Style::default().fg(DIM)));
-                }
-                let masked = if key.len() > 12 {
-                    format!("{}...", &key[..12])
-                } else {
-                    key.clone()
-                };
-                spans.push(Span::styled(masked, Style::default().fg(STATUS_FAIL)));
-            }
-        }
-    }
-
-    if !spans.is_empty() {
-        let line = Line::from(spans);
-        f.render_widget(Paragraph::new(line), area);
-    }
-}

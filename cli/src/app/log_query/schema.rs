@@ -81,18 +81,6 @@ pub const TABLES: &[TableInfo] = &[
         ],
     },
     TableInfo {
-        name: "ReconMetadataLogs",
-        description: "User identities and API keys from recon",
-        source: "DB",
-        columns: &[
-            ColumnInfo { name: "timestamp", description: "Recon time" },
-            ColumnInfo { name: "node_id", description: "Node identifier" },
-            ColumnInfo { name: "agent_short_name", description: "Agent short name" },
-            ColumnInfo { name: "entry_type", description: "Entry kind" },
-            ColumnInfo { name: "value", description: "Entry value" },
-        ],
-    },
-    TableInfo {
         name: "ReconSessionLogs",
         description: "Session data discovered in recon",
         source: "DB",

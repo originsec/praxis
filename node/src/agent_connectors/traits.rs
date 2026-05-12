@@ -74,18 +74,14 @@ pub trait AgentSession: Send + Sync {
 }
 
 //
-// Trait for agents that support reconnaissance.
-// Implement this trait to enable discovery of tools, config, sessions, and project paths.
+// Trait for agents that support reconnaissance. Implementations discover
+// configuration (files + project paths), tools (MCP servers, skills, and —
+// when `is_semantic` is true — internal/built-in tools), and stored
+// sessions for the agent.
 //
 
 #[async_trait]
 pub trait AgentRecon: Send + Sync {
-    //
-    // Perform reconnaissance on the agent to discover tools, config, sessions, and project paths.
-    // - is_semantic=false: Static discovery (MCP servers, skills, config, sessions, project_paths)
-    // - is_semantic=true: Also includes internal tools via semantic parsing
-    //
-
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
 }
 

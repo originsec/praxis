@@ -779,7 +779,7 @@ impl App {
             } => {
                 if let Some(ref mut recon) = self.nodes.recon {
                     if let Some(ref mut result) = recon.recon_result {
-                        if let Some(ref mut item) = result.config.get_mut(target_idx) {
+                        if let Some(ref mut item) = result.config.items.get_mut(target_idx) {
                             item.contents = content.clone();
                         }
                     }
@@ -799,7 +799,9 @@ impl App {
             } => {
                 if let Some(ref mut recon) = self.nodes.recon {
                     if let Some(ref mut result) = recon.recon_result {
-                        if let Some(ref mut session) = result.sessions.get_mut(target_idx) {
+                        if let Some(ref mut session) =
+                            result.sessions.items.get_mut(target_idx)
+                        {
                             session.content = content.clone();
                         }
                     }
@@ -1315,12 +1317,12 @@ impl App {
             ReconTab::Config => recon
                 .recon_result
                 .as_ref()
-                .map_or(0, |r| r.config.len().saturating_sub(1)),
+                .map_or(0, |r| r.config.items.len().saturating_sub(1)),
             ReconTab::Tools => 2,
             ReconTab::Sessions => recon
                 .recon_result
                 .as_ref()
-                .map_or(0, |r| r.sessions.len().saturating_sub(1)),
+                .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
         };
 
         match key.code {
@@ -1451,6 +1453,7 @@ impl App {
                 let needs_fetch = if let Some(ref result) = recon.recon_result {
                     result
                         .config
+                        .items
                         .get(selected)
                         .map_or(false, |item| item.contents.is_none())
                 } else {
@@ -1463,7 +1466,11 @@ impl App {
                 }
 
                 let path = if let Some(ref result) = recon.recon_result {
-                    result.config.get(selected).map(|item| item.path.clone())
+                    result
+                        .config
+                        .items
+                        .get(selected)
+                        .map(|item| item.path.clone())
                 } else {
                     None
                 };
@@ -1518,6 +1525,7 @@ impl App {
                 let needs_fetch = if let Some(ref result) = recon.recon_result {
                     result
                         .sessions
+                        .items
                         .get(selected)
                         .map_or(false, |s| s.content.is_none())
                 } else {
@@ -1532,6 +1540,7 @@ impl App {
                 let path = if let Some(ref result) = recon.recon_result {
                     result
                         .sessions
+                        .items
                         .get(selected)
                         .map(|s| s.session_file.clone())
                 } else {
@@ -1642,12 +1651,12 @@ impl App {
                     ReconTab::Config => recon
                         .recon_result
                         .as_ref()
-                        .map_or(0, |r| r.config.len().saturating_sub(1)),
+                        .map_or(0, |r| r.config.items.len().saturating_sub(1)),
                     ReconTab::Tools => 2,
                     ReconTab::Sessions => recon
                         .recon_result
                         .as_ref()
-                        .map_or(0, |r| r.sessions.len().saturating_sub(1)),
+                        .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
                 };
                 if recon.right_pane_focused {
                     recon.selected_right_scroll += 3;

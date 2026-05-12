@@ -70,7 +70,7 @@ attribution.
 
 ## Feature Support
 
-Not all agents support all features. The core capabilities - fingerprinting, traffic interception, static recon, semantic recon, and sessions - are supported by most connectors. However, some features depend on how the agent works:
+Not all agents support all features. The core capabilities — fingerprinting, traffic interception, recon (config/tools/sessions discovery, with optional semantic enrichment of internal tools), and sessions — are supported by most connectors. However, some features depend on how the agent works:
 
 **Config editing** requires the agent to have a file-based configuration that can be modified. CLI agents typically store settings in JSON files that can be edited directly. Browser-based agents often don't expose their configuration in an editable format.
 

@@ -165,7 +165,7 @@ impl ToolkitManager {
             out.push(ToolkitReconTarget {
                 node_id: t.node_id,
                 agent_short_name: t.agent_short_name,
-                sessions: result.sessions,
+                sessions: result.sessions.items,
             });
         }
 

@@ -275,9 +275,9 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "mcp_servers": recon.tools.mcp_servers.len(),
             "mcp_tools": mcp_tools_count,
             "skills": recon.tools.skills.len(),
-            "config_items": recon.config.len(),
-            "sessions": recon.sessions.len(),
-            "project_paths": recon.project_paths.len()
+            "config_items": recon.config.items.len(),
+            "sessions": recon.sessions.items.len(),
+            "project_paths": recon.config.project_paths.len()
         }))
     }
 
@@ -307,9 +307,9 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "mcp_tools": mcp_tools_count,
             "skills": recon.tools.skills.len(),
             "internal_tools": recon.tools.internal_tools.len(),
-            "config_items": recon.config.len(),
-            "sessions": recon.sessions.len(),
-            "project_paths": recon.project_paths.len()
+            "config_items": recon.config.items.len(),
+            "sessions": recon.sessions.items.len(),
+            "project_paths": recon.config.project_paths.len()
         }))
     }
 

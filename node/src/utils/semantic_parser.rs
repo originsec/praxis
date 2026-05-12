@@ -66,8 +66,6 @@ pub fn build_servers_and_tools_prompt(text: &str) -> String {
 //
 
 /// JSON schema for internal/built-in tools discovery via semantic parser.
-/// This schema extracts agent internal tools (like ReadFile, WriteFile,
-/// GrepFiles, etc).
 pub const INTERNAL_TOOLS_SCHEMA: &str = r#"{
     "type": "object",
     "properties": {
@@ -94,7 +92,6 @@ DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are
 Tools could also appear in all sorts of formats - plain text, json, xml, etc.";
 
 /// Parse JSON response from semantic parser into a Vec of AgentTool for internal tools.
-/// Returns None if parsing fails.
 pub fn parse_internal_tools_from_json(json: &str) -> Option<Vec<AgentTool>> {
     let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
     let tools = parsed.get("internal_tools")?.as_array()?;
@@ -210,71 +207,6 @@ pub fn parse_servers_and_tools_from_json(json: &str) -> Option<Vec<McpServer>> {
         .collect();
 
     Some(mcp_servers)
-}
-
-//
-// Metadata Extraction Utilities.
-//
-
-/// JSON schema for extracting metadata (user identities and API keys) from config files.
-pub const METADATA_EXTRACTION_SCHEMA: &str = r#"{
-    "type": "object",
-    "properties": {
-        "user_identities": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "User identities found (emails, usernames, account IDs, organization names)"
-        },
-        "api_keys": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "API keys found (partial or full keys, tokens, secrets)"
-        }
-    }
-}"#;
-
-/// Discovery prompt for extracting metadata from configuration files.
-pub const METADATA_EXTRACTION_PROMPT: &str = "Analyze the following configuration file contents and extract:\n\
-1. User identities: Any emails (look for email structure), usernames (identify via field names)\n\
-2. API keys: Any API keys, tokens, secrets, or credentials - identify by field names\n\n\
-Only extract values that actually exist in the text. Do not guess or fabricate any information.";
-
-/// Parsed metadata from semantic parser response
-#[derive(Debug, Default)]
-pub struct ExtractedMetadata {
-    pub user_identities: Vec<String>,
-    pub api_keys: Vec<String>,
-}
-
-/// Parse JSON response from semantic parser into ExtractedMetadata.
-/// Returns None if parsing fails.
-pub fn parse_metadata_from_json(json: &str) -> Option<ExtractedMetadata> {
-    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
-
-    let user_identities = parsed
-        .get("user_identities")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let api_keys = parsed
-        .get("api_keys")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Some(ExtractedMetadata {
-        user_identities,
-        api_keys,
-    })
 }
 
 //
