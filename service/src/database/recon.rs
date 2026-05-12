@@ -6,7 +6,7 @@ use sqlx::Row;
 use super::{Database, DatabasePool};
 
 //
-// Stored recon result.
+// Stored recon result with metadata.
 //
 
 #[derive(Debug, Clone)]
@@ -17,6 +17,7 @@ pub struct StoredReconResult {
     pub node_id: String,
     #[allow(dead_code)]
     pub agent_short_name: String,
+    pub is_semantic: bool,
     pub recon_result: ReconResult,
     pub performed_at: String,
     #[allow(dead_code)]
@@ -24,16 +25,12 @@ pub struct StoredReconResult {
 }
 
 impl Database {
-    //
-    // Store or update recon result for a node+agent.
-    // Uses ON CONFLICT to update existing record.
-    //
-
     pub async fn upsert_recon_result(
         &self,
         node_id: &str,
         agent_short_name: &str,
         recon_result: &ReconResult,
+        is_semantic: bool,
     ) -> Result<()> {
         let id = format!("{}:{}", node_id, agent_short_name);
         let now = Utc::now().to_rfc3339();
@@ -43,15 +40,16 @@ impl Database {
         let sessions_json = serde_json::to_string(&recon_result.sessions).unwrap_or_default();
 
         let sql = "INSERT INTO recon_results (
-                id, node_id, agent_short_name,
+                id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json,
                 performed_at, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT(id) DO UPDATE SET
-                tools_json = $4,
-                config_json = $5,
-                sessions_json = $6,
-                performed_at = $7";
+                is_semantic = $4,
+                tools_json = $5,
+                config_json = $6,
+                sessions_json = $7,
+                performed_at = $8";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -59,6 +57,7 @@ impl Database {
                     .bind(&id)
                     .bind(node_id)
                     .bind(agent_short_name)
+                    .bind(is_semantic as i32)
                     .bind(&tools_json)
                     .bind(&config_json)
                     .bind(&sessions_json)
@@ -72,6 +71,7 @@ impl Database {
                     .bind(&id)
                     .bind(node_id)
                     .bind(agent_short_name)
+                    .bind(if is_semantic { 1i16 } else { 0i16 })
                     .bind(&tools_json)
                     .bind(&config_json)
                     .bind(&sessions_json)
@@ -85,16 +85,12 @@ impl Database {
         Ok(())
     }
 
-    //
-    // Get the latest recon result for a node+agent.
-    //
-
     pub async fn get_recon_result(
         &self,
         node_id: &str,
         agent_short_name: &str,
     ) -> Result<Option<StoredReconResult>> {
-        let sql = "SELECT id, node_id, agent_short_name,
+        let sql = "SELECT id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json,
                 performed_at, created_at
              FROM recon_results
@@ -120,13 +116,9 @@ impl Database {
         }
     }
 
-    //
-    // Get all recon results for a node.
-    //
-
     #[allow(dead_code)]
     pub async fn get_recon_results_for_node(&self, node_id: &str) -> Result<Vec<StoredReconResult>> {
-        let sql = "SELECT id, node_id, agent_short_name,
+        let sql = "SELECT id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json,
                 performed_at, created_at
              FROM recon_results
@@ -145,12 +137,8 @@ impl Database {
         }
     }
 
-    //
-    // List all recon results across all nodes and agents.
-    //
-
     pub async fn list_all_recon_results(&self) -> Result<Vec<StoredReconResult>> {
-        let sql = "SELECT id, node_id, agent_short_name,
+        let sql = "SELECT id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json,
                 performed_at, created_at
              FROM recon_results
@@ -167,10 +155,6 @@ impl Database {
             }
         }
     }
-
-    //
-    // Delete recon result for a node+agent.
-    //
 
     #[allow(dead_code)]
     pub async fn delete_recon_result(&self, node_id: &str, agent_short_name: &str) -> Result<()> {
@@ -197,24 +181,22 @@ impl Database {
     }
 }
 
-//
-// Helper functions for parsing rows.
-//
-
 fn parse_recon_row_sqlite(row: sqlx::sqlite::SqliteRow) -> Result<StoredReconResult> {
     let id: String = row.get(0);
     let node_id: String = row.get(1);
     let agent_short_name: String = row.get(2);
-    let tools_json: String = row.get(3);
-    let config_json: String = row.get(4);
-    let sessions_json: String = row.get(5);
-    let performed_at: String = row.get(6);
-    let created_at: String = row.get(7);
+    let is_semantic: i32 = row.get(3);
+    let tools_json: String = row.get(4);
+    let config_json: String = row.get(5);
+    let sessions_json: String = row.get(6);
+    let performed_at: String = row.get(7);
+    let created_at: String = row.get(8);
 
     Ok(StoredReconResult {
         id,
         node_id,
         agent_short_name,
+        is_semantic: is_semantic != 0,
         recon_result: parse_recon_result(&tools_json, &config_json, &sessions_json),
         performed_at,
         created_at,
@@ -225,16 +207,18 @@ fn parse_recon_row_postgres(row: sqlx::postgres::PgRow) -> Result<StoredReconRes
     let id: String = row.get(0);
     let node_id: String = row.get(1);
     let agent_short_name: String = row.get(2);
-    let tools_json: String = row.get(3);
-    let config_json: String = row.get(4);
-    let sessions_json: String = row.get(5);
-    let performed_at: String = row.get(6);
-    let created_at: String = row.get(7);
+    let is_semantic: i16 = row.get(3);
+    let tools_json: String = row.get(4);
+    let config_json: String = row.get(5);
+    let sessions_json: String = row.get(6);
+    let performed_at: String = row.get(7);
+    let created_at: String = row.get(8);
 
     Ok(StoredReconResult {
         id,
         node_id,
         agent_short_name,
+        is_semantic: is_semantic != 0,
         recon_result: parse_recon_result(&tools_json, &config_json, &sessions_json),
         performed_at,
         created_at,

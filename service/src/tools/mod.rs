@@ -158,7 +158,7 @@ impl ToolkitManager {
                 t.agent_short_name
             );
             let result = self
-                .acp_recon(&t.node_id, &t.agent_short_name)
+                .acp_recon(&t.node_id, &t.agent_short_name, false)
                 .await
                 .map_err(|e| anyhow!("Recon failed on node {}: {}", t.node_id, e))?;
 
@@ -384,9 +384,11 @@ impl ToolkitManager {
         &self,
         node_id: &str,
         agent_short_name: &str,
+        is_semantic: bool,
     ) -> Result<ReconResult> {
         let params = json!({
             "agent_short_name": agent_short_name,
+            "is_semantic": is_semantic,
             "_meta": { "praxis": { "nodeId": node_id } },
         });
         let result = self

@@ -245,7 +245,7 @@ impl Agent for LuaAgent {
 
 #[async_trait]
 impl AgentRecon for LuaAgent {
-    async fn perform_recon(&self) -> Option<ReconResult> {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         let vm = Arc::clone(&self.vm);
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         let short_name = self.short_name.clone();
@@ -258,7 +258,7 @@ impl AgentRecon for LuaAgent {
                     return None;
                 }
             };
-            Some(runtime::vm_recon(&lua, process_path.as_deref()))
+            Some(runtime::vm_recon(&lua, is_semantic, process_path.as_deref()))
         })
         .await
         {

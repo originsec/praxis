@@ -401,11 +401,15 @@ pub struct ReconTools {
     /// Skills (slash commands like /commit, /review).
     #[serde(default)]
     pub skills: Vec<AgentTool>,
+    /// Internal/built-in tools (e.g. ReadFile, WriteFile, GrepFile).
+    /// Populated only when recon runs in semantic mode.
+    #[serde(default)]
+    pub internal_tools: Vec<AgentTool>,
 }
 
 impl ReconTools {
     pub fn is_empty(&self) -> bool {
-        self.mcp_servers.is_empty() && self.skills.is_empty()
+        self.mcp_servers.is_empty() && self.skills.is_empty() && self.internal_tools.is_empty()
     }
 
     /// Total number of MCP tools across all servers.
@@ -2304,6 +2308,8 @@ pub enum ClientDirectMessage {
         recon_result: Option<ReconResult>,
         /// When the recon was performed (ISO 8601)
         performed_at: Option<String>,
+        /// Whether this was a semantic recon
+        is_semantic: Option<bool>,
     },
 
     //

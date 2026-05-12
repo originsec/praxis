@@ -131,7 +131,8 @@ local recon_config = {
 
 Key points:
 - `recon` receives a context object: `recon = function(ctx) ... end`
-- The result must be shaped as `{ config = { items, project_paths }, tools = { mcp_servers, skills }, sessions = { items } }`. `helpers.run_standard_recon` handles this for the standard pipeline
+- The result must be shaped as `{ config = { items, project_paths }, tools = { mcp_servers, skills, internal_tools }, sessions = { items } }`. `helpers.run_standard_recon` handles this for the standard pipeline
+- Semantic recon (driven by `ctx.is_semantic`) populates `tools.internal_tools` by interrogating the agent through `config.session_fns`
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 - **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
 
@@ -424,14 +425,22 @@ local function run_session_close(state)
   end
 end
 
-local function do_recon(_ctx)
+local function do_recon(ctx)
   if praxis.os_name() ~= "windows" then
     return nil
   end
 
+  local internal_tools = {}
+  if ctx.is_semantic == true then
+    internal_tools = helpers.discover_internal_tools(
+      { process_path = ctx.process_path, working_dir = nil },
+      { create = run_create_session, transact = run_session_transact, close = run_session_close }
+    )
+  end
+
   return {
     config = { items = {}, project_paths = {} },
-    tools = { mcp_servers = {}, skills = {} },
+    tools = { mcp_servers = {}, skills = {}, internal_tools = internal_tools },
     sessions = { items = {} },
   }
 end
@@ -709,7 +718,7 @@ use common::ReconResult;
 
 #[async_trait]
 impl AgentRecon for ExampleAIAgent {
-    async fn perform_recon(&self) -> Option<ReconResult> {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         let mut result = ReconResult::default();
 
         // Discover configuration files
@@ -722,6 +731,11 @@ impl AgentRecon for ExampleAIAgent {
 
         // Discover session history
         result.sessions.items = discover_sessions();
+
+        // Optional: populate internal_tools via semantic enrichment
+        if is_semantic {
+            // result.tools.internal_tools = ...;
+        }
 
         Some(result)
     }

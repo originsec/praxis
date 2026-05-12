@@ -73,7 +73,8 @@ The MCP server exposes the following tools:
 
 All recon tools take a `node` prefix and an `agent` short-name.
 
-- `recon_run` — Run reconnaissance (`node`, `agent`)
+- `recon_run` — Run static reconnaissance (`node`, `agent`)
+- `recon_run_semantic` — Run semantic reconnaissance, includes internal tools (`node`, `agent`)
 - `recon_list` — List stored recon data (`node`, `agent`, `section` = all/sessions/tools/projects/configs)
 - `recon_config_read` — Read config file content discovered by recon (`node`, `agent`, optional `path`)
 - `recon_session_read` — Read session file content (`node`, `agent`, optional `path`)

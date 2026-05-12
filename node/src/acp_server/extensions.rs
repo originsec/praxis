@@ -28,6 +28,8 @@ pub use common::acp_ext::{
 #[derive(Debug, Deserialize)]
 struct ReconParams {
     agent_short_name: String,
+    #[serde(default)]
+    is_semantic: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,7 +162,7 @@ async fn handle_recon(
         )));
     };
 
-    match recon.perform_recon().await {
+    match recon.perform_recon(params.is_semantic).await {
         Some(r) => Ok(ext_ok(&r)),
         None => Ok(ext_err("Recon produced no result (VM busy or failed)")),
     }

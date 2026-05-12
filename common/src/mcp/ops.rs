@@ -363,6 +363,7 @@ pub struct ReconListResult {
     pub projects: Option<Vec<String>>,
     pub mcp_servers: Option<Vec<McpServer>>,
     pub skills: Option<Vec<AgentTool>>,
+    pub internal_tools: Option<Vec<AgentTool>>,
     pub configs: Option<Vec<ConfigItem>>,
 }
 
@@ -399,6 +400,11 @@ pub async fn recon_list(
         },
         skills: if show_all || section == Some("tools") {
             Some(recon.tools.skills)
+        } else {
+            None
+        },
+        internal_tools: if show_all || section == Some("tools") {
+            Some(recon.tools.internal_tools)
         } else {
             None
         },

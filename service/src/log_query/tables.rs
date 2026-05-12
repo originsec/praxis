@@ -73,8 +73,8 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "timestamp", "node_id", "agent_short_name", "agent_name", "version",
         ],
         VirtualTable::ReconLogs => vec![
-            "timestamp", "node_id", "agent_short_name",
-            "mcp_server_count", "skill_count",
+            "timestamp", "node_id", "agent_short_name", "is_semantic",
+            "mcp_server_count", "skill_count", "internal_tool_count",
             "config_count", "session_count", "project_path_count",
         ],
         VirtualTable::ReconToolLogs => vec![
@@ -199,8 +199,10 @@ pub async fn materialize_recon_logs(
                 Value::String(r.performed_at.clone()),
                 Value::String(r.node_id.clone()),
                 Value::String(r.agent_short_name.clone()),
+                Value::Bool(r.is_semantic),
                 Value::Number(r.recon_result.tools.mcp_servers.len().into()),
                 Value::Number(r.recon_result.tools.skills.len().into()),
+                Value::Number(r.recon_result.tools.internal_tools.len().into()),
                 Value::Number(r.recon_result.config.items.len().into()),
                 Value::Number(r.recon_result.sessions.items.len().into()),
                 Value::Number(r.recon_result.config.project_paths.len().into()),
@@ -243,6 +245,18 @@ pub async fn materialize_recon_tool_logs(
                 Value::String(r.node_id.clone()),
                 Value::String(r.agent_short_name.clone()),
                 Value::String("skill".to_string()),
+                Value::Null,
+                Value::String(tool.name.clone()),
+                Value::String(tool.description.clone()),
+                Value::Null,
+            ]);
+        }
+        for tool in &r.recon_result.tools.internal_tools {
+            rows.push(vec![
+                Value::String(r.performed_at.clone()),
+                Value::String(r.node_id.clone()),
+                Value::String(r.agent_short_name.clone()),
+                Value::String("internal".to_string()),
                 Value::Null,
                 Value::String(tool.name.clone()),
                 Value::String(tool.description.clone()),

@@ -115,6 +115,7 @@ pub struct ReconOverlay {
     pub agent_short_name: String,
     pub recon_result: Option<common::ReconResult>,
     pub performed_at: Option<String>,
+    pub is_semantic: bool,
     pub is_loading: bool,
     pub error: Option<String>,
     pub active_tab: ReconTab,
@@ -754,6 +755,7 @@ impl App {
                 agent_short_name,
                 recon_result,
                 performed_at,
+                is_semantic,
             } => {
                 if let Some(ref mut recon) = self.nodes.recon {
                     if recon.node_id == node_id && recon.agent_short_name == agent_short_name {
@@ -761,6 +763,7 @@ impl App {
                         if let Some(result) = recon_result {
                             recon.recon_result = Some(result);
                             recon.performed_at = performed_at;
+                            recon.is_semantic = is_semantic.unwrap_or(false);
                             recon.error = None;
                         } else if recon.recon_result.is_none() {
                             recon.error = Some("No recon data available".to_string());
@@ -1176,6 +1179,7 @@ impl App {
             agent_short_name: agent_short_name.clone(),
             recon_result: None,
             performed_at: None,
+            is_semantic: false,
             is_loading: true,
             error: None,
             active_tab: ReconTab::Config,
@@ -1204,6 +1208,7 @@ impl App {
                     agent_short_name: agent_short_name.clone(),
                     recon_result: Some(recon),
                     performed_at: None,
+                    is_semantic: None,
                 });
                 return;
             }
@@ -1212,7 +1217,10 @@ impl App {
                 .acp_request(
                     &node_id,
                     "_praxis/recon",
-                    serde_json::json!({ "agent_short_name": agent_short_name }),
+                    serde_json::json!({
+                        "agent_short_name": agent_short_name,
+                        "is_semantic": false,
+                    }),
                 )
                 .await;
 
@@ -1227,6 +1235,7 @@ impl App {
                         agent_short_name: agent_short_name.clone(),
                         recon_result: Some(recon),
                         performed_at: None,
+                        is_semantic: None,
                     });
                     return;
                 }
@@ -1237,6 +1246,7 @@ impl App {
                 agent_short_name,
                 recon_result: None,
                 performed_at: None,
+                is_semantic: None,
             });
         });
     }
@@ -1245,7 +1255,7 @@ impl App {
         self.nodes.recon = None;
     }
 
-    async fn trigger_recon_refresh(&mut self) {
+    async fn trigger_recon_refresh(&mut self, semantic: bool) {
         let Some(ref mut recon) = self.nodes.recon else { return };
         recon.is_loading = true;
         recon.error = None;
@@ -1264,7 +1274,10 @@ impl App {
                 .acp_request(
                     &node_id,
                     "_praxis/recon",
-                    serde_json::json!({ "agent_short_name": agent_short_name }),
+                    serde_json::json!({
+                        "agent_short_name": agent_short_name,
+                        "is_semantic": semantic,
+                    }),
                 )
                 .await;
 
@@ -1281,6 +1294,7 @@ impl App {
                         agent_short_name: agent_short_name.clone(),
                         recon_result: Some(recon_result),
                         performed_at: None,
+                        is_semantic: None,
                     });
                     return;
                 }
@@ -1291,6 +1305,7 @@ impl App {
                 agent_short_name,
                 recon_result: None,
                 performed_at: None,
+                is_semantic: None,
             });
         });
     }
@@ -1303,7 +1318,7 @@ impl App {
                 .recon_result
                 .as_ref()
                 .map_or(0, |r| r.config.items.len().saturating_sub(1)),
-            ReconTab::Tools => 1,
+            ReconTab::Tools => 2,
             ReconTab::Sessions => recon
                 .recon_result
                 .as_ref()
@@ -1420,7 +1435,10 @@ impl App {
                 recon.selected_right_scroll += 10;
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.trigger_recon_refresh().await;
+                self.trigger_recon_refresh(false).await;
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.trigger_recon_refresh(true).await;
             }
             _ => {}
         }
@@ -1634,7 +1652,7 @@ impl App {
                         .recon_result
                         .as_ref()
                         .map_or(0, |r| r.config.items.len().saturating_sub(1)),
-                    ReconTab::Tools => 1,
+                    ReconTab::Tools => 2,
                     ReconTab::Sessions => recon
                         .recon_result
                         .as_ref()

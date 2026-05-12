@@ -235,14 +235,21 @@ pub fn vm_fingerprint_details(lua: &Lua) -> Result<FingerprintDetails> {
     parse_fingerprint_details(value)
 }
 
-pub fn vm_recon(lua: &Lua, process_path: Option<&str>) -> Result<ReconResult> {
+pub fn vm_recon(
+    lua: &Lua,
+    is_semantic: bool,
+    process_path: Option<&str>,
+) -> Result<ReconResult> {
     let table = connector_table(lua)?;
     let func: Function = table
         .get("recon")
         .map_err(lua_error)
         .map_err(|_| anyhow!("Lua connector missing function 'recon'"))?;
     let ctx = lua
-        .to_value(&json!({ "process_path": process_path }))
+        .to_value(&json!({
+            "is_semantic": is_semantic,
+            "process_path": process_path,
+        }))
         .map_err(lua_error)?;
     let value: Value = func.call(ctx).map_err(lua_error)?;
     let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
@@ -943,6 +950,23 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    //
+    // Semantic parser helper for internal-tools discovery. Blocks on an
+    // async call to the semantic parser service and should only be called
+    // during semantic recon.
+    //
+
+    praxis
+        .set(
+            "semantic_discover_internal_tools",
+            lua.create_function(|lua, response_text: String| {
+                let tools = semantic_discover_internal_tools(&response_text);
+                lua.to_value(&tools)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     praxis
         .set(
             "kill_processes_by_name",
@@ -1536,6 +1560,43 @@ fn abort_handle(handle: &str) -> bool {
 
 pub fn abort_command_handle(handle: &str) -> bool {
     abort_handle(handle)
+}
+
+//
+// Semantic parser helper for Lua agents. Blocks on async calls using
+// tokio::task::block_in_place so it can be called from synchronous Lua
+// functions while the perform_recon future is being polled.
+//
+
+fn semantic_discover_internal_tools(response_text: &str) -> Vec<common::AgentTool> {
+    let client = match crate::utils::semantic_parser::get_client() {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    let cleaned = response_text.replace("Generating response", "");
+
+    let result = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(client.parse(
+            crate::utils::semantic_parser::INTERNAL_TOOLS_PROMPT.to_string(),
+            cleaned,
+            crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
+        ))
+    });
+
+    match result {
+        Ok(resp) if resp.success => {
+            if let Some(json) = resp.json {
+                if let Some(tools) =
+                    crate::utils::semantic_parser::parse_internal_tools_from_json(&json)
+                {
+                    return tools;
+                }
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn parse_fingerprint_details(value: Value) -> Result<FingerprintDetails> {

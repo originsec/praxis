@@ -262,6 +262,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let value = client
             .acp_request(&node_id, EXT_PRAXIS_RECON, json!({
                 "agent_short_name": params.agent,
+                "is_semantic": false,
             }))
             .await.map_err(mcp_err)?;
 
@@ -274,6 +275,38 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "mcp_servers": recon.tools.mcp_servers.len(),
             "mcp_tools": mcp_tools_count,
             "skills": recon.tools.skills.len(),
+            "config_items": recon.config.items.len(),
+            "sessions": recon.sessions.items.len(),
+            "project_paths": recon.config.project_paths.len()
+        }))
+    }
+
+    #[tool(description = "Run semantic reconnaissance on a node (includes internal tools)")]
+    async fn recon_run_semantic(
+        &self,
+        Parameters(params): Parameters<ReconRunParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
+
+        let value = client
+            .acp_request(&node_id, EXT_PRAXIS_RECON, json!({
+                "agent_short_name": params.agent,
+                "is_semantic": true,
+            }))
+            .await.map_err(mcp_err)?;
+
+        let recon: ReconResult = serde_json::from_value(value)
+            .map_err(|e| mcp_err(format!("Recon failed: {}", e)))?;
+
+        let mcp_tools_count: usize = recon.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+        json_result(json!({
+            "status": "success",
+            "mcp_servers": recon.tools.mcp_servers.len(),
+            "mcp_tools": mcp_tools_count,
+            "skills": recon.tools.skills.len(),
+            "internal_tools": recon.tools.internal_tools.len(),
             "config_items": recon.config.items.len(),
             "sessions": recon.sessions.items.len(),
             "project_paths": recon.config.project_paths.len()
@@ -320,6 +353,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         if let Some(skills) = &result.skills {
             let items: Vec<_> = skills.iter().map(|s| json!({"name": s.name, "description": s.description})).collect();
             response["skills"] = json!(items);
+        }
+
+        if let Some(internal_tools) = &result.internal_tools {
+            let items: Vec<_> = internal_tools.iter().map(|t| json!({"name": t.name, "description": t.description})).collect();
+            response["internal_tools"] = json!(items);
         }
 
         if let Some(configs) = &result.configs {

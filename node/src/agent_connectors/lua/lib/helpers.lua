@@ -123,6 +123,7 @@ function M.new_recon_result()
     context_filenames = {},
     project_paths = {},
     sessions = {},
+    skills = {},
   }
 end
 
@@ -141,6 +142,9 @@ function M.merge_recon_result(dest, source)
   end
   for _, s in ipairs(source.sessions or {}) do
     table.insert(dest.sessions, s)
+  end
+  for _, s in ipairs(source.skills or {}) do
+    table.insert(dest.skills, s)
   end
 end
 
@@ -206,6 +210,51 @@ function M.for_each_user_home_coalesce(fn, opts)
   end
 
   return out
+end
+
+--
+-- Discover internal tools by creating a temporary session, asking the agent
+-- to list its tools, then parsing the response with the semantic parser.
+-- session_fns = { create = fn, transact = fn, close = fn }
+--
+
+function M.discover_internal_tools(session_opts, session_fns)
+  local prompts = {
+    "What tools do you have that you can use to help me? High level overview. "
+      .. "Respond as json in format - complete this json: "
+      .. "{ tools: [{'toolName': toolname, 'toolDescription:' ...",
+    "What tools do you have that you can use to help me? High level overview "
+      .. "of each tool with a name an description. Don't leave any out...",
+  }
+
+  for i, prompt in ipairs(prompts) do
+    local state = session_fns.create(session_opts)
+    if state == nil then
+      praxis.log_warn("discover_internal_tools: create returned nil")
+      return {}
+    end
+
+    praxis.log_info("discover_internal_tools: attempt " .. i .. "/" .. #prompts)
+    local tools = {}
+    local ok, result = pcall(session_fns.transact, state, prompt)
+    if ok and result then
+      local response = result.response or ""
+      praxis.log_info("discover_internal_tools: got response (" .. #response .. " bytes)")
+      tools = praxis.semantic_discover_internal_tools(response)
+      praxis.log_info("discover_internal_tools: parsed " .. #tools .. " tools")
+    elseif not ok then
+      praxis.log_warn("discover_internal_tools: transact failed: " .. tostring(result))
+    end
+    pcall(session_fns.close, state)
+
+    if #tools > 0 then
+      return tools
+    end
+
+    praxis.log_info("discover_internal_tools: 0 tools found, trying next prompt")
+  end
+
+  return {}
 end
 
 --
@@ -846,6 +895,7 @@ end
 function M.collect_configs(base_path, templates, opts)
   local result = M.new_recon_result()
   local scope = opts.scope or "home"
+  local include_contents = opts.include_contents
 
   local function add_item(file_path, tmpl)
     local config_type = tmpl.type
@@ -853,14 +903,16 @@ function M.collect_configs(base_path, templates, opts)
       config_type = config_type .. ":" .. base_path
     end
 
+    local contents = include_contents and praxis.read_file(file_path) or nil
+
     table.insert(result.config_items, {
       path = file_path,
       config_type = config_type,
-      contents = nil,
+      contents = contents,
     })
 
     if tmpl.mcp then
-      local content = praxis.read_file(file_path)
+      local content = contents or praxis.read_file(file_path)
       if content then
         local context_path = scope == "project" and base_path or nil
         local mcp_key = type(tmpl.mcp) == "string" and tmpl.mcp or "default"
@@ -934,20 +986,24 @@ end
 --
 -- Config fields:
 --   home_dir          (string)   dot-dir name for user_homes_with_dir, e.g. ".claude"
---   system_configs    (fn?)      fn() -> recon_buffer for system-level files
+--   system_configs    (fn?)      fn(is_semantic) -> recon_buffer for system files
 --   home_configs      (table)    array of { path, type, mcp } templates
 --   project_configs   (table)    array of { path, type, mcp } templates
 --   project_markers   (table?)   array of path suffixes for walk_files discovery
 --   project_discovery (fn?)      fn(home) -> {paths} for custom project discovery
 --   mcp_parsers       (table)    { default = fn, [key] = fn, ... }
 --   auth_check        (fn)       fn(path, user_homes, process_path) -> bool
---   session_discovery  (fn?)     fn(home) -> {sessions}
+--   session_discovery (fn?)      fn(home) -> {sessions}
+--   skill_discovery   (fn?)      fn(home, project_paths) -> {skills}
+--   session_fns       (table?)   { create, transact, close } used by semantic
+--                                internal-tools discovery
 --   context_filenames (table?)   initial context filenames to include
 --   post_collect      (fn?)      fn(buffer, ctx) -> nil, called after collection
 --
 
 function M.run_standard_recon(ctx, config)
   local result = M.new_recon_result()
+  local is_semantic = (ctx and ctx.is_semantic == true)
 
   if config.context_filenames then
     for _, f in ipairs(config.context_filenames) do
@@ -960,12 +1016,12 @@ function M.run_standard_recon(ctx, config)
   --
 
   if config.system_configs then
-    M.merge_recon_result(result, config.system_configs())
+    M.merge_recon_result(result, config.system_configs(is_semantic))
   end
 
   --
   -- Per-home collection: home configs, project discovery, project configs,
-  -- and session discovery.
+  -- session discovery, and skill discovery.
   --
 
   local homes = praxis.user_homes() or {}
@@ -974,7 +1030,10 @@ function M.run_standard_recon(ctx, config)
     local home_result = M.new_recon_result()
 
     M.merge_recon_result(home_result,
-      M.collect_configs(home, config.home_configs, { scope = "home" }))
+      M.collect_configs(home, config.home_configs, {
+        scope = "home",
+        include_contents = is_semantic,
+      }))
 
     local projects = {}
 
@@ -997,13 +1056,27 @@ function M.run_standard_recon(ctx, config)
     for _, proj in ipairs(projects) do
       table.insert(home_result.project_paths, proj)
       M.merge_recon_result(home_result,
-        M.collect_configs(proj, config.project_configs, { scope = "project" }))
+        M.collect_configs(proj, config.project_configs, {
+          scope = "project",
+          include_contents = is_semantic,
+        }))
     end
 
     if config.session_discovery then
       local sessions = config.session_discovery(home)
       for _, s in ipairs(sessions or {}) do
         table.insert(home_result.sessions, s)
+      end
+    end
+
+    if config.skill_discovery then
+      local ok, skills = pcall(config.skill_discovery, home, home_result.project_paths)
+      if ok and type(skills) == "table" then
+        for _, s in ipairs(skills) do
+          table.insert(home_result.skills, s)
+        end
+      elseif not ok then
+        praxis.log_warn("skill_discovery failed for " .. tostring(home) .. ": " .. tostring(skills))
       end
     end
 
@@ -1048,6 +1121,45 @@ function M.run_standard_recon(ctx, config)
 
   local mcp_unique = M.extract_mcp_servers(result.raw_configs_for_mcp, config.mcp_parsers)
 
+  --
+  -- Filter discovered skills to those whose context_path passes auth (or
+  -- is global, which is implicitly authorised by any authed home).
+  --
+
+  local authed_set = {}
+  for _, p in ipairs(filtered_paths) do
+    authed_set[p] = true
+  end
+  local skills_filtered = {}
+  for _, s in ipairs(M.dedup_skills(result.skills or {})) do
+    if s.context_path == nil or authed_set[s.context_path] then
+      table.insert(skills_filtered, s)
+    end
+  end
+
+  --
+  -- Semantic enrichment: discover internal/built-in tools by interrogating
+  -- the agent. Only runs in semantic mode and only when session_fns are
+  -- provided.
+  --
+
+  local internal_tools = {}
+  if is_semantic and config.session_fns then
+    internal_tools = M.discover_internal_tools({
+      process_path = ctx and ctx.process_path or nil,
+      working_dir = filtered_paths[1],
+    }, config.session_fns)
+  end
+
+  --
+  -- Drop config contents from the output now that downstream semantic
+  -- helpers have had their chance to consume them.
+  --
+
+  for _, item in ipairs(result.config_items) do
+    item.contents = nil
+  end
+
   return {
     config = {
       items = result.config_items,
@@ -1055,7 +1167,8 @@ function M.run_standard_recon(ctx, config)
     },
     tools = {
       mcp_servers = mcp_unique,
-      skills = config.skills or {},
+      skills = skills_filtered,
+      internal_tools = internal_tools,
     },
     sessions = {
       items = result.sessions,

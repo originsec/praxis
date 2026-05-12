@@ -61,6 +61,55 @@ pub fn build_servers_and_tools_prompt(text: &str) -> String {
     format!("{}\n\n**TEXT**:\n{}", MCP_SERVERS_AND_TOOLS_PROMPT, text)
 }
 
+//
+// Internal Tools Discovery Utilities.
+//
+
+/// JSON schema for internal/built-in tools discovery via semantic parser.
+pub const INTERNAL_TOOLS_SCHEMA: &str = r#"{
+    "type": "object",
+    "properties": {
+        "internal_tools": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Name of the internal tool" },
+                    "description": { "type": "string", "description": "What the tool does" }
+                },
+                "required": ["name", "description"]
+            }
+        }
+    },
+    "required": ["internal_tools"]
+}"#;
+
+/// Discovery prompt for extracting internal tools from unstructured text.
+pub const INTERNAL_TOOLS_PROMPT: &str = "Extract all internal/built-in tools from the following text. \
+These are tools that are part of the agent's core functionality, exclude MCP server tools. \
+For each tool, extract the name and a brief description of what it does. \
+DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned. \
+Tools could also appear in all sorts of formats - plain text, json, xml, etc.";
+
+/// Parse JSON response from semantic parser into a Vec of AgentTool for internal tools.
+pub fn parse_internal_tools_from_json(json: &str) -> Option<Vec<AgentTool>> {
+    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+    let tools = parsed.get("internal_tools")?.as_array()?;
+
+    let internal_tools: Vec<AgentTool> = tools
+        .iter()
+        .filter_map(|t| {
+            Some(AgentTool {
+                name: t.get("name")?.as_str()?.to_string(),
+                description: t.get("description")?.as_str()?.to_string(),
+                ..Default::default()
+            })
+        })
+        .collect();
+
+    Some(internal_tools)
+}
+
 /// JSON schema for MCP server info discovery (including connection status).
 /// Used for parsing `claude mcp list` output.
 #[allow(dead_code)]
@@ -181,7 +230,6 @@ pub fn init_global_client(client: SemanticParserClient) {
 }
 
 /// Get the global semantic parser client
-#[allow(dead_code)]
 pub fn get_client() -> Option<Arc<SemanticParserClient>> {
     SEMANTIC_PARSER_CLIENT.read().unwrap().clone()
 }
@@ -199,7 +247,6 @@ impl SemanticParserTracker {
     }
 
     /// Register a new request and return a receiver for the response
-    #[allow(dead_code)]
     pub fn register(&self, request_id: String) -> oneshot::Receiver<SemanticParserResponse> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(request_id, tx);
@@ -215,7 +262,6 @@ impl SemanticParserTracker {
 }
 
 /// Client for sending semantic parser requests
-#[allow(dead_code)]
 pub struct SemanticParserClient {
     channel: Arc<Channel>,
     node_id: String,
@@ -236,7 +282,6 @@ impl SemanticParserClient {
     }
 
     /// Send a semantic parser request and wait for the response
-    #[allow(dead_code)]
     pub async fn parse(
         &self,
         instruction: String,

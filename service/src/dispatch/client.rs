@@ -1683,10 +1683,11 @@ async fn handle_recon_get(
     {
         Ok(Some(stored)) => {
             common::log_info!(
-                "ReconGet response: found recon for {} {} (performed_at: {})",
+                "ReconGet response: found recon for {} {} (performed_at: {}, semantic: {})",
                 common::short_id(&node_id),
                 agent_short_name,
                 stored.performed_at,
+                stored.is_semantic
             );
             let _ = send_to_client(
                 &ctx.client_publish_channel,
@@ -1696,6 +1697,7 @@ async fn handle_recon_get(
                     agent_short_name,
                     recon_result: Some(stored.recon_result),
                     performed_at: Some(stored.performed_at),
+                    is_semantic: Some(stored.is_semantic),
                 },
             )
             .await;
@@ -1714,6 +1716,7 @@ async fn handle_recon_get(
                     agent_short_name,
                     recon_result: None,
                     performed_at: None,
+                    is_semantic: None,
                 },
             )
             .await;
@@ -1728,6 +1731,7 @@ async fn handle_recon_get(
                     agent_short_name,
                     recon_result: None,
                     performed_at: None,
+                    is_semantic: None,
                 },
             )
             .await;

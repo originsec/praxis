@@ -113,6 +113,52 @@ impl DummyAgent {
         ]
     }
 
+    /// Generate demo internal tools (only for semantic recon)
+    fn get_demo_internal_tools(&self) -> Vec<AgentTool> {
+        vec![
+            AgentTool {
+                name: "Bash".to_string(),
+                description: "Execute shell commands in a persistent session".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Read".to_string(),
+                description: "Read file contents from the filesystem".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Write".to_string(),
+                description: "Write content to files".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Edit".to_string(),
+                description: "Make targeted edits to files".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Glob".to_string(),
+                description: "Find files matching a pattern".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Grep".to_string(),
+                description: "Search file contents with regex".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "Task".to_string(),
+                description: "Launch sub-agents for complex tasks".to_string(),
+                ..Default::default()
+            },
+            AgentTool {
+                name: "WebFetch".to_string(),
+                description: "Fetch and process web content".to_string(),
+                ..Default::default()
+            },
+        ]
+    }
+
     /// Generate demo config items
     fn get_demo_config(&self) -> Vec<ConfigItem> {
         vec![
@@ -170,11 +216,18 @@ impl Agent for DummyAgent {
 
 #[async_trait]
 impl AgentRecon for DummyAgent {
-    async fn perform_recon(&self) -> Option<ReconResult> {
-        let tools = ReconTools {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
+        common::log_info!("Performing recon (is_semantic={})", is_semantic);
+
+        let mut tools = ReconTools {
             mcp_servers: self.get_demo_mcp_servers(),
             skills: self.get_demo_skills(),
+            internal_tools: Vec::new(),
         };
+
+        if is_semantic {
+            tools.internal_tools = self.get_demo_internal_tools();
+        }
 
         let config = ReconConfig {
             items: self.get_demo_config(),
@@ -182,9 +235,10 @@ impl AgentRecon for DummyAgent {
         };
 
         common::log_info!(
-            "Recon complete - {} MCP servers, {} skills, {} config items",
+            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items",
             tools.mcp_servers.len(),
             tools.skills.len(),
+            tools.internal_tools.len(),
             config.items.len()
         );
 

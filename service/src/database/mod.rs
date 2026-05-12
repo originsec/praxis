@@ -450,9 +450,9 @@ impl Database {
 
         //
         // Migration: drop the recon-result columns that used to back the
-        // auto-discovered keys/secrets metadata, the semantic-recon flag,
-        // and project_paths (now nested inside config_json). Stored rows
-        // become stale; the recon flow rewrites them on the next run.
+        // auto-discovered keys/secrets metadata and the standalone project
+        // paths list. Project paths are now nested inside config_json.
+        // is_semantic still exists — it gates internal_tools discovery.
         //
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -460,9 +460,6 @@ impl Database {
                     .execute(pool)
                     .await;
                 let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN project_paths_json")
-                    .execute(pool)
-                    .await;
-                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN is_semantic")
                     .execute(pool)
                     .await;
             }
@@ -475,9 +472,6 @@ impl Database {
                 )
                 .execute(pool)
                 .await;
-                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN IF EXISTS is_semantic")
-                    .execute(pool)
-                    .await;
             }
         }
 

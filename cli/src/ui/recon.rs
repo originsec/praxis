@@ -71,6 +71,10 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         ),
     ];
 
+    if overlay.is_semantic {
+        spans.push(Span::raw("  "));
+        spans.push(chrome::pill("AI", ACCENT));
+    }
     if overlay.is_loading {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
@@ -136,10 +140,9 @@ fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         .recon_result
         .as_ref()
         .map_or(0, |r| r.config.items.len());
-    let tools_count = overlay
-        .recon_result
-        .as_ref()
-        .map_or(0, |r| r.tools.mcp_servers.len() + r.tools.skills.len());
+    let tools_count = overlay.recon_result.as_ref().map_or(0, |r| {
+        r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
+    });
     let sessions_count = overlay
         .recon_result
         .as_ref()
