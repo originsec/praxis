@@ -14,11 +14,15 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-pub fn render_recon(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let block = Block::default().style(Style::default().bg(BG_MENU));
+pub struct ReconLayout {
+    pub header: Rect,
+    pub divider: Rect,
+    pub tabs: Rect,
+    pub content: Rect,
+    pub hints: Rect,
+}
 
-    f.render_widget(Clear, area);
-    f.render_widget(block.clone(), area);
+pub fn compute_layout(area: Rect) -> ReconLayout {
     let inner = Rect {
         x: area.x + 2,
         y: area.y + 1,
@@ -36,17 +40,99 @@ pub fn render_recon(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     ])
     .split(inner);
 
-    render_header(f, chunks[0], overlay);
-    render_divider(f, chunks[1]);
-    render_tab_bar(f, chunks[2], overlay);
+    ReconLayout {
+        header: chunks[0],
+        divider: chunks[1],
+        tabs: chunks[2],
+        content: chunks[4],
+        hints: chunks[5],
+    }
+}
+
+//
+// Returns the horizontal hit rects for each tab in the tab bar, in
+// the same order they're rendered. Widths must stay in sync with
+// `render_tab_bar` below.
+//
+
+pub fn tab_hit_rects(tabs: Rect, overlay: &ReconOverlay) -> [(Rect, ReconTab); 3] {
+    let (cc, tc, sc) = tab_counts(overlay);
+    let w_config = tab_width("Config", cc);
+    let w_tools = tab_width("Tools", tc);
+    let w_sessions = tab_width("Sessions", sc);
+    let sep: u16 = 5;
+
+    let y = tabs.y;
+    let x0 = tabs.x;
+    let r_config = Rect {
+        x: x0,
+        y,
+        width: w_config,
+        height: 1,
+    };
+    let r_tools = Rect {
+        x: x0 + w_config + sep,
+        y,
+        width: w_tools,
+        height: 1,
+    };
+    let r_sessions = Rect {
+        x: x0 + w_config + sep + w_tools + sep,
+        y,
+        width: w_sessions,
+        height: 1,
+    };
+    [
+        (r_config, ReconTab::Config),
+        (r_tools, ReconTab::Tools),
+        (r_sessions, ReconTab::Sessions),
+    ]
+}
+
+fn tab_counts(overlay: &ReconOverlay) -> (usize, usize, usize) {
+    let cc = overlay
+        .recon_result
+        .as_ref()
+        .map_or(0, |r| r.config.items.len());
+    let tc = overlay.recon_result.as_ref().map_or(0, |r| {
+        r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
+    });
+    let sc = overlay
+        .recon_result
+        .as_ref()
+        .map_or(0, |r| r.sessions.items.len());
+    (cc, tc, sc)
+}
+
+fn tab_width(label: &str, count: usize) -> u16 {
+    //
+    // chrome::tab renders " {label} " then "{count} ". Label and count
+    // are ASCII so byte length equals column width.
+    //
+    let label_w = label.len() as u16 + 2;
+    let count_w = count.to_string().len() as u16 + 1;
+    label_w + count_w
+}
+
+pub fn render_recon(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
+    let block = Block::default().style(Style::default().bg(BG_MENU));
+
+    f.render_widget(Clear, area);
+    f.render_widget(block.clone(), area);
+
+    let layout = compute_layout(area);
+
+    render_header(f, layout.header, overlay);
+    render_divider(f, layout.divider);
+    render_tab_bar(f, layout.tabs, overlay);
 
     match overlay.active_tab {
-        ReconTab::Config => config_tab::render(f, chunks[4], overlay),
-        ReconTab::Tools => tools_tab::render(f, chunks[4], overlay),
-        ReconTab::Sessions => sessions_tab::render(f, chunks[4], overlay),
+        ReconTab::Config => config_tab::render(f, layout.content, overlay),
+        ReconTab::Tools => tools_tab::render(f, layout.content, overlay),
+        ReconTab::Sessions => sessions_tab::render(f, layout.content, overlay),
     }
 
-    render_hints(f, chunks[5], overlay);
+    render_hints(f, layout.hints, overlay);
 }
 
 fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
@@ -136,17 +222,7 @@ fn render_hints(f: &mut Frame, area: Rect, _overlay: &ReconOverlay) {
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let config_count = overlay
-        .recon_result
-        .as_ref()
-        .map_or(0, |r| r.config.items.len());
-    let tools_count = overlay.recon_result.as_ref().map_or(0, |r| {
-        r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
-    });
-    let sessions_count = overlay
-        .recon_result
-        .as_ref()
-        .map_or(0, |r| r.sessions.items.len());
+    let (config_count, tools_count, sessions_count) = tab_counts(overlay);
 
     let mut spans = Vec::new();
     spans.extend(chrome::tab(

@@ -27,7 +27,6 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::widgets::{Block, Borders};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1621,31 +1620,31 @@ impl App {
     async fn handle_recon_mouse(&mut self, mouse: MouseEvent) {
         let Some(ref mut recon) = self.nodes.recon else { return };
 
-        let h = self.terminal_width;
+        //
+        // Replicate the top-level layout from ui::mod::render to get
+        // the rect that's passed to render_recon, then derive the
+        // recon sub-rects from there so geometry stays consistent
+        // with the renderer.
+        //
+
+        let w = self.terminal_width;
         let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
-        let terminal_area = Rect::new(0, 0, h, term_h);
-        let inner_area = terminal_area.inner(Margin {
+        let terminal_area = Rect::new(0, 0, w, term_h);
+        let inner = terminal_area.inner(Margin {
             vertical: 1,
             horizontal: 2,
         });
-        let frame_chunks = Layout::vertical([
+        let top_chunks = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Length(1),
         ])
-        .split(inner_area);
-        let content_area = frame_chunks[1];
+        .split(inner);
+        let recon_area = top_chunks[2];
 
-        let block = Block::default().borders(Borders::ALL);
-        let overlay_inner = block.inner(content_area);
-        let recon_chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(overlay_inner);
-        let recon_content = recon_chunks[2];
+        let layout = crate::ui::recon::compute_layout(recon_area);
+        let recon_content = layout.content;
 
         let left_pct = recon.recon_split_percent.min(80).max(20);
         let right_pct = 100u16.saturating_sub(left_pct);
@@ -1690,6 +1689,29 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                //
+                // Tab-bar click: switch tabs.
+                //
+
+                for (rect, tab) in crate::ui::recon::tab_hit_rects(layout.tabs, recon) {
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row == rect.y
+                    {
+                        if recon.active_tab != tab {
+                            recon.active_tab = tab;
+                            recon.selected_left = 0;
+                            recon.selected_right_scroll = 0;
+                            recon.right_pane_focused = false;
+                            recon.config_content_error = None;
+                            recon.session_content_error = None;
+                            recon.config_loading = false;
+                            recon.session_loading = false;
+                        }
+                        return;
+                    }
+                }
+
                 if crate::ui::common::hit_vertical_border(left_area, mouse.column, mouse.row) {
                     recon.recon_dragging = true;
                     return;
