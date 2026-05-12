@@ -240,7 +240,7 @@ pub enum ClientDirectMessage {
     ApplicationLogCleared { deleted_count },
 
     // Recon
-    ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic },
+    ReconGetResponse { node_id, agent_short_name, recon_result, performed_at },
 
 }
 ```
@@ -313,8 +313,7 @@ connector catalog via `InitializeResponse._meta.connectors`:
 All extensions are advertised under `InitializeResponse._meta.extensions`.
 
 - `_praxis/recon` — agent-scoped reconnaissance. Params
-  `{ "agent_short_name": string, "is_semantic": bool }`; result is a
-  serialized `ReconResult`. Replaces the legacy `NodeCommand::Agent(Recon)`.
+  `{ "agent_short_name": string }`; result is a serialized `ReconResult`.
 - `_praxis/read_file` — read a file on the node. Params
   `{ "agent_short_name": string, "path": string }`.
 - `_praxis/write_file` — write a file on the node. Params
@@ -391,11 +390,9 @@ pub struct SelectedAgent {
 
 ```rust
 pub struct ReconResult {
-    pub tools: ReconTools,
-    pub config: Vec<ConfigItem>,
-    pub sessions: Vec<SessionItem>,
-    pub project_paths: Vec<String>,
-    pub metadata: Option<ReconMetadata>,
+    pub config: ReconConfig,     // { items, project_paths }
+    pub tools: ReconTools,        // { mcp_servers, skills }
+    pub sessions: ReconSessions,  // { items }
 }
 ```
 

@@ -1,4 +1,3 @@
-local helpers = require("praxis.helpers")
 local devtools = require("praxis.devtools")
 
 local AGENT_NAME = "Microsoft 365 Copilot"
@@ -153,26 +152,27 @@ local function do_recon(ctx)
     return nil
   end
 
-  local is_semantic = ctx.is_semantic
   local process_path = ctx.process_path
 
-  local identities = {}
   local project_paths = {}
-  local internal_tools = {}
 
-  --
-  -- Create a temporary DevTools session to discover identities and project
-  -- paths by running JavaScript in the M365 Copilot WebView.
-  --
+  local function empty_result()
+    return {
+      config = { items = {}, project_paths = project_paths },
+      tools = { mcp_servers = {}, skills = {} },
+      sessions = { items = {} },
+    }
+  end
 
   if not process_path then
     praxis.log_warn("m365copilot: skipping discovery, no process_path (fingerprint not run?)")
-    return {
-      tools = { internal_tools = {}, mcp_servers = {}, skills = {} },
-      project_paths = {},
-      metadata = nil,
-    }
+    return empty_result()
   end
+
+  --
+  -- Create a temporary DevTools session to discover which Work/Web modes
+  -- are present in the M365 Copilot WebView.
+  --
 
   local discovery_handle = nil
   local discovery_desktop = nil
@@ -184,22 +184,6 @@ local function do_recon(ctx)
       base_port = 9250,
       port_range = 100,
     })
-
-    local profile = praxis.cdp_evaluate(discovery_handle, [[
-      (function() {
-        try {
-          var entry = Object.entries(window)
-            .filter(function(e) { return /nestedAppAuthService/i.test(e[0]); })[0];
-          if (entry) return entry[1].user.profile;
-        } catch(e) {}
-        return null;
-      })()
-    ]])
-
-    if profile then
-      if profile.upn then table.insert(identities, profile.upn) end
-      if profile.displayName then table.insert(identities, profile.displayName) end
-    end
 
     local toggles = praxis.cdp_evaluate(discovery_handle,
       "(function() {"
@@ -226,34 +210,7 @@ local function do_recon(ctx)
     praxis.log_warn("m365copilot: discovery failed: " .. tostring(err))
   end
 
-  if is_semantic then
-    internal_tools = helpers.discover_internal_tools(
-      {
-        process_path = process_path,
-        working_dir = WORKING_DIR_WORK,
-      },
-      {
-        create = run_create_session,
-        transact = run_session_transact,
-        close = run_session_close,
-      }
-    )
-  end
-
-  local metadata = nil
-  if #identities > 0 then
-    metadata = { user_identities = identities }
-  end
-
-  return {
-    tools = {
-      internal_tools = internal_tools,
-      mcp_servers = {},
-      skills = {},
-    },
-    project_paths = project_paths,
-    metadata = metadata,
-  }
+  return empty_result()
 end
 
 local function do_fingerprint()

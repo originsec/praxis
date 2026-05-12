@@ -363,7 +363,6 @@ pub struct ReconListResult {
     pub projects: Option<Vec<String>>,
     pub mcp_servers: Option<Vec<McpServer>>,
     pub skills: Option<Vec<AgentTool>>,
-    pub internal_tools: Option<Vec<AgentTool>>,
     pub configs: Option<Vec<ConfigItem>>,
 }
 
@@ -384,12 +383,12 @@ pub async fn recon_list(
 
     Ok(ReconListResult {
         sessions: if show_all || section == Some("sessions") {
-            Some(recon.sessions)
+            Some(recon.sessions.items)
         } else {
             None
         },
         projects: if show_all || section == Some("projects") {
-            Some(recon.project_paths)
+            Some(recon.config.project_paths)
         } else {
             None
         },
@@ -403,13 +402,8 @@ pub async fn recon_list(
         } else {
             None
         },
-        internal_tools: if show_all || section == Some("tools") {
-            Some(recon.tools.internal_tools)
-        } else {
-            None
-        },
         configs: if show_all || section == Some("configs") {
-            Some(recon.config)
+            Some(recon.config.items)
         } else {
             None
         },
@@ -440,8 +434,18 @@ async fn resolve_recon(
         .ok_or_else(|| anyhow!("No stored recon data for agent '{}' on this node. Run recon_run first.", agent))?;
 
     let paths: Vec<String> = match file_type {
-        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
-        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+        AgentFileType::Config => recon
+            .config
+            .items
+            .iter()
+            .map(|c| c.path.clone())
+            .collect(),
+        AgentFileType::Session => recon
+            .sessions
+            .items
+            .iter()
+            .map(|s| s.session_file.clone())
+            .collect(),
     };
 
     Ok(ResolvedRecon { node_id, paths })

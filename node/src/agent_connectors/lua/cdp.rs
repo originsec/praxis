@@ -140,8 +140,7 @@ fn lua_err(e: impl std::fmt::Display) -> mlua::Error {
 }
 
 //
-// Block on an async future from synchronous Lua context. Uses the same
-// pattern as semantic_discover_internal_tools.
+// Block on an async future from synchronous Lua context.
 //
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {

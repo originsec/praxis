@@ -235,21 +235,14 @@ pub fn vm_fingerprint_details(lua: &Lua) -> Result<FingerprintDetails> {
     parse_fingerprint_details(value)
 }
 
-pub fn vm_recon(
-    lua: &Lua,
-    is_semantic: bool,
-    process_path: Option<&str>,
-) -> Result<ReconResult> {
+pub fn vm_recon(lua: &Lua, process_path: Option<&str>) -> Result<ReconResult> {
     let table = connector_table(lua)?;
     let func: Function = table
         .get("recon")
         .map_err(lua_error)
         .map_err(|_| anyhow!("Lua connector missing function 'recon'"))?;
     let ctx = lua
-        .to_value(&json!({
-            "is_semantic": is_semantic,
-            "process_path": process_path,
-        }))
+        .to_value(&json!({ "process_path": process_path }))
         .map_err(lua_error)?;
     let value: Value = func.call(ctx).map_err(lua_error)?;
     let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
@@ -950,35 +943,6 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
-    //
-    // Semantic parser helpers. These block on async calls to the semantic
-    // parser service and should only be called during semantic recon.
-    //
-
-    praxis
-        .set(
-            "semantic_discover_internal_tools",
-            lua.create_function(|lua, response_text: String| {
-                let tools = semantic_discover_internal_tools(&response_text);
-                lua.to_value(&tools)
-            })
-            .map_err(lua_error)?,
-        )
-        .map_err(lua_error)?;
-
-    praxis
-        .set(
-            "semantic_extract_metadata",
-            lua.create_function(|lua, config_items: Value| {
-                let items: Vec<common::ConfigItem> =
-                    lua.from_value(config_items).unwrap_or_default();
-                let metadata = semantic_extract_metadata(&items);
-                lua.to_value(&metadata)
-            })
-            .map_err(lua_error)?,
-        )
-        .map_err(lua_error)?;
-
     praxis
         .set(
             "kill_processes_by_name",
@@ -1572,124 +1536,6 @@ fn abort_handle(handle: &str) -> bool {
 
 pub fn abort_command_handle(handle: &str) -> bool {
     abort_handle(handle)
-}
-
-//
-// Semantic parser helpers for Lua agents. These block on async calls using
-// tokio::task::block_in_place so they can be called from synchronous Lua
-// functions while the perform_recon future is being polled.
-//
-
-fn semantic_discover_internal_tools(response_text: &str) -> Vec<common::AgentTool> {
-    let client = match crate::utils::semantic_parser::get_client() {
-        Some(c) => c,
-        None => return Vec::new(),
-    };
-
-    let cleaned = response_text.replace("Generating response", "");
-
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(client.parse(
-            crate::utils::semantic_parser::INTERNAL_TOOLS_PROMPT.to_string(),
-            cleaned,
-            crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
-        ))
-    });
-
-    match result {
-        Ok(resp) if resp.success => {
-            if let Some(json) = resp.json {
-                if let Some(tools) =
-                    crate::utils::semantic_parser::parse_internal_tools_from_json(&json)
-                {
-                    return tools;
-                }
-            }
-            Vec::new()
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn semantic_extract_metadata(config_items: &[common::ConfigItem]) -> Option<common::ReconMetadata> {
-    if config_items.is_empty() {
-        return None;
-    }
-
-    let client = match crate::utils::semantic_parser::get_client() {
-        Some(c) => c,
-        None => return None,
-    };
-
-    let mut all_user_identities = Vec::new();
-    let mut all_api_keys = Vec::new();
-    let mut current_batch = String::new();
-    let batch_threshold = 8000;
-
-    let mut flush = |batch: &mut String| {
-        if batch.is_empty() {
-            return;
-        }
-        let text = std::mem::take(batch);
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(client.parse(
-                crate::utils::semantic_parser::METADATA_EXTRACTION_PROMPT.to_string(),
-                text,
-                crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
-            ))
-        });
-
-        if let Ok(resp) = result {
-            if resp.success {
-                if let Some(json) = resp.json {
-                    if let Some(metadata) =
-                        crate::utils::semantic_parser::parse_metadata_from_json(&json)
-                    {
-                        all_user_identities.extend(metadata.user_identities);
-                        all_api_keys.extend(metadata.api_keys);
-                    }
-                }
-            }
-        }
-    };
-
-    for item in config_items {
-        let Some(contents) = &item.contents else {
-            continue;
-        };
-        if contents.is_empty() {
-            continue;
-        }
-
-        let entry = format!("--- {} ({})\n{}\n\n", item.path, item.config_type, contents);
-        if current_batch.len() + entry.len() > batch_threshold && !current_batch.is_empty() {
-            flush(&mut current_batch);
-        }
-        current_batch.push_str(&entry);
-    }
-    flush(&mut current_batch);
-
-    if all_user_identities.is_empty() && all_api_keys.is_empty() {
-        return None;
-    }
-
-    all_user_identities.sort();
-    all_user_identities.dedup();
-    all_api_keys.sort();
-    all_api_keys.dedup();
-
-    Some(common::ReconMetadata {
-        user_identities: if all_user_identities.is_empty() {
-            None
-        } else {
-            Some(all_user_identities)
-        },
-        api_keys: if all_api_keys.is_empty() {
-            None
-        } else {
-            Some(all_api_keys)
-        },
-    })
 }
 
 fn parse_fingerprint_details(value: Value) -> Result<FingerprintDetails> {

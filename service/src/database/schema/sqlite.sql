@@ -177,12 +177,9 @@ CREATE TABLE IF NOT EXISTS recon_results (
     id TEXT PRIMARY KEY,
     node_id TEXT NOT NULL,
     agent_short_name TEXT NOT NULL,
-    is_semantic INTEGER NOT NULL,
     tools_json TEXT NOT NULL,
     config_json TEXT NOT NULL,
     sessions_json TEXT NOT NULL,
-    project_paths_json TEXT NOT NULL,
-    metadata_json TEXT,
     performed_at TEXT NOT NULL,
     created_at TEXT NOT NULL
 );

@@ -361,12 +361,6 @@ local recon_config = {
   end,
 
   post_collect = nil,
-
-  session_fns = {
-    create = run_create_session,
-    transact = run_session_transact,
-    close = run_session_close,
-  },
 }
 
 return {

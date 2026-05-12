@@ -61,7 +61,6 @@ pub enum AppEvent {
         agent_short_name: String,
         recon_result: Option<ReconResult>,
         performed_at: Option<String>,
-        is_semantic: Option<bool>,
     },
     ReconConfigContent {
         target_idx: usize,

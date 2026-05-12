@@ -3,14 +3,7 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Droid CLI"
 local AGENT_SHORT_NAME = "droid"
 
-local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
-  if result.success then
-    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
-    return version ~= nil, version
-  end
-  return false, nil
-end
+local verify_binary = helpers.make_verify_version_flag({})
 
 local function pick_path()
   return helpers.find_executable({
@@ -26,113 +19,39 @@ local function pick_path()
   })
 end
 
-local function has_auth_env_vars(homes)
-  return helpers.has_any_env_var({ "FACTORY_API_KEY" }, homes)
+--
+-- Droid uses two co-located files (auth.v2.file + auth.v2.key) to store
+-- the encrypted credential bundle. Either file alone is meaningless so
+-- the predicate insists on both.
+--
+
+local function has_auth_files(_full_path)
+  return true
 end
 
---
--- Check for encrypted auth credentials stored by the login flow.
---
+local auth_check = helpers.auth_via_env_or_files({
+  env_vars = { "FACTORY_API_KEY" },
+  auth_files = { ".factory/auth.v2.file" },
+  file_check = function(path)
+    --
+    -- The matched candidate is .factory/auth.v2.file; only accept if the
+    -- co-located .factory/auth.v2.key also exists.
+    --
+    local key = path:gsub("auth%.v2%.file$", "auth.v2.key")
+    return praxis.path_exists(key) and has_auth_files(path)
+  end,
+})
 
-local function has_auth_files(home)
-  local auth_file = praxis.path_join({ home, ".factory", "auth.v2.file" })
-  local auth_key = praxis.path_join({ home, ".factory", "auth.v2.key" })
-  return praxis.path_exists(auth_file) and praxis.path_exists(auth_key)
+local function discover_sessions_for_home(home)
+  return helpers.discover_jsonl_sessions(home, {
+    sessions_relpath = ".factory/sessions",
+    context_path = function(_home, dirname) return dirname end,
+  })
 end
-
-local function path_has_valid_auth(path, user_homes)
-  if has_auth_env_vars({}) then
-    return true
-  end
-
-  for _, home in ipairs(user_homes or {}) do
-    if helpers.starts_with(path, home) then
-      if has_auth_files(home) then
-        return true
-      end
-    end
-  end
-
-  return false
-end
-
---
--- Session directories use the cwd path with slashes replaced by dashes.
--- E.g. /home/depmod/code/praxis -> -home-depmod-code-praxis
---
 
 local function encode_session_dir_name(path)
   return string.gsub(path, "/", "-")
 end
-
-local function discover_sessions_for_home(home)
-  local sessions = {}
-  local sessions_dir = praxis.path_join({ home, ".factory", "sessions" })
-  if not praxis.path_is_dir(sessions_dir) then
-    return sessions
-  end
-
-  local project_dirs = praxis.read_dir(sessions_dir) or {}
-  for _, proj in ipairs(project_dirs) do
-    if not proj.is_dir then
-      goto continue_proj
-    end
-
-    local entries = praxis.read_dir(proj.path) or {}
-    for _, entry in ipairs(entries) do
-      if not entry.is_file then
-        goto continue_entry
-      end
-      if not helpers.ends_with(entry.name, ".jsonl") then
-        goto continue_entry
-      end
-
-      local session_id = string.sub(entry.name, 1, #entry.name - 6)
-      local message_count = praxis.count_file_lines(entry.path)
-
-      local last_modified = ""
-      if entry.modified_unix then
-        last_modified = praxis.format_unix_timestamp(entry.modified_unix)
-      end
-
-      table.insert(sessions, {
-        session_id = session_id,
-        context_path = proj.name or "",
-        session_file = entry.path,
-        last_modified = last_modified,
-        message_count = message_count,
-        content = nil,
-      })
-
-      ::continue_entry::
-    end
-
-    ::continue_proj::
-  end
-
-  return sessions
-end
-
-local function run_create_session(ctx)
-  local working_dir = ctx.working_dir
-  if type(working_dir) ~= "string" or working_dir == "" then
-    local homes = helpers.user_homes_with_dir(".factory")
-    working_dir = homes[1]
-  end
-
-  return {
-    handle = praxis.uuid_v4(),
-    process_path = ctx.process_path,
-    working_dir = working_dir,
-    yolo_mode = ctx.yolo_mode == true,
-    prompt_timeout_secs = ctx.prompt_timeout_secs,
-    external_session_id = nil,
-  }
-end
-
---
--- Find the most recently modified session for a given working directory.
---
 
 local function find_latest_session_id(working_dir)
   if type(working_dir) ~= "string" or working_dir == "" then
@@ -146,74 +65,48 @@ local function find_latest_session_id(working_dir)
 
   local dir_name = encode_session_dir_name(working_dir)
   local sessions_dir = praxis.path_join({ home, ".factory", "sessions", dir_name })
-  if not praxis.path_is_dir(sessions_dir) then
+  local latest = helpers.find_latest_session_file(sessions_dir)
+  if not latest then
     return nil
   end
 
-  local entries = praxis.read_dir(sessions_dir) or {}
-  local best_modified = -1
-  local best_id = nil
+  local name = latest:match("([^/\\]+)$") or ""
+  if helpers.ends_with(name, ".jsonl") then
+    return string.sub(name, 1, #name - 6)
+  end
+  return name
+end
 
-  for _, entry in ipairs(entries) do
-    if entry.is_file and helpers.ends_with(entry.name, ".jsonl") then
-      local m = entry.modified_unix or 0
-      if m > best_modified then
-        best_modified = m
-        best_id = string.sub(entry.name, 1, #entry.name - 6)
+local session_fns = helpers.subprocess_session({
+  home_dir = ".factory",
+  error_label = "Droid command failed",
+  initial_state = function(_ctx)
+    return { external_session_id = nil }
+  end,
+  on_response = function(state, _prompt, _stdout)
+    if state.external_session_id == nil or state.external_session_id == "" then
+      local discovered = find_latest_session_id(state.working_dir)
+      if discovered ~= nil then
+        state.external_session_id = discovered
       end
     end
-  end
+  end,
+  build_invocation = function(state, prompt)
+    local args = { "exec" }
 
-  return best_id
-end
-
-local function run_session_transact(state, prompt)
-  local args = { "exec" }
-
-  if state.yolo_mode then
-    table.insert(args, "--skip-permissions-unsafe")
-  end
-
-  if state.external_session_id ~= nil and state.external_session_id ~= "" then
-    table.insert(args, "-s")
-    table.insert(args, state.external_session_id)
-  end
-
-  table.insert(args, prompt)
-
-  local spec = {
-    program = state.process_path,
-    args = args,
-    cwd = state.working_dir,
-    timeout_secs = state.prompt_timeout_secs or 1800,
-  }
-
-  local result = praxis.command_run_handle(spec, state.handle)
-  if not result.success then
-    error("Droid command failed: " .. tostring(result.stderr or "unknown error"))
-  end
-
-  --
-  -- After the first transact, try to find the session ID from the sessions
-  -- directory so we can resume it on subsequent calls.
-  --
-
-  if state.external_session_id == nil or state.external_session_id == "" then
-    local discovered = find_latest_session_id(state.working_dir)
-    if discovered ~= nil then
-      state.external_session_id = discovered
+    if state.yolo_mode then
+      table.insert(args, "--skip-permissions-unsafe")
     end
-  end
 
-  return {
-    response = result.stdout or "",
-    state = state,
-  }
-end
+    if state.external_session_id ~= nil and state.external_session_id ~= "" then
+      table.insert(args, "-s")
+      table.insert(args, state.external_session_id)
+    end
 
-local function run_session_close(state)
-  -- Droid sessions don't need explicit cleanup
-end
+    table.insert(args, prompt)
+    return { args = args }
+  end,
+})
 
 local recon_config = {
   home_dir = ".factory",
@@ -237,14 +130,8 @@ local recon_config = {
     default = helpers.parse_mcp_from_json,
   },
 
-  auth_check = path_has_valid_auth,
+  auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
-
-  session_fns = {
-    create = run_create_session,
-    transact = run_session_transact,
-    close = run_session_close,
-  },
 }
 
 return {
@@ -265,14 +152,14 @@ return {
   end,
 
   create_session = function(ctx)
-    return run_create_session(ctx)
+    return session_fns.create(ctx)
   end,
 
   session_transact = function(_ctx, state, prompt)
-    return run_session_transact(state, prompt)
+    return session_fns.transact(state, prompt)
   end,
 
   session_close = function(_ctx, state)
-    run_session_close(state)
+    session_fns.close(state)
   end,
 }

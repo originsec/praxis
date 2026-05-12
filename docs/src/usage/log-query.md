@@ -86,25 +86,11 @@ Summary of reconnaissance results per node+agent.
 | timestamp | When recon was performed |
 | node_id | Node identifier |
 | agent_short_name | Agent short name |
-| is_semantic | Whether this was a semantic recon |
 | mcp_server_count | Number of MCP servers discovered |
 | skill_count | Number of skills discovered |
-| internal_tool_count | Number of internal tools discovered |
 | config_count | Number of config items discovered |
 | session_count | Number of sessions discovered |
 | project_path_count | Number of project paths discovered |
-
-### ReconMetadataLogs
-
-User identities and API keys extracted from agent configurations.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When recon was performed |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| entry_type | "user_identity" or "api_key" |
-| value | The identity or key value |
 
 ### ReconSessionLogs
 
@@ -122,18 +108,18 @@ Sessions discovered during reconnaissance.
 
 ### ReconToolLogs
 
-Individual tools discovered during reconnaissance (MCP tools, skills, internal tools).
+Individual tools discovered during reconnaissance (MCP tools and skills).
 
 | Column | Description |
 |--------|-------------|
 | timestamp | When recon was performed |
 | node_id | Node identifier |
 | agent_short_name | Agent short name |
-| tool_type | Type: "mcp", "skill", or "internal" |
-| server_name | MCP server name (null for skills/internal) |
+| tool_type | Type: "mcp" or "skill" |
+| server_name | MCP server name (null for skills) |
 | tool_name | Tool name |
 | tool_description | Tool description |
-| transport | MCP transport type (null for skills/internal) |
+| transport | MCP transport type (null for skills) |
 
 ### TrafficLogs
 
@@ -225,9 +211,6 @@ AgentLogs | where available == true
 
 // Find all MCP tools across agents
 ReconToolLogs | where tool_type == "mcp" | project agent_short_name, server_name, tool_name
-
-// List API keys found in recon
-ReconMetadataLogs | where entry_type == "api_key"
 
 // Correlate traffic matches with rules
 TrafficMatchLogs | project timestamp, rule_name, url, summary | take 50

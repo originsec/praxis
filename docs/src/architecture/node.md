@@ -259,9 +259,9 @@ All are agent-scoped custom ACP methods (no `session_id` required) and are
 advertised in `InitializeResponse._meta.extensions`:
 
 - `_praxis/recon` — reconnaissance. Params
-  `{ "agent_short_name": string, "is_semantic": bool }`; returns a
-  `ReconResult`. Replaces the legacy `NodeCommand::Agent(Recon)` /
-  `Agent(ReconSemantic)` commands.
+  `{ "agent_short_name": string }`; returns a `ReconResult` with three
+  categories: `config` (config items + project paths), `tools` (MCP
+  servers + skills), `sessions` (enumerated agent sessions).
 - `_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files` —
   agent-scoped file ops used by recon tooling and the orchestrator.
 - `_praxis/write_session_content` — writes agent-session content through

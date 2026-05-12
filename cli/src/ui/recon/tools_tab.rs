@@ -46,7 +46,6 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let categories = [
         ("MCP Servers", result.tools.mcp_servers.len()),
         ("Skills", result.tools.skills.len()),
-        ("Internal", result.tools.internal_tools.len()),
     ];
 
     let visible_items = inner.height as usize;
@@ -88,8 +87,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
 fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
     let title = match overlay.selected_left {
         0 => " MCP Servers ",
-        1 => " Skills ",
-        _ => " Internal Tools ",
+        _ => " Skills ",
     };
 
     let block = focused_titled_panel(title, overlay.right_pane_focused);
@@ -144,7 +142,7 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                 }
             }
         }
-        1 => {
+        _ => {
             if result.tools.skills.is_empty() {
                 lines.push(Line::from(Span::styled(" No skills discovered", Style::default().fg(DIM))));
             } else {
@@ -157,25 +155,6 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                         lines.push(Line::from(vec![
                             Span::styled("  ", Style::default().fg(DIM)),
                             Span::styled(skill.description.clone(), Style::default().fg(DIM)),
-                        ]));
-                    }
-                    lines.push(Line::from(""));
-                }
-            }
-        }
-        _ => {
-            if result.tools.internal_tools.is_empty() {
-                lines.push(Line::from(Span::styled(" No internal tools discovered", Style::default().fg(DIM))));
-            } else {
-                for tool in &result.tools.internal_tools {
-                    lines.push(Line::from(vec![
-                        Span::styled("• ", Style::default().fg(ACCENT)),
-                        Span::styled(tool.name.clone(), Style::default().fg(TEXT_BRIGHT)),
-                    ]));
-                    if !tool.description.is_empty() {
-                        lines.push(Line::from(vec![
-                            Span::styled("  ", Style::default().fg(DIM)),
-                            Span::styled(tool.description.clone(), Style::default().fg(DIM)),
                         ]));
                     }
                     lines.push(Line::from(""));

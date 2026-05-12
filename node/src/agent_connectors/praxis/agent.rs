@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use common::{AgentTool, PraxisAgentConfig, ReconResult, ReconTools, SessionContext};
+use common::{PraxisAgentConfig, ReconResult, SessionContext};
 use uuid::Uuid;
 
 use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
@@ -51,20 +51,14 @@ impl Agent for PraxisAgent {
 
 #[async_trait]
 impl AgentRecon for PraxisAgent {
-    async fn perform_recon(&self, _is_semantic: bool) -> Option<ReconResult> {
-        let mut tools = ReconTools::default();
-        tools.internal_tools.push(AgentTool {
-            name: "run_command".to_string(),
-            description: "Execute a shell command on the target system".to_string(),
-            context_path: None,
-        });
+    async fn perform_recon(&self) -> Option<ReconResult> {
+        //
+        // The Praxis agent runs shell commands directly via the node; it has
+        // no MCP servers, skills, project-scoped config, or stored sessions
+        // to surface. Return an empty result rather than synthesising fake
+        // tool entries.
+        //
 
-        Some(ReconResult {
-            tools,
-            config: Vec::new(),
-            sessions: Vec::new(),
-            project_paths: Vec::new(),
-            metadata: None,
-        })
+        Some(ReconResult::default())
     }
 }

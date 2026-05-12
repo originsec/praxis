@@ -7,14 +7,7 @@ local function is_session_file(name)
   return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
 
-local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
-  if result.success then
-    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
-    return true, version
-  end
-  return false, nil
-end
+local verify_binary = helpers.make_verify_version_flag({})
 
 local function pick_path()
   return helpers.find_executable({
@@ -34,37 +27,25 @@ local function pick_path()
   })
 end
 
-local function has_auth_env_vars(homes)
-  return helpers.has_any_env_var({
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_USE_VERTEXAI",
-    "GOOGLE_GENAI_USE_GCA",
-  }, homes)
-end
-
 local function has_auth_in_settings(settings_path)
   local content = praxis.read_file(settings_path)
   if not content then
     return false
   end
-
   local parsed = helpers.parse_json(content)
   return parsed ~= nil and parsed.security ~= nil and parsed.security.auth ~= nil
 end
 
-local function path_has_valid_auth(path)
-  if has_auth_env_vars({path}) then
-    return true
-  end
-
-  local own_settings = praxis.path_join({ path, ".gemini", "settings.json" })
-  if has_auth_in_settings(own_settings) then
-    return true
-  end
-
-  return false
-end
+local auth_check = helpers.auth_via_env_or_files({
+  env_vars = {
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "GOOGLE_GENAI_USE_GCA",
+  },
+  auth_files = { ".gemini/settings.json" },
+  file_check = has_auth_in_settings,
+})
 
 local function extract_context_filenames(json_obj)
   local out = { "GEMINI.md" }
@@ -85,6 +66,13 @@ local function extract_context_filenames(json_obj)
   return out
 end
 
+--
+-- Gemini stores session files at <home>/.gemini/tmp/<sha256-hash>/chats/.
+-- We need to parse each file to recover the canonical sessionId and the
+-- message count, which is not derivable from filename or line count, so
+-- this stays a bespoke walker rather than using discover_jsonl_sessions.
+--
+
 local function discover_sessions_for_home(home)
   local sessions = {}
   local tmp_dir = praxis.path_join({ home, ".gemini", "tmp" })
@@ -92,52 +80,32 @@ local function discover_sessions_for_home(home)
     return sessions
   end
 
-  local project_dirs = praxis.read_dir(tmp_dir) or {}
-  for _, proj in ipairs(project_dirs) do
+  for _, proj in ipairs(praxis.read_dir(tmp_dir) or {}) do
     local project_hash = proj.name or ""
-    if not proj.is_dir or #project_hash ~= 64 then
-      goto continue_proj
+    if proj.is_dir and #project_hash == 64 then
+      local chats_dir = praxis.path_join({ proj.path, "chats" })
+      if praxis.path_is_dir(chats_dir) then
+        for _, entry in ipairs(praxis.read_dir(chats_dir) or {}) do
+          if entry.is_file and is_session_file(entry.name) then
+            local parsed = helpers.parse_json(praxis.read_file(entry.path) or "")
+            if parsed and type(parsed.sessionId) == "string" then
+              local last_updated = parsed.lastUpdated
+              if type(last_updated) ~= "string" then
+                last_updated = ""
+              end
+              table.insert(sessions, {
+                session_id = parsed.sessionId,
+                context_path = project_hash,
+                session_file = entry.path,
+                last_modified = last_updated,
+                message_count = type(parsed.messages) == "table" and #parsed.messages or 0,
+                content = nil,
+              })
+            end
+          end
+        end
+      end
     end
-
-    local chats_dir = praxis.path_join({ proj.path, "chats" })
-    if not praxis.path_is_dir(chats_dir) then
-      goto continue_proj
-    end
-
-    local chat_entries = praxis.read_dir(chats_dir) or {}
-    for _, entry in ipairs(chat_entries) do
-      if not entry.is_file or not is_session_file(entry.name) then
-        goto continue_entry
-      end
-
-      local content = praxis.read_file(entry.path)
-      if not content then
-        goto continue_entry
-      end
-
-      local parsed = helpers.parse_json(content)
-      if not parsed or type(parsed.sessionId) ~= "string" then
-        goto continue_entry
-      end
-
-      local last_updated = parsed.lastUpdated
-      if type(last_updated) ~= "string" then
-        last_updated = ""
-      end
-
-      table.insert(sessions, {
-        session_id = parsed.sessionId,
-        context_path = project_hash,
-        session_file = entry.path,
-        last_modified = last_updated,
-        message_count = type(parsed.messages) == "table" and #parsed.messages or 0,
-        content = nil,
-      })
-
-      ::continue_entry::
-    end
-
-    ::continue_proj::
   end
 
   return sessions
@@ -155,37 +123,13 @@ local function find_latest_session_id_from_storage(working_dir)
   end
 
   local chats_dir = praxis.path_join({ home, ".gemini", "tmp", project_hash, "chats" })
-  if not praxis.path_is_dir(chats_dir) then
-    return nil
-  end
-
-  local entries = praxis.read_dir(chats_dir) or {}
-  local best = nil
-  local best_modified = -1
-
-  for _, entry in ipairs(entries) do
-    if entry.is_file and is_session_file(entry.name) then
-      local m = entry.modified_unix or 0
-      if m > best_modified then
-        best_modified = m
-        best = entry.path
-      end
-    end
-  end
-
+  local best = helpers.find_latest_session_file(chats_dir, { suffix = ".json" })
   if not best then
     return nil
   end
 
-  local content = praxis.read_file(best)
-  if not content then
-    return nil
-  end
-  local parsed = helpers.parse_json(content)
-  if parsed == nil then
-    return nil
-  end
-  if type(parsed.sessionId) == "string" then
+  local parsed = helpers.parse_json(praxis.read_file(best) or "")
+  if parsed ~= nil and type(parsed.sessionId) == "string" then
     return parsed.sessionId
   end
   return nil
@@ -196,7 +140,7 @@ end
 -- These apply to all users on the machine.
 --
 
-local function collect_system_config(include_contents)
+local function collect_system_config()
   local result = helpers.new_recon_result()
 
   local function add_system_file(path, config_type)
@@ -207,7 +151,7 @@ local function collect_system_config(include_contents)
     table.insert(result.config_items, {
       path = path,
       config_type = config_type,
-      contents = include_contents and content or nil,
+      contents = nil,
     })
     if not content then
       return
@@ -221,8 +165,7 @@ local function collect_system_config(include_contents)
       context_path = nil,
       mcp_key = "default",
     })
-    local found = extract_context_filenames(parsed)
-    for _, f in ipairs(found) do
+    for _, f in ipairs(extract_context_filenames(parsed)) do
       table.insert(result.context_filenames, f)
     end
   end
@@ -254,70 +197,42 @@ local function collect_system_config(include_contents)
   return result
 end
 
-local function run_create_session(ctx)
-  local working_dir = ctx.working_dir
-  if type(working_dir) ~= "string" or working_dir == "" then
-    local homes = helpers.user_homes_with_dir(".gemini")
-    working_dir = homes[1]
-  end
-
-  return {
-    handle = praxis.uuid_v4(),
-    process_path = ctx.process_path,
-    working_dir = working_dir,
-    yolo_mode = ctx.yolo_mode == true,
-    prompt_timeout_secs = ctx.prompt_timeout_secs,
-    external_session_id = nil,
-  }
-end
-
-local function run_session_transact(state, prompt)
-  local args = {}
-  if state.yolo_mode then
-    table.insert(args, "-y")
-  end
-  if state.external_session_id ~= nil and state.external_session_id ~= "" then
-    table.insert(args, "-r")
-    table.insert(args, state.external_session_id)
-  end
-
-  local spec = {
-    program = state.process_path,
-    args = args,
-    cwd = state.working_dir,
-    stdin = prompt,
-    timeout_secs = state.prompt_timeout_secs or 1800,
-  }
-
-  local result = praxis.command_run_handle(spec, state.handle)
-  if not result.success then
-    error("Gemini command failed: " .. tostring(result.stderr or "unknown error"))
-  end
-
-  if state.external_session_id == nil or state.external_session_id == "" then
-    local discovered = find_latest_session_id_from_storage(state.working_dir)
-    if discovered ~= nil then
-      state.external_session_id = discovered
+local session_fns = helpers.subprocess_session({
+  home_dir = ".gemini",
+  error_label = "Gemini command failed",
+  initial_state = function(_ctx)
+    return { external_session_id = nil }
+  end,
+  on_response = function(state, _prompt, _stdout)
+    if state.external_session_id == nil or state.external_session_id == "" then
+      local discovered = find_latest_session_id_from_storage(state.working_dir)
+      if discovered ~= nil then
+        state.external_session_id = discovered
+      end
     end
-  end
-
-  return {
-    response = result.stdout or "",
-    state = state,
-  }
-end
-
-local function run_session_close(state)
-  if state.external_session_id ~= nil and state.external_session_id ~= "" then
-    local spec = {
-      program = state.process_path,
-      args = { "--delete-session", state.external_session_id },
-      cwd = state.working_dir,
-      timeout_secs = 10,
-    }
-    pcall(praxis.command_run, spec)
-  end
-end
+  end,
+  build_invocation = function(state, prompt)
+    local args = {}
+    if state.yolo_mode then
+      table.insert(args, "-y")
+    end
+    if state.external_session_id ~= nil and state.external_session_id ~= "" then
+      table.insert(args, "-r")
+      table.insert(args, state.external_session_id)
+    end
+    return { args = args, stdin = prompt }
+  end,
+  close = function(state)
+    if state.external_session_id ~= nil and state.external_session_id ~= "" then
+      pcall(praxis.command_run, {
+        program = state.process_path,
+        args = { "--delete-session", state.external_session_id },
+        cwd = state.working_dir,
+        timeout_secs = 10,
+      })
+    end
+  end,
+})
 
 --
 -- Post-collection hook: extract context filenames from settings configs,
@@ -325,33 +240,20 @@ end
 -- variables.
 --
 
-local function post_collect(result, ctx)
-
-  --
-  -- Extract context filenames from all settings config items.
-  --
-
+local function post_collect(result, _ctx)
   for _, item in ipairs(result.config_items) do
     if helpers.ends_with(item.config_type, "_settings")
         or helpers.starts_with(item.config_type, "project_settings:") then
-      local content = item.contents or praxis.read_file(item.path)
-      if content then
-        local parsed = helpers.parse_json(content)
-        if parsed then
-          local found = extract_context_filenames(parsed)
-          for _, f in ipairs(found) do
-            table.insert(result.context_filenames, f)
-          end
+      local parsed = helpers.parse_json(praxis.read_file(item.path) or "")
+      if parsed then
+        for _, f in ipairs(extract_context_filenames(parsed)) do
+          table.insert(result.context_filenames, f)
         end
       end
     end
   end
 
   result.context_filenames = helpers.dedup(result.context_filenames)
-
-  --
-  -- Discover custom context files in project directories.
-  --
 
   for _, proj in ipairs(result.project_paths) do
     for _, fname in ipairs(result.context_filenames) do
@@ -361,16 +263,12 @@ local function post_collect(result, ctx)
           table.insert(result.config_items, {
             path = p,
             config_type = "project_context:" .. proj,
-            contents = ctx.is_semantic and praxis.read_file(p) or nil,
+            contents = nil,
           })
         end
       end
     end
   end
-
-  --
-  -- Collect environment variables.
-  --
 
   local env_lines = {}
   local env_vars = {
@@ -427,15 +325,9 @@ local recon_config = {
     default = helpers.parse_mcp_from_json,
   },
 
-  auth_check = path_has_valid_auth,
+  auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
   post_collect = post_collect,
-
-  session_fns = {
-    create = run_create_session,
-    transact = run_session_transact,
-    close = run_session_close,
-  },
 }
 
 return {
@@ -457,11 +349,7 @@ return {
 
   create_session = function(ctx)
     local pp = ctx.process_path
-    local working_dir = ctx.working_dir
-    if type(working_dir) ~= "string" or working_dir == "" then
-      local homes = helpers.user_homes_with_dir(".gemini")
-      working_dir = homes[1]
-    end
+    local working_dir = helpers.resolve_working_dir(ctx, ".gemini")
 
     local acp_handle = praxis.acp_start({
       program = pp,
@@ -484,10 +372,7 @@ return {
 
   session_transact = function(_ctx, state, prompt)
     local response = praxis.acp_prompt(state.acp_handle, prompt, state.yolo_mode or false, state.interactive or false)
-    return {
-      response = response,
-      state = state,
-    }
+    return { response = response, state = state }
   end,
 
   session_close = function(_ctx, state)
@@ -495,5 +380,4 @@ return {
       praxis.acp_close(state.acp_handle)
     end
   end,
-
 }

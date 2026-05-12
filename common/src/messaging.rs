@@ -356,32 +356,6 @@ pub struct McpServer {
     pub context_path: Option<String>,
 }
 
-/// Tools discovered during agent reconnaissance
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ReconTools {
-    /// MCP servers with their tools
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServer>,
-    /// Skills (slash commands like /commit, /review)
-    #[serde(default)]
-    pub skills: Vec<AgentTool>,
-    /// Internal tools (like ReadFile, WriteFile, GrepFile) - only via
-    /// ReconSemantic
-    #[serde(default)]
-    pub internal_tools: Vec<AgentTool>,
-}
-
-impl ReconTools {
-    pub fn is_empty(&self) -> bool {
-        self.mcp_servers.is_empty() && self.skills.is_empty() && self.internal_tools.is_empty()
-    }
-
-    /// Get total number of MCP tools across all servers
-    pub fn mcp_tool_count(&self) -> usize {
-        self.mcp_servers.iter().map(|s| s.tools.len()).sum()
-    }
-}
-
 /// Configuration item discovered during agent reconnaissance
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConfigItem {
@@ -412,50 +386,74 @@ pub struct SessionItem {
     pub content: Option<String>,
 }
 
-/// Metadata extracted from agent configuration during reconnaissance
+//
+// Recon outputs are organised into three independent categories. Each
+// category owns the data discovered by that part of the recon pipeline,
+// keeping the shape of ReconResult straightforward.
+//
+
+/// Tools discovered during agent reconnaissance.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ReconMetadata {
-    /// User identities found in config (emails, usernames, account IDs)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user_identities: Option<Vec<String>>,
-    /// API keys found in config
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_keys: Option<Vec<String>>,
+pub struct ReconTools {
+    /// MCP servers with their tools.
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServer>,
+    /// Skills (slash commands like /commit, /review).
+    #[serde(default)]
+    pub skills: Vec<AgentTool>,
 }
 
-impl ReconMetadata {
+impl ReconTools {
     pub fn is_empty(&self) -> bool {
-        self.user_identities.as_ref().map_or(true, |v| v.is_empty())
-            && self.api_keys.as_ref().map_or(true, |v| v.is_empty())
+        self.mcp_servers.is_empty() && self.skills.is_empty()
+    }
+
+    /// Total number of MCP tools across all servers.
+    pub fn mcp_tool_count(&self) -> usize {
+        self.mcp_servers.iter().map(|s| s.tools.len()).sum()
     }
 }
 
-/// Result of agent reconnaissance
+/// Configuration items + the project paths in which they were discovered.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ReconResult {
-    /// Tools discovered (MCP servers, skills, internal tools)
-    pub tools: ReconTools,
-    /// Configuration items discovered (contents fetched on-demand)
+pub struct ReconConfig {
     #[serde(default)]
-    pub config: Vec<ConfigItem>,
-    /// Sessions discovered (from enumeration)
-    #[serde(default)]
-    pub sessions: Vec<SessionItem>,
-    /// Discovered project paths (directories containing agent configs)
+    pub items: Vec<ConfigItem>,
+    /// Project directories where agent-scoped config was discovered.
     #[serde(default)]
     pub project_paths: Vec<String>,
-    /// Metadata extracted from configuration (user identities, API keys, etc.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<ReconMetadata>,
+}
+
+impl ReconConfig {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty() && self.project_paths.is_empty()
+    }
+}
+
+/// Sessions enumerated during reconnaissance.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ReconSessions {
+    #[serde(default)]
+    pub items: Vec<SessionItem>,
+}
+
+impl ReconSessions {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+/// Result of agent reconnaissance.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ReconResult {
+    pub config: ReconConfig,
+    pub tools: ReconTools,
+    pub sessions: ReconSessions,
 }
 
 impl ReconResult {
     pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
-            && self.config.is_empty()
-            && self.sessions.is_empty()
-            && self.project_paths.is_empty()
-            && self.metadata.as_ref().map_or(true, |m| m.is_empty())
+        self.config.is_empty() && self.tools.is_empty() && self.sessions.is_empty()
     }
 }
 
@@ -2306,8 +2304,6 @@ pub enum ClientDirectMessage {
         recon_result: Option<ReconResult>,
         /// When the recon was performed (ISO 8601)
         performed_at: Option<String>,
-        /// Whether this was a semantic recon
-        is_semantic: Option<bool>,
     },
 
     //

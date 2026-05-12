@@ -13,7 +13,6 @@ pub enum VirtualTable {
     ReconLogs,
     ReconToolLogs,
     ReconSessionLogs,
-    ReconMetadataLogs,
     EventLogs,
     ToolkitActionsLog,
     SemanticOperationLogs,
@@ -30,7 +29,6 @@ impl VirtualTable {
                 | VirtualTable::ReconLogs
                 | VirtualTable::ReconToolLogs
                 | VirtualTable::ReconSessionLogs
-                | VirtualTable::ReconMetadataLogs
                 | VirtualTable::EventLogs
                 | VirtualTable::ToolkitActionsLog
                 | VirtualTable::SemanticOperationLogs
@@ -48,7 +46,6 @@ pub fn resolve_table(name: &str) -> Option<VirtualTable> {
         "reconlogs" => Some(VirtualTable::ReconLogs),
         "recontoollogs" => Some(VirtualTable::ReconToolLogs),
         "reconsessionlogs" => Some(VirtualTable::ReconSessionLogs),
-        "reconmetadatalogs" => Some(VirtualTable::ReconMetadataLogs),
         "eventlogs" => Some(VirtualTable::EventLogs),
         "toolkitactionslog" => Some(VirtualTable::ToolkitActionsLog),
         "semanticoperationlogs" => Some(VirtualTable::SemanticOperationLogs),
@@ -76,8 +73,8 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "timestamp", "node_id", "agent_short_name", "agent_name", "version",
         ],
         VirtualTable::ReconLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "is_semantic",
-            "mcp_server_count", "skill_count", "internal_tool_count",
+            "timestamp", "node_id", "agent_short_name",
+            "mcp_server_count", "skill_count",
             "config_count", "session_count", "project_path_count",
         ],
         VirtualTable::ReconToolLogs => vec![
@@ -87,9 +84,6 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
         VirtualTable::ReconSessionLogs => vec![
             "timestamp", "node_id", "agent_short_name", "session_id",
             "context_path", "last_modified", "message_count",
-        ],
-        VirtualTable::ReconMetadataLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "entry_type", "value",
         ],
         VirtualTable::EventLogs => vec![
             "timestamp", "source", "source_id", "level", "target", "message",
@@ -205,13 +199,11 @@ pub async fn materialize_recon_logs(
                 Value::String(r.performed_at.clone()),
                 Value::String(r.node_id.clone()),
                 Value::String(r.agent_short_name.clone()),
-                Value::Bool(r.is_semantic),
                 Value::Number(r.recon_result.tools.mcp_servers.len().into()),
                 Value::Number(r.recon_result.tools.skills.len().into()),
-                Value::Number(r.recon_result.tools.internal_tools.len().into()),
-                Value::Number(r.recon_result.config.len().into()),
-                Value::Number(r.recon_result.sessions.len().into()),
-                Value::Number(r.recon_result.project_paths.len().into()),
+                Value::Number(r.recon_result.config.items.len().into()),
+                Value::Number(r.recon_result.sessions.items.len().into()),
+                Value::Number(r.recon_result.config.project_paths.len().into()),
             ]
         })
         .collect();
@@ -257,18 +249,6 @@ pub async fn materialize_recon_tool_logs(
                 Value::Null,
             ]);
         }
-        for tool in &r.recon_result.tools.internal_tools {
-            rows.push(vec![
-                Value::String(r.performed_at.clone()),
-                Value::String(r.node_id.clone()),
-                Value::String(r.agent_short_name.clone()),
-                Value::String("internal".to_string()),
-                Value::Null,
-                Value::String(tool.name.clone()),
-                Value::String(tool.description.clone()),
-                Value::Null,
-            ]);
-        }
     }
 
     Ok((columns, rows))
@@ -286,7 +266,7 @@ pub async fn materialize_recon_session_logs(
     let mut rows = Vec::new();
 
     for r in results {
-        for session in &r.recon_result.sessions {
+        for session in &r.recon_result.sessions.items {
             rows.push(vec![
                 Value::String(r.performed_at.clone()),
                 Value::String(r.node_id.clone()),
@@ -296,47 +276,6 @@ pub async fn materialize_recon_session_logs(
                 Value::String(session.last_modified.clone()),
                 Value::Number(session.message_count.into()),
             ]);
-        }
-    }
-
-    Ok((columns, rows))
-}
-
-pub async fn materialize_recon_metadata_logs(
-    database: &Arc<Database>,
-) -> anyhow::Result<(Vec<String>, Vec<Vec<Value>>)> {
-    let columns: Vec<String> = table_columns(VirtualTable::ReconMetadataLogs)
-        .into_iter()
-        .map(String::from)
-        .collect();
-
-    let results = database.list_all_recon_results().await?;
-    let mut rows = Vec::new();
-
-    for r in results {
-        if let Some(meta) = &r.recon_result.metadata {
-            if let Some(identities) = &meta.user_identities {
-                for identity in identities {
-                    rows.push(vec![
-                        Value::String(r.performed_at.clone()),
-                        Value::String(r.node_id.clone()),
-                        Value::String(r.agent_short_name.clone()),
-                        Value::String("user_identity".to_string()),
-                        Value::String(identity.clone()),
-                    ]);
-                }
-            }
-            if let Some(keys) = &meta.api_keys {
-                for key in keys {
-                    rows.push(vec![
-                        Value::String(r.performed_at.clone()),
-                        Value::String(r.node_id.clone()),
-                        Value::String(r.agent_short_name.clone()),
-                        Value::String("api_key".to_string()),
-                        Value::String(key.clone()),
-                    ]);
-                }
-            }
         }
     }
 
