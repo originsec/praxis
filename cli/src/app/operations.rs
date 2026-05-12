@@ -267,7 +267,19 @@ impl App {
                     self.open_run_target_popup();
                 }
             }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('n')
+                if key
+                    .modifiers
+                    .contains(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                if self.operations.tab == OpsTab::Library {
+                    self.open_new_chain_form();
+                }
+            }
+            KeyCode::Char('n')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
                 match self.operations.tab {
                     OpsTab::Library => self.open_new_op_form(),
                     OpsTab::Triggers => self.open_new_trigger_form(),
@@ -276,14 +288,21 @@ impl App {
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match self.operations.tab {
-                    OpsTab::Library => self.edit_selected_op(),
+                    OpsTab::Library => {
+                        let filtered = self.filtered_library();
+                        match filtered.get(self.operations.library_selected) {
+                            Some(&(_, true)) => self.edit_selected_chain(),
+                            Some(&(_, false)) => self.edit_selected_op(),
+                            None => {}
+                        }
+                    }
                     OpsTab::Triggers => self.edit_selected_trigger(),
                     _ => {}
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match self.operations.tab {
-                    OpsTab::Library => self.delete_selected_op().await,
+                    OpsTab::Library => self.delete_selected_library_row().await,
                     OpsTab::Executions => self.delete_selected_execution().await,
                     OpsTab::Triggers => self.delete_selected_trigger().await,
                 }
@@ -820,6 +839,24 @@ impl App {
         }
     }
 
+    pub(crate) async fn delete_selected_library_row(&mut self) {
+        let filtered = self.filtered_library();
+        let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) else {
+            return;
+        };
+        if is_chain {
+            let chain = &self.operations.chain_definitions[idx];
+            let chain_id = chain.id.clone();
+            let name = chain.name.clone();
+            self.confirm = Some(ConfirmAction {
+                message: format!("Delete chain \"{}\"?", name),
+                action: ConfirmKind::DeleteChain(chain_id),
+            });
+        } else {
+            self.delete_selected_op().await;
+        }
+    }
+
     pub(crate) async fn execute_run_options(&mut self, opts: RunOptions) {
         let selected_nodes: Vec<String> = opts
             .nodes
@@ -1040,16 +1077,26 @@ impl App {
                     let rel = mouse.column.saturating_sub(hints_area.x) as usize;
                     match self.operations.tab {
                         OpsTab::Library => {
-                            // " ^r execute  ^n new  ^e edit  ^d delete"
-                            //  0  2      12 13  20 21  28 29
-                            if rel >= 1 && rel < 13 {
+                            //
+                            // " ^r execute    ^n new op    ^⌥n new chain    ^e edit    ^d delete"
+                            // Approximate column ranges below; clicks anywhere
+                            // inside the hint chip dispatch the action.
+                            //
+                            if rel < 13 {
                                 self.open_run_target_popup();
-                            } else if rel >= 13 && rel < 21 {
+                            } else if rel < 24 {
                                 self.open_new_op_form();
-                            } else if rel >= 21 && rel < 29 {
-                                self.edit_selected_op();
-                            } else if rel >= 29 && rel < 40 {
-                                self.delete_selected_op().await;
+                            } else if rel < 40 {
+                                self.open_new_chain_form();
+                            } else if rel < 51 {
+                                let filtered = self.filtered_library();
+                                match filtered.get(self.operations.library_selected) {
+                                    Some(&(_, true)) => self.edit_selected_chain(),
+                                    Some(&(_, false)) => self.edit_selected_op(),
+                                    None => {}
+                                }
+                            } else if rel < 63 {
+                                self.delete_selected_library_row().await;
                             }
                         }
                         OpsTab::Executions => {

@@ -203,9 +203,27 @@ Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 - **Triggers** — automated chain firing rules
 
 Common actions:
-- Create new operations inline
-- Run operations with node/agent selection and YOLO mode
+- Create new operations inline (`Ctrl+N` on the Library tab)
+- Create new chains via the chain builder (`Ctrl+Alt+N` on the Library tab, or click `^⌥n new chain` in the hint bar)
+- Edit an existing op or chain (`Ctrl+E` with the row selected — opens the op form for ops, the chain builder for chains)
+- Run operations and chains with node/agent selection and YOLO mode (`Ctrl+R`)
+- Delete the selected op or chain (`Ctrl+D`)
 - Create, edit, enable/disable and delete chain triggers
+
+#### Library tab — chain builder
+
+The chain builder is a visual canvas with draggable element blocks and
+orthogonal line connectors between ports. It is mouse-first:
+
+- **Canvas** — drag a block by its body to move it; drag empty space to pan; the mouse wheel scrolls vertically. Block positions persist in `ChainDefinitionInput.positions` so each chain remembers its layout.
+- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag.
+- **Selection** — single-click a block to select it; click a connector segment to select that connection. The selected item's fields appear in the properties strip below the canvas.
+- **Properties strip** — for blocks: click any field to edit inline; the kind cycler `◂ Kind ▸` changes the element type; `[Delete]` removes the block (and any incident connections). For connections: the condition cycler toggles `any` / `on success` / `on failure`; the port numbers are editable.
+- **Header strip** — `Name`, `Category`, `Timeout`, and `Description` text fields are at the top of the modal; click to edit.
+- **Palette** — the row of `[+ TRG]`, `[+ OP]`, … buttons along the bottom drops a new element of that kind at the centre of the visible canvas.
+- **Save / Cancel** — buttons in the top-right corner of the modal; `Ctrl+S` and `Esc` are keyboard equivalents.
+
+A newly created chain is seeded with a connected `Trigger → Termination` pair so the graph is valid out of the box; auto-layout (left-to-right BFS from triggers) is applied to existing chains that don't yet have stored positions.
 
 #### Triggers tab
 

@@ -1,9 +1,9 @@
 use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
-    ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, InterceptRule, InterceptStatus,
-    InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult, SemanticOpUpdate, SystemState,
-    TerminalOutput, TrafficMatchWithDetails,
+    ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
+    InterceptRule, InterceptStatus, InterceptedTrafficEntry, OperationDefinitionInfo,
+    ReconResult, SemanticOpUpdate, SystemState, TerminalOutput, TrafficMatchWithDetails,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -78,6 +78,13 @@ pub enum AppEvent {
     // returned from the service.
     //
     LogQueryResult(Result<crate::client::LogQueryResults, String>),
+    //
+    // Full chain definition arrived in response to ChainGet — open the
+    // chain edit form populated with this chain.
+    //
+    ChainLoadedForEdit {
+        chain: ChainDefinitionFull,
+    },
     Tick,
     AnimationTick,
 }

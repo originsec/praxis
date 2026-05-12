@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
-    ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage, ClientDirectMessage,
+    ChainDefinitionInput, ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage,
+    ClientDirectMessage,
     ClientRegistration, ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
     InterceptedTrafficEntry, LuaAgentScriptInfo, OperationDefinitionInfo, RuleScope,
     SemanticOpUpdate, SystemState, TargetDirection, TargetSpec, TerminalOutput,
@@ -1156,7 +1157,6 @@ impl Client {
         self.publish_signal(message).await
     }
 
-    #[allow(dead_code)]
     pub async fn request_chain_def(&self, chain_id: &str) -> Result<()> {
         let message = ClientSignalMessage::ChainGet {
             client_id: self.client_id.clone(),
@@ -1165,9 +1165,37 @@ impl Client {
         self.publish_signal(message).await
     }
 
-    #[allow(dead_code)]
     pub async fn get_current_chain(&self) -> Option<ChainDefinitionFull> {
         self.state.lock().await.current_chain.clone()
+    }
+
+    pub async fn add_chain_def(&self, definition: ChainDefinitionInput) -> Result<()> {
+        let message = ClientSignalMessage::ChainCreate {
+            client_id: self.client_id.clone(),
+            definition,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_chain_def(
+        &self,
+        chain_id: String,
+        definition: ChainDefinitionInput,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainUpdate {
+            client_id: self.client_id.clone(),
+            chain_id,
+            definition,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_chain_def(&self, chain_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainDelete {
+            client_id: self.client_id.clone(),
+            chain_id,
+        };
+        self.publish_signal(message).await
     }
 
     pub async fn clear_all_ops(&self) -> Result<()> {
