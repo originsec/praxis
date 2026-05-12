@@ -1078,7 +1078,7 @@ impl App {
                     match self.operations.tab {
                         OpsTab::Library => {
                             //
-                            // " ^r execute    ^n new op    ^⌥n new chain    ^e edit    ^d delete"
+                            // " ^r execute    ^n new op    ^! newchain    ^e edit    ^d delete"
                             // Approximate column ranges below; clicks anywhere
                             // inside the hint chip dispatch the action.
                             //
@@ -1086,16 +1086,16 @@ impl App {
                                 self.open_run_target_popup();
                             } else if rel < 24 {
                                 self.open_new_op_form();
-                            } else if rel < 40 {
+                            } else if rel < 38 {
                                 self.open_new_chain_form();
-                            } else if rel < 51 {
+                            } else if rel < 49 {
                                 let filtered = self.filtered_library();
                                 match filtered.get(self.operations.library_selected) {
                                     Some(&(_, true)) => self.edit_selected_chain(),
                                     Some(&(_, false)) => self.edit_selected_op(),
                                     None => {}
                                 }
-                            } else if rel < 63 {
+                            } else if rel < 61 {
                                 self.delete_selected_library_row().await;
                             }
                         }
