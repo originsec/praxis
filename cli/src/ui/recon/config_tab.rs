@@ -137,10 +137,13 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         for line in content.lines() {
             lines.push(Line::from(Span::styled(line.to_string(), Style::default().fg(TEXT))));
         }
+        let max_scroll = (lines.len() as u16).saturating_sub(inner.height);
+        overlay.right_pane_max_scroll.set(max_scroll);
+        let effective = overlay.selected_right_scroll.min(max_scroll);
         f.render_widget(
             Paragraph::new(lines)
                 .wrap(Wrap { trim: false })
-                .scroll((overlay.selected_right_scroll, 0)),
+                .scroll((effective, 0)),
             inner,
         );
     } else {

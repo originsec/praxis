@@ -129,6 +129,7 @@ pub struct ReconOverlay {
     pub active_tab: ReconTab,
     pub selected_left: usize,
     pub selected_right_scroll: u16,
+    pub right_pane_max_scroll: Cell<u16>,
     pub config_loading: bool,
     pub config_content_error: Option<String>,
     pub session_loading: bool,
@@ -1207,6 +1208,7 @@ impl App {
             active_tab: ReconTab::Config,
             selected_left: 0,
             selected_right_scroll: 0,
+            right_pane_max_scroll: Cell::new(0),
             config_loading: false,
             config_content_error: None,
             session_loading: false,
@@ -1435,7 +1437,9 @@ impl App {
             }
             KeyCode::Down => {
                 if recon.right_pane_focused {
-                    recon.selected_right_scroll += 1;
+                    let max = recon.right_pane_max_scroll.get();
+                    recon.selected_right_scroll =
+                        recon.selected_right_scroll.saturating_add(1).min(max);
                 } else {
                     if recon.selected_left < left_max {
                         recon.selected_left += 1;
@@ -1454,7 +1458,9 @@ impl App {
                 }
             }
             KeyCode::PageDown => {
-                recon.selected_right_scroll += 10;
+                let max = recon.right_pane_max_scroll.get();
+                recon.selected_right_scroll =
+                    recon.selected_right_scroll.saturating_add(10).min(max);
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.trigger_recon_refresh(false).await;
@@ -1681,7 +1687,9 @@ impl App {
                         .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
                 };
                 if recon.right_pane_focused {
-                    recon.selected_right_scroll += 3;
+                    let max = recon.right_pane_max_scroll.get();
+                    recon.selected_right_scroll =
+                        recon.selected_right_scroll.saturating_add(3).min(max);
                 } else {
                     recon.selected_left = (recon.selected_left + 3).min(left_max);
                     recon.config_content_error = None;
@@ -1833,15 +1841,17 @@ impl App {
                         }
                     }
                     Window::Intercept if self.intercept.detail_focus => {
+                        let max = self.intercept.detail_max_scroll.get();
                         self.intercept.detail_scroll =
-                            self.intercept.detail_scroll.saturating_add(3);
+                            self.intercept.detail_scroll.saturating_add(3).min(max);
                     }
                     Window::Intercept => {
                         self.intercept.move_selection(3);
                     }
                     Window::LogQuery if self.log_query.row_expanded => {
+                        let max = self.log_query.detail_max_scroll.get();
                         self.log_query.detail_scroll =
-                            self.log_query.detail_scroll.saturating_add(3);
+                            self.log_query.detail_scroll.saturating_add(3).min(max);
                     }
                     Window::LogQuery => {
                         let n = self.log_query.visible_row_count();

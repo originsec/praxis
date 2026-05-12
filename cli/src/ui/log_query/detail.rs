@@ -43,7 +43,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
         render_value(row.get(i), &mut lines);
     }
 
-    let para = Paragraph::new(lines).scroll((state.detail_scroll, 0));
+    let max_scroll = (lines.len() as u16).saturating_sub(inner.height);
+    state.detail_max_scroll.set(max_scroll);
+    let effective = state.detail_scroll.min(max_scroll);
+
+    let para = Paragraph::new(lines).scroll((effective, 0));
     f.render_widget(para, inner);
 }
 
