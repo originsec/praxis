@@ -432,6 +432,41 @@ local function build_session_metadata_line(meta, message_count)
   return praxis.json_encode(payload)
 end
 
+--
+-- Discover Cursor custom commands (.cursor/commands/*.md) at user and
+-- project scope. Cursor's rules (.cursor/rules/*.mdc) are project context,
+-- not invokable commands, so they are deliberately omitted here.
+--
+
+local function discover_skills(home, project_paths)
+  local skills = {}
+
+  local home_cursor = praxis.path_join({ home, ".cursor" })
+  for _, s in ipairs(helpers.discover_command_skills(home_cursor, {
+    dir = "commands",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })) do
+    table.insert(skills, s)
+  end
+
+  for _, proj in ipairs(project_paths or {}) do
+    local proj_cursor = praxis.path_join({ proj, ".cursor" })
+    for _, s in ipairs(helpers.discover_command_skills(proj_cursor, {
+      dir = "commands",
+      pattern = "%.md$",
+      name_prefix = "/",
+      parse = "markdown",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+  end
+
+  return skills
+end
+
 local recon_config = {
   home_dir = ".cursor",
 
@@ -453,6 +488,7 @@ local recon_config = {
 
   auth_check = path_has_valid_auth,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
 
   session_fns = {
     create = run_create_session,

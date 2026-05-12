@@ -117,6 +117,7 @@ function M.new_recon_result()
     context_filenames = {},
     project_paths = {},
     sessions = {},
+    skills = {},
   }
 end
 
@@ -135,6 +136,9 @@ function M.merge_recon_result(dest, source)
   end
   for _, s in ipairs(source.sessions or {}) do
     table.insert(dest.sessions, s)
+  end
+  for _, k in ipairs(source.skills or {}) do
+    table.insert(dest.skills, k)
   end
 end
 
@@ -696,6 +700,226 @@ function M.extract_mcp_servers(raw_configs, parsers)
 end
 
 --
+-- Parse a YAML-ish key from a markdown frontmatter block. Supports plain,
+-- single-quoted, double-quoted scalars and `|` / `>` block scalars (with
+-- optional chomping indicators). No nesting. Returns the value string or
+-- nil if the key is not found or no frontmatter delimiters are present.
+--
+
+function M.parse_frontmatter_field(content, field)
+  if type(content) ~= "string" or content == "" then
+    return nil
+  end
+  local fm = content:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
+  if not fm then
+    return nil
+  end
+
+  --
+  -- Split frontmatter into lines (keeps empties).
+  --
+
+  local lines = {}
+  for line in (fm .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    table.insert(lines, line)
+  end
+
+  local key_pattern = "^(%s*)" .. field .. "%s*:%s*(.-)%s*$"
+  for i, line in ipairs(lines) do
+    local indent, value = line:match(key_pattern)
+    if indent then
+      --
+      -- Block scalar: collect subsequent lines indented further than the
+      -- key itself, joining with spaces (folded `>`) or newlines (literal
+      -- `|`). Strip trailing whitespace; treat blank lines as paragraph
+      -- separators.
+      --
+
+      local style = value:match("^([|>])[%+%-]?%s*$")
+      if style then
+        local key_indent_len = #indent
+        local block = {}
+        for j = i + 1, #lines do
+          local l = lines[j]
+          if l:match("^%s*$") then
+            table.insert(block, "")
+          else
+            local lead = l:match("^(%s*)")
+            if #lead > key_indent_len then
+              table.insert(block, l:sub(#lead + 1))
+            else
+              break
+            end
+          end
+        end
+        --
+        -- Trim trailing empties and join according to style.
+        --
+
+        while #block > 0 and block[#block] == "" do
+          table.remove(block)
+        end
+        local sep = style == ">" and " " or "\n"
+        local joined = table.concat(block, sep)
+        joined = joined:gsub("^%s+", ""):gsub("%s+$", "")
+        return joined
+      end
+
+      --
+      -- Inline scalar: strip quotes if wrapping the whole value.
+      --
+
+      local stripped = value:match('^"(.*)"$') or value:match("^'(.*)'$")
+      local final = stripped or value
+      if final == "" then
+        return nil
+      end
+      return final
+    end
+  end
+  return nil
+end
+
+--
+-- Return the first non-empty, non-frontmatter line of a markdown document.
+-- Strips leading "# " markers so headings collapse to their text.
+--
+
+function M.first_meaningful_line(content)
+  if type(content) ~= "string" or content == "" then
+    return nil
+  end
+  local body = content
+  local _, fm_end = body:find("^%-%-%-\r?\n.-\r?\n%-%-%-\r?\n")
+  if fm_end then
+    body = body:sub(fm_end + 1)
+  end
+  for line in body:gmatch("[^\r\n]+") do
+    local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if trimmed ~= "" then
+      return (trimmed:gsub("^#+%s*", ""))
+    end
+  end
+  return nil
+end
+
+--
+-- Strip a path extension. "foo.md" -> "foo", "foo.bar.toml" -> "foo.bar".
+--
+
+function M.strip_extension(name)
+  return (tostring(name or ""):gsub("%.[^.]+$", ""))
+end
+
+--
+-- Discover slash-command style skills under base_path/dir. Each file matching
+-- pattern becomes one skill, with name derived from the path (sub-paths
+-- become "parent/leaf" so namespace nesting is preserved). The description
+-- is taken from the frontmatter `description:` field if present, otherwise
+-- the first meaningful line of the file. Set context_path to mark project
+-- skills.
+--
+-- opts: {
+--   dir          = "commands",       -- subdirectory under base_path
+--   pattern      = "%.md$",          -- lua pattern (anchored to end of name)
+--   name_prefix  = "/",              -- prepended to derived names
+--   parse        = "markdown"|"toml",-- how to extract description
+--   context_path = nil | "<path>",   -- nil for global, base for project
+-- }
+--
+
+function M.discover_command_skills(base_path, opts)
+  local dir = praxis.path_join({ base_path, opts.dir })
+  if not praxis.path_is_dir(dir) then
+    return {}
+  end
+
+  local files = praxis.walk_files(dir, 8) or {}
+  local skills = {}
+  for _, file in ipairs(files) do
+    local nf = M.norm(file)
+    if nf:match(opts.pattern) then
+      local rel = nf:sub(#M.norm(dir) + 2)
+      local name_path = M.strip_extension(rel)
+      local name = (opts.name_prefix or "") .. name_path
+
+      local content = praxis.read_file(file)
+      local description = nil
+      if opts.parse == "toml" then
+        local parsed = M.parse_toml(content or "")
+        if parsed and type(parsed.description) == "string" then
+          description = parsed.description
+        elseif parsed and type(parsed.prompt) == "string" then
+          description = parsed.prompt:sub(1, 200)
+        end
+      else
+        description = M.parse_frontmatter_field(content or "", "description")
+        if description == nil then
+          description = M.first_meaningful_line(content or "")
+        end
+      end
+
+      table.insert(skills, {
+        name = name,
+        description = description or "",
+        context_path = opts.context_path,
+      })
+    end
+  end
+  return skills
+end
+
+--
+-- Discover Anthropic-style "SKILL.md" skills under base_path/dir. Each
+-- subdirectory containing a SKILL.md becomes one skill. The name comes from
+-- the frontmatter `name:` (falling back to the directory name) and the
+-- description from frontmatter `description:`.
+--
+
+function M.discover_skill_md_skills(base_path, opts)
+  local dir = praxis.path_join({ base_path, opts.dir or "skills" })
+  if not praxis.path_is_dir(dir) then
+    return {}
+  end
+
+  local skills = {}
+  local entries = praxis.read_dir(dir) or {}
+  for _, entry in ipairs(entries) do
+    if entry.is_dir then
+      local skill_md = praxis.path_join({ entry.path, "SKILL.md" })
+      if praxis.path_exists(skill_md) then
+        local content = praxis.read_file(skill_md) or ""
+        local name = M.parse_frontmatter_field(content, "name") or entry.name
+        local description = M.parse_frontmatter_field(content, "description") or ""
+        table.insert(skills, {
+          name = name,
+          description = description,
+          context_path = opts.context_path,
+        })
+      end
+    end
+  end
+  return skills
+end
+
+--
+-- Deduplicate a list of skills by name+context_path, preserving first seen.
+--
+
+function M.dedup_skills(skills)
+  local seen = {}
+  local out = {}
+  for _, s in ipairs(skills or {}) do
+    local key = (s.name or "") .. "::" .. (s.context_path or "")
+    if not seen[key] then
+      seen[key] = true
+      table.insert(out, s)
+    end
+  end
+  return out
+end
+
+--
 -- Standard recon orchestration. Takes a declarative config table describing
 -- where to find configs, how to discover projects, and how to parse MCP
 -- servers. Handles the full system → home → project → auth → MCP → semantic
@@ -711,6 +935,7 @@ end
 --   mcp_parsers       (table)    { default = fn, [key] = fn, ... }
 --   auth_check        (fn)       fn(path, user_homes, process_path) -> bool
 --   session_discovery  (fn?)     fn(home) -> {sessions}
+--   skill_discovery   (fn?)      fn(home, project_paths) -> {skills}
 --   session_fns       (table)    { create, transact, close } for semantic enrichment
 --   context_filenames (table?)   initial context filenames to include
 --   post_collect      (fn?)      fn(result, ctx) -> result, called after collection
@@ -788,6 +1013,17 @@ function M.run_standard_recon(ctx, config)
       end
     end
 
+    if config.skill_discovery then
+      local ok, skills = pcall(config.skill_discovery, home, home_result.project_paths)
+      if ok and type(skills) == "table" then
+        for _, s in ipairs(skills) do
+          table.insert(home_result.skills, s)
+        end
+      elseif not ok then
+        praxis.log_warn("skill_discovery failed for " .. tostring(home) .. ": " .. tostring(skills))
+      end
+    end
+
     return home_result
   end
 
@@ -857,10 +1093,28 @@ function M.run_standard_recon(ctx, config)
     end
   end
 
+  --
+  -- Filter skills to those whose context_path passes auth (or is global,
+  -- which is implicitly authorised by the presence of an authed home).
+  -- Skills outside any filtered path are dropped to mirror how MCP servers
+  -- are gated.
+  --
+
+  local authed_set = {}
+  for _, p in ipairs(filtered_paths) do
+    authed_set[p] = true
+  end
+  local skills_filtered = {}
+  for _, s in ipairs(M.dedup_skills(result.skills or {})) do
+    if s.context_path == nil or authed_set[s.context_path] then
+      table.insert(skills_filtered, s)
+    end
+  end
+
   return {
     tools = {
       mcp_servers = mcp_unique,
-      skills = {},
+      skills = skills_filtered,
       internal_tools = internal_tools,
     },
     config = result.config_items,

@@ -215,6 +215,41 @@ local function run_session_close(state)
   -- Droid sessions don't need explicit cleanup
 end
 
+--
+-- Discover Droid custom commands (.factory/commands/*.md) at user and
+-- project scope. Best-effort: if the directory does not exist the helper
+-- returns an empty list, so this is safe regardless of CLI version.
+--
+
+local function discover_skills(home, project_paths)
+  local skills = {}
+
+  local home_factory = praxis.path_join({ home, ".factory" })
+  for _, s in ipairs(helpers.discover_command_skills(home_factory, {
+    dir = "commands",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })) do
+    table.insert(skills, s)
+  end
+
+  for _, proj in ipairs(project_paths or {}) do
+    local proj_factory = praxis.path_join({ proj, ".factory" })
+    for _, s in ipairs(helpers.discover_command_skills(proj_factory, {
+      dir = "commands",
+      pattern = "%.md$",
+      name_prefix = "/",
+      parse = "markdown",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+  end
+
+  return skills
+end
+
 local recon_config = {
   home_dir = ".factory",
 
@@ -239,6 +274,7 @@ local recon_config = {
 
   auth_check = path_has_valid_auth,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
 
   session_fns = {
     create = run_create_session,

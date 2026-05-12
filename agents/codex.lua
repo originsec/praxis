@@ -292,6 +292,21 @@ local function run_session_close(state)
   -- Codex sessions don't need explicit cleanup
 end
 
+--
+-- Discover Codex prompts (~/.codex/prompts/*.md) as slash-command skills.
+-- Codex has no project-local prompt directory.
+--
+
+local function discover_skills(home, _project_paths)
+  local home_codex = praxis.path_join({ home, ".codex" })
+  return helpers.discover_command_skills(home_codex, {
+    dir = "prompts",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })
+end
+
 local recon_config = {
   home_dir = ".codex",
 
@@ -314,6 +329,7 @@ local recon_config = {
 
   auth_check = path_has_valid_auth,
   session_discovery = discover_sessions_for_home,
+  skill_discovery = discover_skills,
 
   session_fns = {
     create = run_create_session,
