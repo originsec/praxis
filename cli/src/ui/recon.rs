@@ -6,26 +6,15 @@ use crate::app::{ReconOverlay, ReconTab};
 use crate::ui::chrome;
 use crate::ui::common::short_id;
 use crate::ui::theme::{
-    ACCENT, BG_MENU, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 pub fn render_recon(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let block = Block::default().style(Style::default().bg(BG_MENU));
-
-    f.render_widget(Clear, area);
-    f.render_widget(block.clone(), area);
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 1,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(2),
-    };
-
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // divider
@@ -34,7 +23,7 @@ pub fn render_recon(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
-    .split(inner);
+    .split(area);
 
     render_header(f, chunks[0], overlay);
     render_divider(f, chunks[1]);
@@ -99,10 +88,7 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         ));
     }
 
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(BG_MENU)),
-        area,
-    );
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_divider(f: &mut Frame, area: Rect) {
@@ -110,8 +96,7 @@ fn render_divider(f: &mut Frame, area: Rect) {
         Paragraph::new(Line::from(Span::styled(
             "\u{2500}".repeat(area.width as usize),
             Style::default().fg(BORDER_SUBTLE),
-        )))
-        .style(Style::default().bg(BG_MENU)),
+        ))),
         area,
     );
 }
@@ -129,10 +114,7 @@ fn render_hints(f: &mut Frame, area: Rect, _overlay: &ReconOverlay) {
         Span::styled("^q", key),
         Span::styled(" close", label),
     ]);
-    f.render_widget(
-        Paragraph::new(hints).style(Style::default().bg(BG_MENU)),
-        area,
-    );
+    f.render_widget(Paragraph::new(hints), area);
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
@@ -164,10 +146,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     spans.push(Span::styled("tab", Style::default().fg(TEXT_BRIGHT)));
     spans.push(Span::styled(" switch", Style::default().fg(MUTED)));
 
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(BG_MENU)),
-        area,
-    );
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 pub fn common_two_pane_layout(area: Rect, split_percent: u16) -> (Rect, Rect) {
