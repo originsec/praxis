@@ -197,16 +197,13 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
 
     let lines = parse_session_content(&content_to_display);
 
-    let max_scroll = (lines.len() as u16).saturating_sub(inner.height);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_visual_lines = paragraph.line_count(inner.width) as u16;
+    let max_scroll = total_visual_lines.saturating_sub(inner.height);
     overlay.right_pane_max_scroll.set(max_scroll);
     let effective = overlay.selected_right_scroll.min(max_scroll);
 
-    f.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((effective, 0)),
-        inner,
-    );
+    f.render_widget(paragraph.scroll((effective, 0)), inner);
 }
 
 #[derive(Debug, Clone)]
