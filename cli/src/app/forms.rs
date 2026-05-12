@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 //
 // Form used by the Nodes window to add a new remote agent node (e.g.
 // a Codex app-server reachable over WebSocket). Submission publishes
@@ -175,21 +177,13 @@ pub enum TriggerFormSection {
 }
 
 //
-// Chain builder form. Owns the in-progress chain definition (header fields,
-// element list, connection list) plus all UI state (focused section, which
-// element/connection row is selected, and an optional overlay for the
-// element-kind picker or connection editor). Submission emits a
-// `ChainCreate` or `ChainUpdate` signal.
+// Chain builder form. Now visual: blocks are positioned on a 2D canvas with
+// orthogonal connectors between ports. Header inputs (name, category, etc.)
+// live on a strip above the canvas, a properties strip lives below, and a
+// palette of "add element" buttons sits along the bottom. The struct owns
+// the in-progress chain plus the canvas viewport state (camera, selection,
+// active drag) and the inline-edit target.
 //
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ChainFormSection {
-    Header,
-    Elements,
-    Properties,
-    Connections,
-    Buttons,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ElementKind {
@@ -315,28 +309,104 @@ pub struct ConnectionDraft {
 }
 
 //
-// Overlay used while picking what kind of element to add, or while filling
-// in a new connection between elements. Held on the form so the renderer
-// and event handler can switch into a focused editor mode.
+// Overlay kept on the form when the user is picking an op name from the
+// library. Other "modal" interactions (kind picker, connection edit) are
+// gone — the canvas + palette replaces them.
 //
 
 pub enum ChainFormEditor {
-    PickElementKind {
-        cursor: usize,
-    },
-    EditConnection {
-        editing_idx: Option<usize>,
-        from_idx: usize,
-        to_idx: usize,
-        from_port: String,
-        to_port: String,
-        condition: ConditionKind,
-        focus: u8, // 0=from 1=to 2=from_port 3=to_port 4=condition 5=save 6=cancel
-    },
     PickOpName {
         cursor: usize,
         filter: String,
     },
+}
+
+//
+// What the user has clicked. `Selected::None` means clicking a block /
+// connection has not happened yet (or selection was cleared). When a block
+// or connection is selected, the properties strip and key handlers operate
+// on it.
+//
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum Selected {
+    None,
+    Block(String),
+    Connection(usize),
+}
+
+//
+// Active drag state. Updated on each MouseEventKind::Drag and committed on
+// MouseEventKind::Up. The renderer reads this to show a rubber-band line
+// during port-to-port connection drags.
+//
+
+#[derive(Clone)]
+pub enum Drag {
+    None,
+    //
+    // Dragging a block by its body. `grab_dx/dy` is the offset within the
+    // block where the user grabbed so the block follows the cursor exactly.
+    //
+    Block {
+        id: String,
+        grab_dx: i32,
+        grab_dy: i32,
+    },
+    //
+    // Panning the canvas. `last_col/row` records the previous mouse
+    // position so the delta can be added to camera.
+    //
+    Canvas {
+        last_col: u16,
+        last_row: u16,
+    },
+    //
+    // Pulling a connection out of a source port. The renderer draws an
+    // orthogonal rubber-band from the source port to the cursor. On Up,
+    // if the cursor is over an input port, a connection is created.
+    //
+    Port {
+        from_id: String,
+        from_port: u32,
+        cursor_col: u16,
+        cursor_row: u16,
+    },
+}
+
+
+//
+// Which text field is currently being edited inline. The canvas widgets
+// stay clickable even while editing — clicking another field reseats the
+// edit target, clicking the canvas commits and clears.
+//
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum EditTarget {
+    HeaderName,
+    HeaderCategory,
+    HeaderTimeout,
+    HeaderDescription,
+    BlockProp { id: String, field: BlockField },
+    ConnectionPort { idx: usize, side: PortSide },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PortSide {
+    From,
+    To,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BlockField {
+    OpName,
+    ModelRef,
+    Prompt,
+    MemoryKey,
+    MaxIterations,
+    ToolName,
+    ToolParams,
+    PayloadId,
 }
 
 pub struct ChainForm {
@@ -347,11 +417,16 @@ pub struct ChainForm {
     pub timeout: String,
     pub elements: Vec<ChainElementDraft>,
     pub connections: Vec<ConnectionDraft>,
-    pub element_selected: usize,
-    pub connection_selected: usize,
-    pub section: ChainFormSection,
-    pub focused_header_field: u8, // 0=name 1=category 2=timeout 3=description
-    pub focused_prop_field: u8,
+    //
+    // Canvas position per element id. Round-trips through
+    // ChainDefinitionInput.positions so layout is preserved across reloads.
+    //
+    pub positions: HashMap<String, (i32, i32)>,
+    pub camera_x: i32,
+    pub camera_y: i32,
+    pub selected: Selected,
+    pub drag: Drag,
+    pub editing: Option<EditTarget>,
     //
     // Snapshot of currently known op full_names. Used by the operation
     // picker overlay so the user can pick a real op name rather than typing
@@ -373,11 +448,12 @@ impl ChainForm {
             timeout: String::new(),
             elements: Vec::new(),
             connections: Vec::new(),
-            element_selected: 0,
-            connection_selected: 0,
-            section: ChainFormSection::Header,
-            focused_header_field: 0,
-            focused_prop_field: 0,
+            positions: HashMap::new(),
+            camera_x: 0,
+            camera_y: 0,
+            selected: Selected::None,
+            drag: Drag::None,
+            editing: None,
             available_op_names,
             element_id_seq: 0,
             editor: None,
@@ -390,12 +466,16 @@ impl ChainForm {
         format!("{}_{}", kind.id_prefix(), self.element_id_seq)
     }
 
-    pub fn selected_element(&self) -> Option<&ChainElementDraft> {
-        self.elements.get(self.element_selected)
+    pub fn selected_block_mut(&mut self) -> Option<&mut ChainElementDraft> {
+        if let Selected::Block(ref id) = self.selected.clone() {
+            self.elements.iter_mut().find(|e| &e.id == id)
+        } else {
+            None
+        }
     }
 
-    pub fn selected_element_mut(&mut self) -> Option<&mut ChainElementDraft> {
-        self.elements.get_mut(self.element_selected)
+    pub fn block_pos(&self, id: &str) -> (i32, i32) {
+        self.positions.get(id).copied().unwrap_or((0, 0))
     }
 }
 

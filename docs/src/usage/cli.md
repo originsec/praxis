@@ -212,17 +212,18 @@ Common actions:
 
 #### Library tab — chain builder
 
-The chain builder is a structured form modal for assembling a chain from its
-elements (Trigger, Operation, Transform, Generic Prompt, Memory, Loop, Tool,
-Payload, Termination) and the connections between them. It is mouse-friendly:
+The chain builder is a visual canvas with draggable element blocks and
+orthogonal line connectors between ports. It is mouse-first:
 
-- Header fields — click `Name`, `Category`, `Timeout`, or `Description` to focus and type.
-- Elements panel — click an element row to select it; click `[+ Add Element]` to pick an element kind.
-- Properties panel — click a property row to focus; the `Kind` row cycles on click and `Operation` rows open the op-name picker.
-- Connections panel — click a row to edit it; click `[+ Add Connection]` to add a new connection. The connection editor picks `from`/`to` elements, ports, and an optional `on success` / `on failure` condition.
-- Buttons — click `Save` to submit (creates or updates depending on whether you opened the form for editing) or `Cancel` (or press `Esc`) to discard.
+- **Canvas** — drag a block by its body to move it; drag empty space to pan; the mouse wheel scrolls vertically. Block positions persist in `ChainDefinitionInput.positions` so each chain remembers its layout.
+- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag.
+- **Selection** — single-click a block to select it; click a connector segment to select that connection. The selected item's fields appear in the properties strip below the canvas.
+- **Properties strip** — for blocks: click any field to edit inline; the kind cycler `◂ Kind ▸` changes the element type; `[Delete]` removes the block (and any incident connections). For connections: the condition cycler toggles `any` / `on success` / `on failure`; the port numbers are editable.
+- **Header strip** — `Name`, `Category`, `Timeout`, and `Description` text fields are at the top of the modal; click to edit.
+- **Palette** — the row of `[+ TRG]`, `[+ OP]`, … buttons along the bottom drops a new element of that kind at the centre of the visible canvas.
+- **Save / Cancel** — buttons in the top-right corner of the modal; `Ctrl+S` and `Esc` are keyboard equivalents.
 
-Keyboard equivalents are also available: `Tab`/`Shift+Tab` cycle sections, `↑/↓` move within a list, `a` adds a new element/connection (depending on focused section), `d` deletes the selected row, `←/→` cycles toggles, `Ctrl+S` saves, and `Esc` cancels. Newly created chains are seeded with a connected `Trigger → Termination` pair so you can extend the scaffold rather than build from scratch.
+A newly created chain is seeded with a connected `Trigger → Termination` pair so the graph is valid out of the box; auto-layout (left-to-right BFS from triggers) is applied to existing chains that don't yet have stored positions.
 
 #### Triggers tab
 
