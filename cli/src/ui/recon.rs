@@ -64,6 +64,17 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         spans.push(Span::raw("  "));
         spans.push(chrome::pill("AI", ACCENT));
     }
+    if let Some((ref msg, at)) = overlay.config_edit_status {
+        if at.elapsed() < std::time::Duration::from_secs(3) {
+            spans.push(Span::raw("  "));
+            let style = if msg == "Saved" || msg == "No changes" {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(STATUS_FAIL).add_modifier(Modifier::BOLD)
+            };
+            spans.push(Span::styled(msg.clone(), style));
+        }
+    }
     if overlay.is_loading {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
@@ -101,20 +112,25 @@ fn render_divider(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_hints(f: &mut Frame, area: Rect, _overlay: &ReconOverlay) {
+fn render_hints(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
-    let hints = Line::from(vec![
+    let mut spans = vec![
         Span::styled("^r", key),
         Span::styled(" refresh", label),
         Span::raw("    "),
         Span::styled("^d", key),
         Span::styled(" discover", label),
-        Span::raw("    "),
-        Span::styled("^q", key),
-        Span::styled(" close", label),
-    ]);
-    f.render_widget(Paragraph::new(hints), area);
+    ];
+    if overlay.active_tab == ReconTab::Config {
+        spans.push(Span::raw("    "));
+        spans.push(Span::styled("^e", key));
+        spans.push(Span::styled(" edit", label));
+    }
+    spans.push(Span::raw("    "));
+    spans.push(Span::styled("^q", key));
+    spans.push(Span::styled(" close", label));
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
