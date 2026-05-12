@@ -32,6 +32,7 @@ The overlay shows three tabs:
 | `PgUp` / `PgDn` | Scroll content |
 | `r` | Refresh (static recon) |
 | `d` | Discover (semantic recon) |
+| `Ctrl+E` | Edit selected Config file in `$EDITOR` |
 | `Esc` / `q` | Close overlay |
 
 On first open, the TUI checks the service cache. If no recon data is

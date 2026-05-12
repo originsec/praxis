@@ -81,6 +81,7 @@ interface.
 | `PgUp` / `PgDn` | Scroll right pane content |
 | `r` | Trigger static recon refresh |
 | `d` | Trigger semantic recon (Discover) |
+| `Ctrl+E` | Edit selected Config file in `$EDITOR` (Config tab only) |
 | `Esc` / `q` | Close overlay |
 
 When opened, the TUI first checks the service cache for existing recon
@@ -91,8 +92,10 @@ recon data appears instantly on re-open.
 The **Config** tab shows discovered configuration files in the left pane
 and the selected file's contents in the right pane. Pre-fetched contents
 are shown inline; files discovered by static recon but not yet fetched
-display a placeholder. Extracted metadata (user identities, API keys) is
-shown below the tab bar when present.
+display a placeholder. Press `Ctrl+E` to open the selected file in
+`$VISUAL`/`$EDITOR`; on a clean exit with changes, the new contents are
+written back to the node and the right pane refreshes (a transient
+"Saved" / "No changes" / error status shows in the recon header).
 
 The **Tools** tab has three categories: MCP Servers, Skills, and Internal
 tools. The left pane shows the category list; the right pane shows
