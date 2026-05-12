@@ -1188,7 +1188,7 @@ impl App {
             session_loading: false,
             session_content_error: None,
             right_pane_focused: false,
-            recon_split_percent: 35,
+            recon_split_percent: 25,
             recon_dragging: false,
         });
 
