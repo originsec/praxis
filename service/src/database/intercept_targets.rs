@@ -19,7 +19,8 @@ impl Database {
     }
 
     pub async fn set_intercept_targets_text(&self, text: &str) -> Result<()> {
-        self.set_config(intercept_targets::SERVICE_CONFIG_KEY, text).await
+        self.set_config(intercept_targets::SERVICE_CONFIG_KEY, text)
+            .await
     }
 
     //

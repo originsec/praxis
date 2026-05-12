@@ -1,8 +1,8 @@
 use anyhow::Result;
 use common::{
-    publish_json, publish_json_exchange, ClientBroadcastMessage, InterceptTargetConfig,
-    NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate, NodeRegistration,
-    NodeRegistrationAck, PraxisAgentConfig, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
+    CLIENT_BROADCAST_EXCHANGE, ClientBroadcastMessage, InterceptTargetConfig,
+    NODE_BROADCAST_EXCHANGE, NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate,
+    NodeRegistration, NodeRegistrationAck, PraxisAgentConfig, publish_json, publish_json_exchange,
 };
 use lapin::Channel;
 use std::sync::Arc;
@@ -57,12 +57,16 @@ impl NodeMessageHandler {
 
         common::log_info!(
             "Node registered: id={}, node_type={}, machine_name={}, os_details={}",
-            registration.node_id, registration.node_type, registration.machine_name, registration.os_details
+            registration.node_id,
+            registration.node_type,
+            registration.machine_name,
+            registration.os_details
         );
 
         common::log_info!(
             "Sent NodeRegistrationAck to node {} on queue {}",
-            node.id, node.queue_name
+            node.id,
+            node.queue_name
         );
 
         //
@@ -83,8 +87,16 @@ impl NodeMessageHandler {
             .map(|a| format!("{}({})", a.short_name, if a.available { "✔" } else { "✘" }))
             .collect();
 
-        let _selected_name = update.selected_agent.as_ref().map(|a| a.short_name.as_str()).unwrap_or("none");
-        let _session_id = update.selected_agent.as_ref().and_then(|a| a.session_id.as_deref()).unwrap_or("none");
+        let _selected_name = update
+            .selected_agent
+            .as_ref()
+            .map(|a| a.short_name.as_str())
+            .unwrap_or("none");
+        let _session_id = update
+            .selected_agent
+            .as_ref()
+            .and_then(|a| a.session_id.as_deref())
+            .unwrap_or("none");
 
         //
         // Update the node registry with the new information.
@@ -133,12 +145,18 @@ impl NodeMessageHandler {
     // sync without requiring node re-registration.
     //
 
-    pub async fn broadcast_intercept_targets(&self, targets: Vec<InterceptTargetConfig>) -> Result<()> {
+    pub async fn broadcast_intercept_targets(
+        &self,
+        targets: Vec<InterceptTargetConfig>,
+    ) -> Result<()> {
         let count = targets.len();
         let message = NodeBroadcastMessage::InterceptTargetsUpdate { targets };
         publish_json_exchange(&self.channel, NODE_BROADCAST_EXCHANGE, &message).await?;
 
-        common::log_info!("Broadcast InterceptTargetsUpdate ({} target(s)) to all nodes", count);
+        common::log_info!(
+            "Broadcast InterceptTargetsUpdate ({} target(s)) to all nodes",
+            count
+        );
 
         Ok(())
     }

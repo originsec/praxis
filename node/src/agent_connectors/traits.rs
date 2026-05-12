@@ -1,8 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use common::{ReconResult, SessionContext};
+use common::{PermissionDecision, ReconResult, SessionContext, SessionUpdateKind};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 //
@@ -16,6 +17,12 @@ pub enum AgentMode {
     DevTools,
     Cli,
     Acp,
+}
+
+pub struct SessionTransactContext {
+    pub update_tx: Option<mpsc::Sender<SessionUpdateKind>>,
+    pub permission_rx: Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>,
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 //
@@ -38,6 +45,22 @@ pub trait AgentSession: Send + Sync {
     #[allow(dead_code)]
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
+
+    fn transact_with_context(&self, prompt: &str, ctx: SessionTransactContext) -> Result<String> {
+        self.set_cancel_flag(ctx.cancel_flag);
+        if let Some(handle) = self.acp_handle()
+            && let Some(update_tx) = ctx.update_tx
+        {
+            crate::acp::register_update_sender(&handle, update_tx);
+        }
+        if let Some(handle) = self.acp_handle()
+            && let Some(permission_rx) = ctx.permission_rx
+        {
+            crate::acp::register_permission_receiver(&handle, permission_rx);
+        }
+        self.transact(prompt)
+    }
+
     fn close(&self);
 
     //

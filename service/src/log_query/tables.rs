@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::database::Database;
 use crate::state::NodeRegistry;
@@ -57,36 +57,87 @@ pub fn resolve_table(name: &str) -> Option<VirtualTable> {
 pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
     match table {
         VirtualTable::TrafficLogs => vec![
-            "timestamp", "traffic_id", "node_id", "agent_short_name", "intercept_method",
-            "direction", "method", "url", "host", "request_headers", "request_body",
-            "response_status", "response_headers", "response_body",
+            "timestamp",
+            "traffic_id",
+            "node_id",
+            "agent_short_name",
+            "intercept_method",
+            "direction",
+            "method",
+            "url",
+            "host",
+            "request_headers",
+            "request_body",
+            "response_status",
+            "response_headers",
+            "response_body",
         ],
         VirtualTable::TrafficMatchLogs => vec![
-            "timestamp", "traffic_id", "node_id", "agent_short_name", "rule_id",
-            "rule_name", "summary", "method", "url", "host", "direction",
+            "timestamp",
+            "traffic_id",
+            "node_id",
+            "agent_short_name",
+            "rule_id",
+            "rule_name",
+            "summary",
+            "method",
+            "url",
+            "host",
+            "direction",
             "response_status",
         ],
         VirtualTable::NodeLogs => vec![
-            "timestamp", "node_id", "machine_name", "os_details", "intercept_active",
+            "timestamp",
+            "node_id",
+            "machine_name",
+            "os_details",
+            "intercept_active",
         ],
         VirtualTable::AgentLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "agent_name", "version",
+            "timestamp",
+            "node_id",
+            "agent_short_name",
+            "agent_name",
+            "version",
         ],
         VirtualTable::ReconLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "is_semantic",
-            "mcp_server_count", "skill_count", "internal_tool_count",
-            "config_count", "session_count", "project_path_count",
+            "timestamp",
+            "node_id",
+            "agent_short_name",
+            "is_semantic",
+            "mcp_server_count",
+            "skill_count",
+            "internal_tool_count",
+            "config_count",
+            "session_count",
+            "project_path_count",
         ],
         VirtualTable::ReconToolLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "tool_type",
-            "server_name", "tool_name", "tool_description", "transport",
+            "timestamp",
+            "node_id",
+            "agent_short_name",
+            "tool_type",
+            "server_name",
+            "tool_name",
+            "tool_description",
+            "transport",
         ],
         VirtualTable::ReconSessionLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "session_id",
-            "context_path", "last_modified", "message_count",
+            "timestamp",
+            "node_id",
+            "agent_short_name",
+            "session_id",
+            "context_path",
+            "last_modified",
+            "message_count",
         ],
         VirtualTable::EventLogs => vec![
-            "timestamp", "source", "source_id", "level", "target", "message",
+            "timestamp",
+            "source",
+            "source_id",
+            "level",
+            "target",
+            "message",
         ],
         VirtualTable::ToolkitActionsLog => vec![
             "timestamp",
@@ -101,14 +152,30 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "details_json",
         ],
         VirtualTable::SemanticOperationLogs => vec![
-            "timestamp", "operation_id", "node_id", "agent_short_name",
-            "status", "operation_spec", "start_time", "end_time",
-            "summary", "result", "chain_execution_id",
+            "timestamp",
+            "operation_id",
+            "node_id",
+            "agent_short_name",
+            "status",
+            "operation_spec",
+            "start_time",
+            "end_time",
+            "summary",
+            "result",
+            "chain_execution_id",
         ],
         VirtualTable::SemanticOperationChainLogs => vec![
-            "timestamp", "execution_id", "chain_id", "chain_name",
-            "node_id", "agent_short_name", "status", "elements",
-            "outputs", "started_at", "ended_at",
+            "timestamp",
+            "execution_id",
+            "chain_id",
+            "chain_name",
+            "node_id",
+            "agent_short_name",
+            "status",
+            "elements",
+            "outputs",
+            "started_at",
+            "ended_at",
         ],
     }
 }
@@ -117,9 +184,7 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
 // Materialize in-memory tables from node registry.
 //
 
-pub async fn materialize_node_logs(
-    registry: &Arc<NodeRegistry>,
-) -> (Vec<String>, Vec<Vec<Value>>) {
+pub async fn materialize_node_logs(registry: &Arc<NodeRegistry>) -> (Vec<String>, Vec<Vec<Value>>) {
     let columns: Vec<String> = table_columns(VirtualTable::NodeLogs)
         .into_iter()
         .map(String::from)
@@ -318,7 +383,9 @@ pub async fn materialize_toolkit_actions_log(
                 a.node_id.map(Value::String).unwrap_or(Value::Null),
                 a.agent_short_name.map(Value::String).unwrap_or(Value::Null),
                 a.session_id.map(Value::String).unwrap_or(Value::Null),
-                Value::String(serde_json::to_string(&a.details).unwrap_or_else(|_| "{}".to_string())),
+                Value::String(
+                    serde_json::to_string(&a.details).unwrap_or_else(|_| "{}".to_string()),
+                ),
             ]
         })
         .collect();

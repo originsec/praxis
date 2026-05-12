@@ -3,26 +3,26 @@
 // The MCP server connects to the service via RabbitMQ like any other client.
 //
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use common::{
-    client_queue_name, mcp::McpClient, publish_json, ChainDefinitionInfo, ChainExecutionUpdate,
+    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate,
     ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
     InterceptedTrafficEntry, OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate,
-    SystemState, TrafficSearchFilters, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
+    SystemState, TrafficSearchFilters, client_queue_name, mcp::McpClient, publish_json,
 };
 use futures_util::StreamExt;
 use lapin::{
+    Channel, Connection, ConnectionProperties, ExchangeKind,
     options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions},
     types::FieldTable,
-    Channel, Connection, ConnectionProperties, ExchangeKind,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -149,7 +149,9 @@ impl ServiceMcpClient {
         // Start consuming messages.
         //
 
-        client.start_consuming(&client_queue, broadcast_queue.name().as_str()).await?;
+        client
+            .start_consuming(&client_queue, broadcast_queue.name().as_str())
+            .await?;
 
         //
         // Register with the service.
@@ -237,13 +239,21 @@ impl ServiceMcpClient {
             ClientDirectMessage::AcpMessage { json_rpc } => {
                 Self::handle_acp_frame(&mut state, &json_rpc);
             }
-            ClientDirectMessage::SemanticOpQueued { operation_id, request_id, .. } => {
+            ClientDirectMessage::SemanticOpQueued {
+                operation_id,
+                request_id,
+                ..
+            } => {
                 if let Some(entry) = state.pending_semantic_ops.get_mut(&request_id) {
                     *entry = Some(operation_id);
                 }
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
-                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
                     state.operations[idx] = update;
                 } else {
                     state.operations.push(update);
@@ -252,7 +262,10 @@ impl ServiceMcpClient {
             ClientDirectMessage::SemanticOpList(operations) => {
                 state.operations = operations;
             }
-            ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
+            ClientDirectMessage::TrafficSearchResponse {
+                entries,
+                total_count,
+            } => {
                 state.pending_traffic_search = Some((entries, total_count));
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
@@ -265,7 +278,11 @@ impl ServiceMcpClient {
                 state.current_chain = chain;
             }
             ClientDirectMessage::ChainExecutionUpdate(execution) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == execution.execution_id) {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == execution.execution_id)
+                {
                     state.chain_executions[idx] = execution;
                 } else {
                     state.chain_executions.push(execution);
@@ -298,7 +315,8 @@ impl ServiceMcpClient {
                 if success {
                     state.pending_op_def_delete = Some(Ok(full_name));
                 } else {
-                    state.pending_op_def_delete = Some(Err(format!("Failed to delete '{}'", full_name)));
+                    state.pending_op_def_delete =
+                        Some(Err(format!("Failed to delete '{}'", full_name)));
                 }
             }
             ClientDirectMessage::OpDefError { message } => {
@@ -345,7 +363,9 @@ impl ServiceMcpClient {
             let Some(pending) = state.pending_acp.get_mut(&request_id) else {
                 return;
             };
-            let Some(tx) = pending.response_tx.take() else { return };
+            let Some(tx) = pending.response_tx.take() else {
+                return;
+            };
 
             if let Some(err) = msg.get("error") {
                 let message = err
@@ -414,14 +434,22 @@ impl ServiceMcpClient {
                 state.system_state = Some(system_state);
             }
             ClientBroadcastMessage::ChainExecutionUpdate(execution) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == execution.execution_id) {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == execution.execution_id)
+                {
                     state.chain_executions[idx] = execution;
                 } else {
                     state.chain_executions.push(execution);
                 }
             }
             ClientBroadcastMessage::SemanticOpUpdate(update) => {
-                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
                     state.operations[idx] = update;
                 } else {
                     state.operations.push(update);
@@ -515,7 +543,11 @@ impl ServiceMcpClient {
                 request_id.clone(),
                 PendingAcp {
                     response_tx: Some(tx),
-                    text_buf: if collect_text { Some(String::new()) } else { None },
+                    text_buf: if collect_text {
+                        Some(String::new())
+                    } else {
+                        None
+                    },
                     session_id,
                 },
             );
@@ -578,12 +610,7 @@ impl ServiceMcpClient {
 // to route it. Existing `_meta.praxis` keys in `params` are preserved.
 //
 
-fn build_request_frame(
-    request_id: &str,
-    node_id: &str,
-    method: &str,
-    mut params: Value,
-) -> Value {
+fn build_request_frame(request_id: &str, node_id: &str, method: &str, mut params: Value) -> Value {
     inject_node_id(&mut params, node_id);
     json!({
         "jsonrpc": "2.0",
@@ -628,12 +655,7 @@ impl McpClient for ServiceMcpClient {
         self.state.lock().await.system_state.clone()
     }
 
-    async fn acp_request(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<Value> {
+    async fn acp_request(&self, node_id: &str, method: &str, params: Value) -> Result<Value> {
         self.do_acp_request(node_id, method, params, false)
             .await
             .map(|(v, _)| v)
@@ -648,12 +670,7 @@ impl McpClient for ServiceMcpClient {
         self.do_acp_request(node_id, method, params, true).await
     }
 
-    async fn acp_notification(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<()> {
+    async fn acp_notification(&self, node_id: &str, method: &str, params: Value) -> Result<()> {
         let frame = build_notification_frame(node_id, method, params);
         self.publish_signal(ClientSignalMessage::AcpMessage {
             client_id: self.client_id.clone(),
@@ -848,12 +865,8 @@ impl McpClient for ServiceMcpClient {
         };
         self.publish_signal(message).await?;
 
-        self.poll_pending(
-            50,
-            |s| s.pending_recon_get.take(),
-            "stored recon result",
-        )
-        .await
+        self.poll_pending(50, |s| s.pending_recon_get.take(), "stored recon result")
+            .await
     }
 
     async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
@@ -930,7 +943,8 @@ impl McpClient for ServiceMcpClient {
             "agent_iterations": spec.agent_iterations,
             "yolo_mode": spec.yolo_mode,
             "model_ref": spec.model_ref,
-        })).map_err(|e| anyhow!("Failed to serialize op definition: {}", e))?;
+        }))
+        .map_err(|e| anyhow!("Failed to serialize op definition: {}", e))?;
 
         let message = ClientSignalMessage::OpDefAdd {
             client_id: self.client_id.clone(),
@@ -1049,7 +1063,10 @@ impl McpServerManager {
 
         *self.cancellation_token.write().await = Some(ct);
 
-        common::log_info!("MCP streamable-http server started on port {} (endpoint /mcp)", port);
+        common::log_info!(
+            "MCP streamable-http server started on port {} (endpoint /mcp)",
+            port
+        );
         Ok(())
     }
 
@@ -1060,7 +1077,6 @@ impl McpServerManager {
             ct.cancel();
         }
     }
-
 }
 
 impl Default for McpServerManager {

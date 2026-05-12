@@ -1,6 +1,6 @@
 use nom::bytes::complete::{tag, take_while1};
 use nom::character::complete::{i64, multispace0, u64};
-use nom::combinator::{map, opt, consumed};
+use nom::combinator::{consumed, map, opt};
 use nom::error::ParseError;
 use nom::sequence::{delimited, pair, preceded};
 use nom::{AsChar, IResult, Input, Parser};
@@ -27,13 +27,23 @@ pub fn take_identifier(i: &str) -> IResult<&str, &str> {
 
     // exclude reserved keywords
     if identifier == "by" {
-        return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            i,
+            nom::error::ErrorKind::Tag,
+        )));
     }
     Ok((input, identifier))
 }
 
 pub fn decimal_number(i: &str) -> IResult<&str, Decimal> {
-    pair(i64, opt(preceded(tag("."), map(consumed(u64::<&str, _>), |(i, x)| (i.len(), x))))).parse(i)
+    pair(
+        i64,
+        opt(preceded(
+            tag("."),
+            map(consumed(u64::<&str, _>), |(i, x)| (i.len(), x)),
+        )),
+    )
+    .parse(i)
 }
 
 pub fn trim<I, O, E, F>(f: F) -> impl Parser<I, Output = O, Error = E>

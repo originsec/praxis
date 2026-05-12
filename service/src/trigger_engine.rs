@@ -1,6 +1,6 @@
+use lapin::Channel;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock as TokioRwLock};
-use lapin::Channel;
 
 use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
@@ -90,7 +90,11 @@ impl TriggerEngine {
             let chain = match self.database.get_chain(&trigger.chain_id).await {
                 Ok(Some(chain)) => chain,
                 Ok(None) => {
-                    common::log_warn!("Chain {} not found for trigger {}, disabling", trigger.chain_id, trigger.id);
+                    common::log_warn!(
+                        "Chain {} not found for trigger {}, disabling",
+                        trigger.chain_id,
+                        trigger.id
+                    );
                     let _ = self.database.mark_trigger_fired(&trigger.id, true).await;
                     continue;
                 }
@@ -104,26 +108,36 @@ impl TriggerEngine {
             if targets.is_empty() {
                 common::log_warn!("No targets matched for trigger {}", trigger.id);
             } else {
-                let _results = self.chain_executor.execute_fan_out(
-                    chain,
-                    targets,
-                    None,
-                    None,
-                    self.service_config.clone(),
-                    self.semantic_ops_channel.clone(),
-                    self.broadcast_channel.clone(),
-                    self.acp_node_proxy.clone(),
-                    self.database.clone(),
-                    Some(self.toolkit_manager.clone()),
-                ).await;
+                let _results = self
+                    .chain_executor
+                    .execute_fan_out(
+                        chain,
+                        targets,
+                        None,
+                        None,
+                        self.service_config.clone(),
+                        self.semantic_ops_channel.clone(),
+                        self.broadcast_channel.clone(),
+                        self.acp_node_proxy.clone(),
+                        self.database.clone(),
+                        Some(self.toolkit_manager.clone()),
+                    )
+                    .await;
             }
 
             let disable = matches!(
                 trigger.trigger_config,
-                common::TriggerConfig::Scheduled { recurring: false, .. }
+                common::TriggerConfig::Scheduled {
+                    recurring: false,
+                    ..
+                }
             );
             if let Err(e) = self.database.mark_trigger_fired(&trigger.id, disable).await {
-                common::log_error!("Failed to update trigger {} after firing: {}", trigger.id, e);
+                common::log_error!(
+                    "Failed to update trigger {} after firing: {}",
+                    trigger.id,
+                    e
+                );
             }
         }
     }
@@ -136,7 +150,11 @@ impl TriggerEngine {
         node_id: &str,
         match_context: &str,
     ) {
-        let triggers = match self.database.list_enabled_triggers_by_type("InterceptMatch").await {
+        let triggers = match self
+            .database
+            .list_enabled_triggers_by_type("InterceptMatch")
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 common::log_error!("Failed to list intercept triggers: {}", e);
@@ -173,25 +191,25 @@ impl TriggerEngine {
                 _ => continue,
             };
 
-            let targets = resolve_targets(
-                &trigger.target_spec,
-                &self.node_registry,
-                Some(node_id),
-            ).await;
+            let targets =
+                resolve_targets(&trigger.target_spec, &self.node_registry, Some(node_id)).await;
 
             if !targets.is_empty() {
-                let _results = self.chain_executor.execute_fan_out(
-                    chain,
-                    targets,
-                    Some(match_context.to_string()),
-                    None,
-                    self.service_config.clone(),
-                    self.semantic_ops_channel.clone(),
-                    self.broadcast_channel.clone(),
-                    self.acp_node_proxy.clone(),
-                    self.database.clone(),
-                    Some(self.toolkit_manager.clone()),
-                ).await;
+                let _results = self
+                    .chain_executor
+                    .execute_fan_out(
+                        chain,
+                        targets,
+                        Some(match_context.to_string()),
+                        None,
+                        self.service_config.clone(),
+                        self.semantic_ops_channel.clone(),
+                        self.broadcast_channel.clone(),
+                        self.acp_node_proxy.clone(),
+                        self.database.clone(),
+                        Some(self.toolkit_manager.clone()),
+                    )
+                    .await;
             }
 
             let _ = self.database.mark_trigger_fired(&trigger.id, false).await;
@@ -221,25 +239,25 @@ impl TriggerEngine {
                 _ => continue,
             };
 
-            let targets = resolve_targets(
-                &trigger.target_spec,
-                &self.node_registry,
-                Some(node_id),
-            ).await;
+            let targets =
+                resolve_targets(&trigger.target_spec, &self.node_registry, Some(node_id)).await;
 
             if !targets.is_empty() {
-                let _results = self.chain_executor.execute_fan_out(
-                    chain,
-                    targets,
-                    None,
-                    None,
-                    self.service_config.clone(),
-                    self.semantic_ops_channel.clone(),
-                    self.broadcast_channel.clone(),
-                    self.acp_node_proxy.clone(),
-                    self.database.clone(),
-                    Some(self.toolkit_manager.clone()),
-                ).await;
+                let _results = self
+                    .chain_executor
+                    .execute_fan_out(
+                        chain,
+                        targets,
+                        None,
+                        None,
+                        self.service_config.clone(),
+                        self.semantic_ops_channel.clone(),
+                        self.broadcast_channel.clone(),
+                        self.acp_node_proxy.clone(),
+                        self.database.clone(),
+                        Some(self.toolkit_manager.clone()),
+                    )
+                    .await;
             }
 
             let _ = self.database.mark_trigger_fired(&trigger.id, false).await;

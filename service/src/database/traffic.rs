@@ -1,18 +1,22 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use common::{InterceptedTrafficEntry, InterceptMethod, TrafficDirection, TrafficLogFilters};
+use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection, TrafficLogFilters};
 use indexmap::IndexMap;
 use regex::Regex;
 use sqlx::Row;
 
-use super::{Database, DatabasePool, TRAFFIC_RETENTION_DAYS, MAX_TRAFFIC_QUERY_LIMIT};
+use super::{Database, DatabasePool, MAX_TRAFFIC_QUERY_LIMIT, TRAFFIC_RETENTION_DAYS};
 
 impl Database {
     /// Insert an intercepted traffic entry. Returns the ID of the inserted entry.
     pub async fn insert_traffic(&self, entry: &InterceptedTrafficEntry) -> Result<i64> {
-        let request_headers_json = entry.request_headers.as_ref()
+        let request_headers_json = entry
+            .request_headers
+            .as_ref()
             .map(|h| serde_json::to_string(h).unwrap_or_default());
-        let response_headers_json = entry.response_headers.as_ref()
+        let response_headers_json = entry
+            .response_headers
+            .as_ref()
             .map(|h| serde_json::to_string(h).unwrap_or_default());
 
         let sql = "INSERT INTO intercepted_traffic (timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, created_at)
@@ -69,7 +73,10 @@ impl Database {
     }
 
     /// Query traffic log with filters
-    pub async fn query_traffic(&self, filters: &TrafficLogFilters) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+    pub async fn query_traffic(
+        &self,
+        filters: &TrafficLogFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
         //
         // Build WHERE clause dynamically.
         //
@@ -180,7 +187,8 @@ impl Database {
                     //
                     // Get total count from database when not using regex.
                     //
-                    let count_sql = format!("SELECT COUNT(*) FROM intercepted_traffic {}", where_clause);
+                    let count_sql =
+                        format!("SELECT COUNT(*) FROM intercepted_traffic {}", where_clause);
                     let mut count_query = sqlx::query(&count_sql);
 
                     if let Some(ref node_id) = filters.node_id {
@@ -196,7 +204,8 @@ impl Database {
                         count_query = count_query.bind(end.to_rfc3339());
                     }
                     if let Some(ref direction) = filters.direction {
-                        count_query = count_query.bind(traffic_direction_to_string(direction).to_string());
+                        count_query =
+                            count_query.bind(traffic_direction_to_string(direction).to_string());
                     }
 
                     let count_row = count_query.fetch_one(pool).await?;
@@ -239,7 +248,8 @@ impl Database {
                     entries = entries[start..end].to_vec();
                     filtered_count
                 } else {
-                    let count_sql = format!("SELECT COUNT(*) FROM intercepted_traffic {}", where_clause);
+                    let count_sql =
+                        format!("SELECT COUNT(*) FROM intercepted_traffic {}", where_clause);
                     let mut count_query = sqlx::query(&count_sql);
 
                     if let Some(ref node_id) = filters.node_id {
@@ -255,7 +265,8 @@ impl Database {
                         count_query = count_query.bind(end.to_rfc3339());
                     }
                     if let Some(ref direction) = filters.direction {
-                        count_query = count_query.bind(traffic_direction_to_string(direction).to_string());
+                        count_query =
+                            count_query.bind(traffic_direction_to_string(direction).to_string());
                     }
 
                     let count_row = count_query.fetch_one(pool).await?;
@@ -276,20 +287,16 @@ impl Database {
         let sql = "DELETE FROM intercepted_traffic WHERE created_at < $1";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&cutoff)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(&cutoff)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(&cutoff)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(&cutoff)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)
@@ -300,12 +307,8 @@ impl Database {
         let sql = "DELETE FROM intercepted_traffic";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
         };
 
         Ok(deleted as usize)
@@ -319,20 +322,14 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 match row {
                     Some(row) => Ok(Some(parse_traffic_row_sqlite(&row)?)),
                     None => Ok(None),
                 }
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 match row {
                     Some(row) => Ok(Some(parse_traffic_row_postgres(&row)?)),
                     None => Ok(None),
@@ -342,7 +339,10 @@ impl Database {
     }
 
     /// Search traffic with regex pattern across all fields (URL, headers, body)
-    pub async fn search_traffic(&self, filters: &common::TrafficSearchFilters) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+    pub async fn search_traffic(
+        &self,
+        filters: &common::TrafficSearchFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
         //
         // Build WHERE clause for node and agent filters.
         //
@@ -549,12 +549,13 @@ fn parse_traffic_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Intercepted
     let response_body: Option<Vec<u8>> = row.get(13);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?.with_timezone(&Utc);
-    let intercept_method = intercept_method_str.parse::<InterceptMethod>()
+    let intercept_method = intercept_method_str
+        .parse::<InterceptMethod>()
         .unwrap_or(InterceptMethod::Proxy);
-    let request_headers: Option<IndexMap<String, String>> = request_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
-    let response_headers: Option<IndexMap<String, String>> = response_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
+    let request_headers: Option<IndexMap<String, String>> =
+        request_headers_json.and_then(|j| serde_json::from_str(&j).ok());
+    let response_headers: Option<IndexMap<String, String>> =
+        response_headers_json.and_then(|j| serde_json::from_str(&j).ok());
 
     Ok(InterceptedTrafficEntry {
         id: Some(id),
@@ -591,12 +592,13 @@ fn parse_traffic_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Intercepted
     let response_body: Option<Vec<u8>> = row.get(13);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?.with_timezone(&Utc);
-    let intercept_method = intercept_method_str.parse::<InterceptMethod>()
+    let intercept_method = intercept_method_str
+        .parse::<InterceptMethod>()
         .unwrap_or(InterceptMethod::Proxy);
-    let request_headers: Option<IndexMap<String, String>> = request_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
-    let response_headers: Option<IndexMap<String, String>> = response_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
+    let request_headers: Option<IndexMap<String, String>> =
+        request_headers_json.and_then(|j| serde_json::from_str(&j).ok());
+    let response_headers: Option<IndexMap<String, String>> =
+        response_headers_json.and_then(|j| serde_json::from_str(&j).ok());
 
     Ok(InterceptedTrafficEntry {
         id: Some(id),

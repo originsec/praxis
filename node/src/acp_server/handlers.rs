@@ -1,8 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
-use agent_client_protocol as acp;
 use acp::schema::{
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk,
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
@@ -10,15 +9,17 @@ use acp::schema::{
     SessionInfo, SessionUpdate, StopReason, TextContent, ToolCall as AcpToolCall, ToolCallContent,
     ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
+use agent_client_protocol as acp;
 use common::{SessionContext, SessionUpdateKind};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use super::NodeAcpServer;
 use super::extensions::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON,
-    EXT_PRAXIS_WRITE_FILE, EXT_PRAXIS_WRITE_SESSION_CONTENT,
+    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
+    EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 use super::sessions::NodeSession;
-use super::NodeAcpServer;
+use crate::agent_connectors::SessionTransactContext;
 
 pub async fn handle_initialize(
     server: &NodeAcpServer,
@@ -38,8 +39,14 @@ pub async fn handle_initialize(
             .map(|agent| json!({ "shortName": agent.short_name(), "name": agent.name() }))
             .collect::<Vec<_>>();
         connectors.sort_by(|a, b| {
-            let a = a.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
-            let b = b.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
+            let a = a
+                .get("shortName")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let b = b
+                .get("shortName")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             a.cmp(b)
         });
         connectors
@@ -60,7 +67,10 @@ pub async fn handle_initialize(
         .unwrap_or_else(|_| serde_json::from_value(json!({})).unwrap());
 
     Ok(InitializeResponse::new(ProtocolVersion::LATEST)
-        .agent_info(Implementation::new("praxis-node", env!("CARGO_PKG_VERSION")))
+        .agent_info(Implementation::new(
+            "praxis-node",
+            env!("CARGO_PKG_VERSION"),
+        ))
         .meta(meta))
 }
 
@@ -112,7 +122,10 @@ pub async fn handle_session_new(
 
     let context = SessionContext {
         working_dir: Some(req.cwd.to_string_lossy().to_string()),
-        yolo_mode: praxis.get("yolo").and_then(|v| v.as_bool()).unwrap_or(false),
+        yolo_mode: praxis
+            .get("yolo")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         prompt_timeout_secs: praxis.get("promptTimeoutSecs").and_then(|v| v.as_u64()),
         interactive: praxis
             .get("interactive")
@@ -231,10 +244,10 @@ pub async fn handle_session_prompt(
 
     let acp_handle = node_session.session.acp_handle();
 
-    let forwarder = if let Some(handle) = acp_handle.clone() {
-        let (update_tx, update_rx) =
-            tokio::sync::mpsc::unbounded_channel::<SessionUpdateKind>();
-        crate::acp::register_update_sender(&handle, update_tx);
+    let mut update_tx_for_context = None;
+    let forwarder = if let Some(_handle) = acp_handle.clone() {
+        let (update_tx, update_rx) = tokio::sync::mpsc::channel::<SessionUpdateKind>(1024);
+        update_tx_for_context = Some(update_tx);
 
         let server_for_fwd = Arc::clone(&server);
         let client_id_for_fwd = client_id.to_string();
@@ -265,7 +278,14 @@ pub async fn handle_session_prompt(
         if cancel.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("cancelled before start"));
         }
-        session_for_task.transact(&prompt_text)
+        session_for_task.transact_with_context(
+            &prompt_text,
+            SessionTransactContext {
+                update_tx: update_tx_for_context,
+                permission_rx: None,
+                cancel_flag: cancel,
+            },
+        )
     })
     .await;
 
@@ -331,10 +351,7 @@ pub async fn handle_session_prompt(
             }
         }
         Ok(Err(e)) => {
-            common::log_warn!(
-                "session/prompt transact failed for {}: {}",
-                session_id, e
-            );
+            common::log_warn!("session/prompt transact failed for {}: {}", session_id, e);
             if let Some(id) = id {
                 server.send_error(client_id, id, -32603, &format!("transact failed: {}", e));
             }
@@ -407,7 +424,7 @@ async fn forward_updates(
     server: Arc<NodeAcpServer>,
     client_id: String,
     session_id: String,
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<SessionUpdateKind>,
+    mut rx: tokio::sync::mpsc::Receiver<SessionUpdateKind>,
 ) {
     while let Some(kind) = rx.recv().await {
         let Some(update) = session_update_to_acp(kind) else {
@@ -448,9 +465,9 @@ fn session_update_to_acp(kind: SessionUpdateKind) -> Option<SessionUpdate> {
                 ToolCallStatus::Completed
             });
             if !output.is_empty() {
-                fields = fields.content(vec![ToolCallContent::Content(
-                    acp::schema::Content::new(output),
-                )]);
+                fields = fields.content(vec![ToolCallContent::Content(acp::schema::Content::new(
+                    output,
+                ))]);
             }
             Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
                 tool_id, fields,

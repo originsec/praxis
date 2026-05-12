@@ -113,10 +113,7 @@ pub enum ChainElement {
         mode: MemoryMode,
     },
     /// Loop element - retries via port 0 until max_iterations, then exits via port 1
-    Loop {
-        id: ElementId,
-        max_iterations: u32,
-    },
+    Loop { id: ElementId, max_iterations: u32 },
     /// Tool element - invokes a registered toolkit tool
     Tool {
         id: ElementId,
@@ -274,11 +271,14 @@ impl ChainDefinition {
         let operation_count = self
             .elements
             .iter()
-            .filter(|e| matches!(e,
-                ChainElement::Operation { .. } |
-                ChainElement::Transform { .. } |
-                ChainElement::GenericPrompt { .. }
-            ))
+            .filter(|e| {
+                matches!(
+                    e,
+                    ChainElement::Operation { .. }
+                        | ChainElement::Transform { .. }
+                        | ChainElement::GenericPrompt { .. }
+                )
+            })
             .count();
 
         ChainDefinitionInfo {
@@ -383,16 +383,26 @@ impl ChainDefinition {
                 if *max_iterations < 1 {
                     return Err("Loop element max_iterations must be >= 1".to_string());
                 }
-                let incoming = self.connections.iter().filter(|c| &c.to_element == element.id()).count();
-                let outgoing = self.connections.iter().filter(|c| &c.from_element == element.id()).count();
+                let incoming = self
+                    .connections
+                    .iter()
+                    .filter(|c| &c.to_element == element.id())
+                    .count();
+                let outgoing = self
+                    .connections
+                    .iter()
+                    .filter(|c| &c.from_element == element.id())
+                    .count();
                 if incoming > 1 {
                     return Err(format!(
-                        "Loop element can have at most one incoming connection (has {})", incoming
+                        "Loop element can have at most one incoming connection (has {})",
+                        incoming
                     ));
                 }
                 if outgoing > 2 {
                     return Err(format!(
-                        "Loop element can have at most two outgoing connections (has {})", outgoing
+                        "Loop element can have at most two outgoing connections (has {})",
+                        outgoing
                     ));
                 }
             }
@@ -405,7 +415,8 @@ impl ChainDefinition {
         {
             let element_ids: Vec<&str> = self.elements.iter().map(|e| e.id().as_str()).collect();
             let adj: std::collections::HashMap<&str, Vec<&str>> = {
-                let mut map: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+                let mut map: std::collections::HashMap<&str, Vec<&str>> =
+                    std::collections::HashMap::new();
                 for id in &element_ids {
                     map.entry(id).or_default();
                 }
@@ -455,11 +466,7 @@ fn tarjan_scc<'a>(
         result: Vec<Vec<&'a str>>,
     }
 
-    fn strongconnect<'a>(
-        v: &'a str,
-        adj: &HashMap<&'a str, Vec<&'a str>>,
-        state: &mut State<'a>,
-    ) {
+    fn strongconnect<'a>(v: &'a str, adj: &HashMap<&'a str, Vec<&'a str>>, state: &mut State<'a>) {
         state.index.insert(v, state.index_counter);
         state.lowlink.insert(v, state.index_counter);
         state.index_counter += 1;
@@ -522,32 +529,25 @@ const SESSION_GROUP_COLORS: &[&str] = &[
     //
     // Purple.
     //
-    "#8B5CF6",
-    //
+    "#8B5CF6", //
     // Emerald.
     //
-    "#10B981",
-    //
+    "#10B981", //
     // Amber.
     //
-    "#F59E0B",
-    //
+    "#F59E0B", //
     // Red.
     //
-    "#EF4444",
-    //
+    "#EF4444", //
     // Blue.
     //
-    "#3B82F6",
-    //
+    "#3B82F6", //
     // Pink.
     //
-    "#EC4899",
-    //
+    "#EC4899", //
     // Teal.
     //
-    "#14B8A6",
-    //
+    "#14B8A6", //
     // Orange.
     //
     "#F97316",
@@ -569,10 +569,18 @@ fn migrate_chain_json(json: &str) -> Option<String> {
                 let element_type = e.get("element_type")?.as_str()?;
                 if element_type == "SessionBox" {
                     let id = e.get("id")?.as_str()?.to_string();
-                    let yolo_mode = e.get("yolo_mode").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let contained = e.get("contained_elements")
+                    let yolo_mode = e
+                        .get("yolo_mode")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let contained = e
+                        .get("contained_elements")
                         .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
                         .unwrap_or_default();
                     Some((id, yolo_mode, contained))
                 } else {
@@ -674,8 +682,14 @@ fn migrate_chain_json(json: &str) -> Option<String> {
     //
     if let Some(connections) = value.get_mut("connections").and_then(|c| c.as_array_mut()) {
         connections.retain(|conn| {
-            let from = conn.get("from_element").and_then(|v| v.as_str()).unwrap_or("");
-            let to = conn.get("to_element").and_then(|v| v.as_str()).unwrap_or("");
+            let from = conn
+                .get("from_element")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let to = conn
+                .get("to_element")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             !session_box_ids.contains(from) && !session_box_ids.contains(to)
         });
     }
@@ -919,23 +933,19 @@ impl Database {
         let sql = "SELECT definition, disabled FROM operation_chains WHERE id = $1";
 
         let row_opt: Option<(String, bool)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?
-                    .map(|r| (r.get(0), r.get(1)))
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?
-                    .map(|r| {
-                        let disabled: i16 = r.get(1);
-                        (r.get(0), disabled != 0)
-                    })
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+                .map(|r| (r.get(0), r.get(1))),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+                .map(|r| {
+                    let disabled: i16 = r.get(1);
+                    (r.get(0), disabled != 0)
+                }),
         };
 
         match row_opt {
@@ -969,10 +979,12 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.iter().map(|r| {
-                    let disabled: i16 = r.get(1);
-                    (r.get(0), disabled != 0)
-                }).collect()
+                rows.iter()
+                    .map(|r| {
+                        let disabled: i16 = r.get(1);
+                        (r.get(0), disabled != 0)
+                    })
+                    .collect()
             }
         };
 
@@ -982,10 +994,14 @@ impl Database {
                 serde_json::from_str::<ChainDefinition>(&json)
                     .ok()
                     .or_else(|| {
-                        migrate_chain_json(&json)
-                            .and_then(|migrated| serde_json::from_str::<ChainDefinition>(&migrated).ok())
+                        migrate_chain_json(&json).and_then(|migrated| {
+                            serde_json::from_str::<ChainDefinition>(&migrated).ok()
+                        })
                     })
-                    .map(|mut c| { c.disabled = disabled; c })
+                    .map(|mut c| {
+                        c.disabled = disabled;
+                        c
+                    })
             })
             .map(|c| c.to_info())
             .collect();
@@ -996,8 +1012,12 @@ impl Database {
     /// List chain definitions by category
     /// Automatically handles migration of old format chains
     #[allow(dead_code)]
-    pub async fn list_chains_by_category(&self, category: &str) -> Result<Vec<ChainDefinitionInfo>> {
-        let sql = "SELECT definition, disabled FROM operation_chains WHERE category = $1 ORDER BY name";
+    pub async fn list_chains_by_category(
+        &self,
+        category: &str,
+    ) -> Result<Vec<ChainDefinitionInfo>> {
+        let sql =
+            "SELECT definition, disabled FROM operation_chains WHERE category = $1 ORDER BY name";
 
         let rows: Vec<(String, bool)> = match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -1006,10 +1026,12 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
-                rows.iter().map(|r| {
-                    let disabled: i16 = r.get(1);
-                    (r.get(0), disabled != 0)
-                }).collect()
+                rows.iter()
+                    .map(|r| {
+                        let disabled: i16 = r.get(1);
+                        (r.get(0), disabled != 0)
+                    })
+                    .collect()
             }
         };
 
@@ -1019,10 +1041,14 @@ impl Database {
                 serde_json::from_str::<ChainDefinition>(&json)
                     .ok()
                     .or_else(|| {
-                        migrate_chain_json(&json)
-                            .and_then(|migrated| serde_json::from_str::<ChainDefinition>(&migrated).ok())
+                        migrate_chain_json(&json).and_then(|migrated| {
+                            serde_json::from_str::<ChainDefinition>(&migrated).ok()
+                        })
                     })
-                    .map(|mut c| { c.disabled = disabled; c })
+                    .map(|mut c| {
+                        c.disabled = disabled;
+                        c
+                    })
             })
             .map(|c| c.to_info())
             .collect();
@@ -1040,20 +1066,16 @@ impl Database {
         let sql = "DELETE FROM operation_chains WHERE id = $1";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count > 0)
@@ -1065,24 +1087,20 @@ impl Database {
         let now = chrono::Utc::now().to_rfc3339();
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(if disabled { 1i32 } else { 0i32 })
-                    .bind(&now)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(if disabled { 1i16 } else { 0i16 })
-                    .bind(&now)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(if disabled { 1i32 } else { 0i32 })
+                .bind(&now)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(if disabled { 1i16 } else { 0i16 })
+                .bind(&now)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count > 0)
@@ -1122,20 +1140,16 @@ impl Database {
             )";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)

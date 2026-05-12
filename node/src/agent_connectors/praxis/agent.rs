@@ -44,8 +44,10 @@ impl Agent for PraxisAgent {
         _context: &SessionContext,
         session_id: Uuid,
     ) -> Option<Arc<dyn AgentSession>> {
-        Some(Arc::new(PraxisAgentSession::new(self.config.clone(), session_id))
-            as Arc<dyn AgentSession>)
+        Some(
+            Arc::new(PraxisAgentSession::new(self.config.clone(), session_id))
+                as Arc<dyn AgentSession>,
+        )
     }
 }
 

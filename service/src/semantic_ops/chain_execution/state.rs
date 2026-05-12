@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use common::{
-    ChainExecutionStatus, ChainExecutionUpdate, ElementConfig, ElementContext,
-    ElementExecution, ElementExecutionStatus,
+    ChainExecutionStatus, ChainExecutionUpdate, ElementConfig, ElementContext, ElementExecution,
+    ElementExecutionStatus,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -198,7 +198,10 @@ impl ChainExecutionRegistry {
     pub fn register(&self, state: ChainExecutionState) -> Arc<RwLock<ChainExecutionState>> {
         let execution_id = state.execution_id.clone();
         let arc = Arc::new(RwLock::new(state));
-        self.executions.write().unwrap().insert(execution_id, arc.clone());
+        self.executions
+            .write()
+            .unwrap()
+            .insert(execution_id, arc.clone());
         arc
     }
 

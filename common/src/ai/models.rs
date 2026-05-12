@@ -132,7 +132,12 @@ pub async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, String> {
     Ok(data
         .models
         .into_iter()
-        .map(|m| m.name.strip_prefix("models/").unwrap_or(&m.name).to_string())
+        .map(|m| {
+            m.name
+                .strip_prefix("models/")
+                .unwrap_or(&m.name)
+                .to_string()
+        })
         .collect())
 }
 
@@ -241,28 +246,16 @@ pub async fn fetch_models_for_provider(
             let url = base_url.unwrap_or("https://api.openai.com/v1");
             fetch_openai_compatible_models(url, api_key).await
         }
-        "groq" => {
-            fetch_openai_compatible_models("https://api.groq.com/openai/v1", api_key).await
-        }
-        "mistral" => {
-            fetch_openai_compatible_models("https://api.mistral.ai/v1", api_key).await
-        }
-        "xai" => {
-            fetch_openai_compatible_models("https://api.x.ai/v1", api_key).await
-        }
+        "groq" => fetch_openai_compatible_models("https://api.groq.com/openai/v1", api_key).await,
+        "mistral" => fetch_openai_compatible_models("https://api.mistral.ai/v1", api_key).await,
+        "xai" => fetch_openai_compatible_models("https://api.x.ai/v1", api_key).await,
         "gemini" => fetch_gemini_models(api_key).await,
-        "cerebras" => {
-            fetch_openai_compatible_models("https://api.cerebras.ai/v1", api_key).await
-        }
+        "cerebras" => fetch_openai_compatible_models("https://api.cerebras.ai/v1", api_key).await,
         "nvidia" => {
             fetch_openai_compatible_models("https://integrate.api.nvidia.com/v1", api_key).await
         }
-        "minimax" => {
-            fetch_openai_compatible_models("https://api.minimax.io/v1", api_key).await
-        }
-        "moonshot" => {
-            fetch_openai_compatible_models("https://api.moonshot.ai/v1", api_key).await
-        }
+        "minimax" => fetch_openai_compatible_models("https://api.minimax.io/v1", api_key).await,
+        "moonshot" => fetch_openai_compatible_models("https://api.moonshot.ai/v1", api_key).await,
         "fireworksai" | "fireworks" => {
             fetch_openai_compatible_models("https://api.fireworks.ai/inference/v1", api_key).await
         }

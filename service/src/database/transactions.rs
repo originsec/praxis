@@ -133,7 +133,11 @@ impl Database {
 
     /// List recent transactions for a node
     #[allow(dead_code)]
-    pub async fn list_transactions_by_node(&self, node_id: &str, limit: usize) -> Result<Vec<TransactionRecord>> {
+    pub async fn list_transactions_by_node(
+        &self,
+        node_id: &str,
+        limit: usize,
+    ) -> Result<Vec<TransactionRecord>> {
         let sql = "SELECT transaction_id, node_id, prompt_text, request_sent_at, response_received_at, response_text, status
              FROM session_transactions WHERE node_id = $1 ORDER BY request_sent_at DESC LIMIT $2";
 
@@ -192,20 +196,16 @@ impl Database {
             )";
 
         let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(delete_sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(delete_sql)
-                    .bind(to_delete as i64)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(delete_sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(delete_sql)
+                .bind(to_delete as i64)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(deleted as usize)
@@ -221,20 +221,16 @@ impl Database {
              WHERE status = 'Pending'";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(Utc::now().to_rfc3339())
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count as usize)

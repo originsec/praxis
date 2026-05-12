@@ -9,16 +9,20 @@ pub async fn handle_intercept_command(
 ) -> NodeCommandResult {
     match cmd {
         InterceptCommand::Enable { method } => {
-            let mut state = node_state.write().await;
+            let (intercept_manager, targets) = {
+                let state = node_state.read().await;
+                (
+                    state.intercept_manager.clone(),
+                    state.intercept_targets.clone(),
+                )
+            };
+            let mut intercept_manager = intercept_manager.lock().await;
 
             //
             // Check if already active.
             //
-            if state.intercept_manager.is_enabled() {
-                let current_method = state
-                    .intercept_manager
-                    .method()
-                    .unwrap_or(InterceptMethod::Proxy);
+            if intercept_manager.is_enabled() {
+                let current_method = intercept_manager.method().unwrap_or(InterceptMethod::Proxy);
                 return NodeCommandResult::Intercept(InterceptCommandResult::Enabled {
                     method: current_method,
                 });
@@ -29,16 +33,9 @@ pub async fn handle_intercept_command(
             //
             let method = method.unwrap_or(InterceptMethod::Proxy);
 
-            //
-            // Snapshot the current target list — the borrow checker requires
-            // we copy off the immutable side before taking &mut on
-            // intercept_manager.
-            //
-            let targets = state.intercept_targets.clone();
-
-            match state.intercept_manager.enable(&targets, method).await {
+            match intercept_manager.enable(&targets, method).await {
                 Ok(used_method) => {
-                    let domains = state.intercept_manager.intercepted_domains();
+                    let domains = intercept_manager.intercepted_domains();
                     common::log_info!(
                         "Intercept enabled ({:?}) for {} domain(s): {:?}",
                         used_method,
@@ -58,16 +55,20 @@ pub async fn handle_intercept_command(
             }
         }
         InterceptCommand::Disable => {
-            let mut state = node_state.write().await;
+            let intercept_manager = {
+                let state = node_state.read().await;
+                state.intercept_manager.clone()
+            };
+            let mut intercept_manager = intercept_manager.lock().await;
 
-            if !state.intercept_manager.is_enabled() {
+            if !intercept_manager.is_enabled() {
                 //
                 // Not active, consider it disabled.
                 //
                 return NodeCommandResult::Intercept(InterceptCommandResult::Disabled);
             }
 
-            match state.intercept_manager.disable().await {
+            match intercept_manager.disable().await {
                 Ok(_) => {
                     common::log_info!("Intercept disabled");
                     NodeCommandResult::Intercept(InterceptCommandResult::Disabled)

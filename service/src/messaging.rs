@@ -2,9 +2,8 @@
 
 use anyhow::Result;
 use common::{
-    publish_json, publish_json_exchange, client_queue_name, node_queue_name,
-    ClientBroadcastMessage, ClientDirectMessage, NodeDirectMessage,
-    CLIENT_BROADCAST_EXCHANGE,
+    CLIENT_BROADCAST_EXCHANGE, ClientBroadcastMessage, ClientDirectMessage, NodeDirectMessage,
+    client_queue_name, node_queue_name, publish_json, publish_json_exchange,
 };
 use lapin::Channel;
 

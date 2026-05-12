@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -358,8 +358,10 @@ mod tests {
 
     #[test]
     fn test_custom_base_url() {
-        let client =
-            OpenAIClient::with_base_url("test-key".to_string(), "https://api.groq.com/v1".to_string());
+        let client = OpenAIClient::with_base_url(
+            "test-key".to_string(),
+            "https://api.groq.com/v1".to_string(),
+        );
         assert!(client.base_url.contains("groq.com"));
         assert!(client.base_url.ends_with("/chat/completions"));
     }
@@ -369,14 +371,26 @@ mod tests {
         //
         // Without trailing slash.
         //
-        let client1 = OpenAIClient::with_base_url("key".to_string(), "https://api.example.com/v1".to_string());
-        assert_eq!(client1.base_url, "https://api.example.com/v1/chat/completions");
+        let client1 = OpenAIClient::with_base_url(
+            "key".to_string(),
+            "https://api.example.com/v1".to_string(),
+        );
+        assert_eq!(
+            client1.base_url,
+            "https://api.example.com/v1/chat/completions"
+        );
 
         //
         // With trailing slash.
         //
-        let client2 = OpenAIClient::with_base_url("key".to_string(), "https://api.example.com/v1/".to_string());
-        assert_eq!(client2.base_url, "https://api.example.com/v1/chat/completions");
+        let client2 = OpenAIClient::with_base_url(
+            "key".to_string(),
+            "https://api.example.com/v1/".to_string(),
+        );
+        assert_eq!(
+            client2.base_url,
+            "https://api.example.com/v1/chat/completions"
+        );
 
         //
         // Already has endpoint.
@@ -385,6 +399,9 @@ mod tests {
             "key".to_string(),
             "https://api.example.com/v1/chat/completions".to_string(),
         );
-        assert_eq!(client3.base_url, "https://api.example.com/v1/chat/completions");
+        assert_eq!(
+            client3.base_url,
+            "https://api.example.com/v1/chat/completions"
+        );
     }
 }

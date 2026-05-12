@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use lapin::Channel;
-use serde_json::{json, Value};
 use serde_json::value::RawValue;
+use serde_json::{Value, json};
 use tokio::sync::RwLock;
 
-use agent_client_protocol as acp;
 use acp::JsonRpcMessage;
 use acp::schema::{
     CancelNotification, ClientNotification, ClientRequest, CloseSessionRequest,
-    CloseSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion, SessionNotification,
+    CloseSessionResponse, Implementation, InitializeRequest, InitializeResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, ProtocolVersion, SessionNotification,
 };
+use agent_client_protocol as acp;
 use common::ClientDirectMessage;
 
 use crate::acp_node_proxy::AcpNodeProxy;
@@ -39,7 +39,11 @@ impl AcpServer {
         service_config: Arc<RwLock<ServiceConfig>>,
         node_proxy: Arc<AcpNodeProxy>,
     ) -> Self {
-        Self { orchestrator_manager, service_config, node_proxy }
+        Self {
+            orchestrator_manager,
+            service_config,
+            node_proxy,
+        }
     }
 
     pub async fn shutdown(&self) {
@@ -133,7 +137,8 @@ impl AcpServer {
         // Get raw params for typed decoding.
         //
 
-        let params_str = msg.get("params")
+        let params_str = msg
+            .get("params")
             .map(|v| v.to_string())
             .unwrap_or_else(|| "{}".to_string());
         let raw_params = match RawValue::from_string(params_str) {
@@ -144,7 +149,8 @@ impl AcpServer {
                         publish_channel,
                         client_id,
                         acp_error_response(id, -32602, "Invalid params"),
-                    ).await;
+                    )
+                    .await;
                 }
                 return;
             }
@@ -161,17 +167,25 @@ impl AcpServer {
         if id.is_some() {
             match ClientRequest::parse_message(&method, &params_value) {
                 Ok(request) => {
-                    self.dispatch_request(client_id, id, request, publish_channel).await;
+                    self.dispatch_request(client_id, id, request, publish_channel)
+                        .await;
                 }
                 Err(req_err) => {
                     let (code, msg) = if req_err.code == acp::ErrorCode::MethodNotFound {
                         (-32601, format!("Method not found: {}", method))
                     } else {
-                        (-32602, format!("Invalid params for {}: {}", method, req_err.message))
+                        (
+                            -32602,
+                            format!("Invalid params for {}: {}", method, req_err.message),
+                        )
                     };
                     common::log_warn!(
                         "ACP: {} from {}: {}",
-                        if code == -32601 { "unknown method" } else { "invalid params" },
+                        if code == -32601 {
+                            "unknown method"
+                        } else {
+                            "invalid params"
+                        },
                         common::short_id(client_id),
                         msg,
                     );
@@ -180,14 +194,16 @@ impl AcpServer {
                             publish_channel,
                             client_id,
                             acp_error_response(id, code as i64, &msg),
-                        ).await;
+                        )
+                        .await;
                     }
                 }
             }
         } else {
             match ClientNotification::parse_message(&method, &params_value) {
                 Ok(notification) => {
-                    self.dispatch_notification(client_id, notification, publish_channel).await;
+                    self.dispatch_notification(client_id, notification, publish_channel)
+                        .await;
                 }
                 Err(_) => {
                     //
@@ -217,30 +233,37 @@ impl AcpServer {
                     match resp {
                         Ok(r) => {
                             let _ = send_to_client(
-                                publish_channel, client_id,
+                                publish_channel,
+                                client_id,
                                 acp_response(id, serde_json::to_value(r).unwrap()),
-                            ).await;
+                            )
+                            .await;
                         }
                         Err(e) => {
                             let _ = send_to_client(
-                                publish_channel, client_id,
+                                publish_channel,
+                                client_id,
                                 acp_error_response(id, i32::from(e.code) as i64, &e.message),
-                            ).await;
+                            )
+                            .await;
                         }
                     }
                 }
             }
 
             ClientRequest::NewSessionRequest(req) => {
-                self.handle_session_new(client_id, id, req, publish_channel).await;
+                self.handle_session_new(client_id, id, req, publish_channel)
+                    .await;
             }
 
             ClientRequest::PromptRequest(req) => {
-                self.handle_session_prompt(client_id, id, req, publish_channel).await;
+                self.handle_session_prompt(client_id, id, req, publish_channel)
+                    .await;
             }
 
             ClientRequest::CloseSessionRequest(req) => {
-                self.handle_session_close(client_id, id, req, publish_channel).await;
+                self.handle_session_close(client_id, id, req, publish_channel)
+                    .await;
             }
 
             _ => {
@@ -249,7 +272,8 @@ impl AcpServer {
                         publish_channel,
                         client_id,
                         acp_error_response(id, -32601, "Method not supported"),
-                    ).await;
+                    )
+                    .await;
                 }
             }
         }
@@ -267,7 +291,8 @@ impl AcpServer {
     ) {
         match notification {
             ClientNotification::CancelNotification(notif) => {
-                self.handle_session_cancel(client_id, notif, publish_channel).await;
+                self.handle_session_cancel(client_id, notif, publish_channel)
+                    .await;
             }
             _ => {}
         }
@@ -285,10 +310,8 @@ impl AcpServer {
     //
 
     async fn handle_initialize(&self, _req: InitializeRequest) -> acp::Result<InitializeResponse> {
-        Ok(
-            InitializeResponse::new(ProtocolVersion::LATEST)
-                .agent_info(Implementation::new("praxis", env!("CARGO_PKG_VERSION")))
-        )
+        Ok(InitializeResponse::new(ProtocolVersion::LATEST)
+            .agent_info(Implementation::new("praxis", env!("CARGO_PKG_VERSION"))))
     }
 
     async fn handle_session_prompt(
@@ -300,7 +323,9 @@ impl AcpServer {
     ) {
         let session_id = req.session_id.to_string();
 
-        let prompt_text = req.prompt.iter()
+        let prompt_text = req
+            .prompt
+            .iter()
             .find_map(|block| {
                 if let acp::schema::ContentBlock::Text(tc) = block {
                     Some(tc.text.clone())
@@ -316,7 +341,8 @@ impl AcpServer {
                     publish_channel,
                     client_id,
                     acp_error_response(id, -32602, "Missing sessionId or prompt text"),
-                ).await;
+                )
+                .await;
             }
             return;
         }
@@ -328,7 +354,13 @@ impl AcpServer {
         };
 
         self.orchestrator_manager
-            .send_prompt(client_id, &session_id, prompt_id, prompt_text, publish_channel)
+            .send_prompt(
+                client_id,
+                &session_id,
+                prompt_id,
+                prompt_text,
+                publish_channel,
+            )
             .await;
     }
 
@@ -366,10 +398,15 @@ impl AcpServer {
         };
         let session_id = format!("{}_{}", prefix, uuid::Uuid::new_v4());
 
-        let meta_val = req.meta.as_ref()
+        let meta_val = req
+            .meta
+            .as_ref()
             .map(|m| serde_json::to_value(m).unwrap_or_default())
             .unwrap_or_default();
-        let model_ref = meta_val.get("modelRef").and_then(|v| v.as_str()).map(String::from);
+        let model_ref = meta_val
+            .get("modelRef")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         //
         // Optional client-supplied conversation history for resume. The
@@ -396,7 +433,8 @@ impl AcpServer {
         //
 
         let config = self.service_config.read().await;
-        let model_def = model_ref.as_deref()
+        let model_def = model_ref
+            .as_deref()
             .and_then(|mr| config.find_model_definition(mr))
             .or_else(|| config.get_orchestrator_model_def());
         let (provider, model_name) = model_def
@@ -405,7 +443,14 @@ impl AcpServer {
         drop(config);
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, model_ref.as_deref(), history, &self.service_config, publish_channel)
+            .create_session(
+                client_id,
+                &session_id,
+                model_ref.as_deref(),
+                history,
+                &self.service_config,
+                publish_channel,
+            )
             .await;
 
         if let Some(id) = id {
@@ -414,13 +459,13 @@ impl AcpServer {
                 model_id.clone(),
                 vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
             );
-            let resp = NewSessionResponse::new(session_id)
-                .models(model_state);
+            let resp = NewSessionResponse::new(session_id).models(model_state);
             let _ = send_to_client(
                 publish_channel,
                 client_id,
                 acp_response(id, serde_json::to_value(resp).unwrap()),
-            ).await;
+            )
+            .await;
         }
     }
 
@@ -443,8 +488,12 @@ impl AcpServer {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, serde_json::to_value(CloseSessionResponse::new()).unwrap()),
-            ).await;
+                acp_response(
+                    id,
+                    serde_json::to_value(CloseSessionResponse::new()).unwrap(),
+                ),
+            )
+            .await;
         }
     }
 }
@@ -492,13 +541,18 @@ fn value_to_request_id(v: &Value) -> acp::jsonrpcmsg::Id {
 // wire.
 //
 
-fn session_notification(session_id: &str, update: acp::schema::SessionUpdate) -> ClientDirectMessage {
+fn session_notification(
+    session_id: &str,
+    update: acp::schema::SessionUpdate,
+) -> ClientDirectMessage {
     let notif = SessionNotification::new(session_id.to_string(), update);
     let params = match notif.to_untyped_message() {
         Ok(m) => m.params,
         Err(e) => {
             tracing::warn!("ACP send: failed to serialize SessionNotification: {}", e);
-            return ClientDirectMessage::AcpMessage { json_rpc: String::new() };
+            return ClientDirectMessage::AcpMessage {
+                json_rpc: String::new(),
+            };
         }
     };
     let params_obj = match params {
@@ -510,10 +564,8 @@ fn session_notification(session_id: &str, update: acp::schema::SessionUpdate) ->
             Some(acp::jsonrpcmsg::Params::Object(map))
         }
     };
-    let request = acp::jsonrpcmsg::Request::notification_v2(
-        "session/update".to_string(),
-        params_obj,
-    );
+    let request =
+        acp::jsonrpcmsg::Request::notification_v2("session/update".to_string(), params_obj);
     let json_rpc = serde_json::to_string(&request).unwrap();
     tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 600));
     ClientDirectMessage::AcpMessage { json_rpc }
@@ -523,17 +575,27 @@ pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientD
     let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
         acp::schema::TextContent::new(text),
     ));
-    session_notification(session_id, acp::schema::SessionUpdate::AgentMessageChunk(chunk))
+    session_notification(
+        session_id,
+        acp::schema::SessionUpdate::AgentMessageChunk(chunk),
+    )
 }
 
 pub fn session_update_user_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
     let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
         acp::schema::TextContent::new(text),
     ));
-    session_notification(session_id, acp::schema::SessionUpdate::UserMessageChunk(chunk))
+    session_notification(
+        session_id,
+        acp::schema::SessionUpdate::UserMessageChunk(chunk),
+    )
 }
 
-pub fn session_update_tool_call(session_id: &str, tool_name: &str, tool_input: Option<Value>) -> ClientDirectMessage {
+pub fn session_update_tool_call(
+    session_id: &str,
+    tool_name: &str,
+    tool_input: Option<Value>,
+) -> ClientDirectMessage {
     let mut tc = acp::schema::ToolCall::new(uuid::Uuid::new_v4().to_string(), tool_name);
     if let Some(input) = tool_input {
         tc = tc.raw_input(input);
@@ -554,24 +616,40 @@ pub fn session_update_tool_result(
     };
     let fields = acp::schema::ToolCallUpdateFields::new()
         .status(status)
-        .content(vec![acp::schema::ToolCallContent::Content(acp::schema::Content::new(result))]);
+        .content(vec![acp::schema::ToolCallContent::Content(
+            acp::schema::Content::new(result),
+        )]);
     let update = acp::schema::ToolCallUpdate::new(tool_name.to_string(), fields);
-    session_notification(session_id, acp::schema::SessionUpdate::ToolCallUpdate(update))
+    session_notification(
+        session_id,
+        acp::schema::SessionUpdate::ToolCallUpdate(update),
+    )
 }
 
 pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessage {
-    let entries = plan.get("steps")
+    let entries = plan
+        .get("steps")
         .and_then(|s| s.as_array())
         .map(|steps| {
-            steps.iter().map(|step| {
-                let desc = step.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                let status = match step.get("status").and_then(|s| s.as_str()) {
-                    Some("done") => acp::schema::PlanEntryStatus::Completed,
-                    Some("in_progress") => acp::schema::PlanEntryStatus::InProgress,
-                    _ => acp::schema::PlanEntryStatus::Pending,
-                };
-                acp::schema::PlanEntry::new(desc, acp::schema::PlanEntryPriority::Medium, status)
-            }).collect::<Vec<_>>()
+            steps
+                .iter()
+                .map(|step| {
+                    let desc = step
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+                    let status = match step.get("status").and_then(|s| s.as_str()) {
+                        Some("done") => acp::schema::PlanEntryStatus::Completed,
+                        Some("in_progress") => acp::schema::PlanEntryStatus::InProgress,
+                        _ => acp::schema::PlanEntryStatus::Pending,
+                    };
+                    acp::schema::PlanEntry::new(
+                        desc,
+                        acp::schema::PlanEntryPriority::Medium,
+                        status,
+                    )
+                })
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
@@ -581,11 +659,18 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
     )
 }
 
-pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> ClientDirectMessage {
-    let usage = acp::schema::UsageUpdate::new(total_tokens as u64, 0)
-        .meta(serde_json::from_value::<acp::schema::Meta>(json!({
+pub fn session_update_usage(
+    session_id: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+) -> ClientDirectMessage {
+    let usage = acp::schema::UsageUpdate::new(total_tokens as u64, 0).meta(
+        serde_json::from_value::<acp::schema::Meta>(json!({
             "promptTokens": prompt_tokens,
             "completionTokens": completion_tokens,
-        })).unwrap());
+        }))
+        .unwrap(),
+    );
     session_notification(session_id, acp::schema::SessionUpdate::UsageUpdate(usage))
 }

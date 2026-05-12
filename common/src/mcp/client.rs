@@ -25,12 +25,7 @@ pub trait McpClient: Send + Sync {
     // the JSON-RPC response.
     //
 
-    async fn acp_request(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<Value>;
+    async fn acp_request(&self, node_id: &str, method: &str, params: Value) -> Result<Value>;
 
     //
     // Like `acp_request` but additionally buffers any `session/update`
@@ -51,12 +46,7 @@ pub trait McpClient: Send + Sync {
     // session/cancel.
     //
 
-    async fn acp_notification(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<()>;
+    async fn acp_notification(&self, node_id: &str, method: &str, params: Value) -> Result<()>;
 
     /// Search intercepted traffic.
     async fn search_traffic(
@@ -146,7 +136,12 @@ pub trait McpClient: Send + Sync {
     async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()>;
 
     /// Create or update an operation definition.
-    async fn create_op_def(&self, spec: SemanticOperationSpec, category: &str, short_name: &str) -> Result<String>;
+    async fn create_op_def(
+        &self,
+        spec: SemanticOperationSpec,
+        category: &str,
+        short_name: &str,
+    ) -> Result<String>;
 
     /// Delete an operation definition by full name (category::short_name).
     async fn delete_op_def(&self, full_name: &str) -> Result<()>;

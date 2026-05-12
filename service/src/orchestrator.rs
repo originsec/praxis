@@ -4,25 +4,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use lapin::Channel;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use futures_util::StreamExt;
 
 use common::ai::{
-    ChatCompletionRequest, Message, Tool, Provider, Usage,
-    parse_manual_tool_call, get_system_prompt_with_tools, create_ai_client,
+    ChatCompletionRequest, Message, Provider, Tool, Usage, create_ai_client,
+    get_system_prompt_with_tools, parse_manual_tool_call,
 };
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use rmcp::{
+    ServiceExt,
     model::{CallToolRequestParams, RawContent},
     transport::StreamableHttpClientTransport,
-    ServiceExt,
 };
 
 use crate::acp_server::{
-    acp_response, acp_error_response,
-    session_update_text, session_update_user_text, session_update_tool_call,
-    session_update_tool_result, session_update_plan, session_update_usage,
+    acp_error_response, acp_response, session_update_plan, session_update_text,
+    session_update_tool_call, session_update_tool_result, session_update_usage,
+    session_update_user_text,
 };
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -152,7 +152,11 @@ impl OrchestratorManager {
 
         let provider = Provider::from_str(&model_def.provider).unwrap_or(Provider::Anthropic);
 
-        let client = match create_ai_client(provider, model_def.api_key.clone(), model_def.base_url.as_deref()) {
+        let client = match create_ai_client(
+            provider,
+            model_def.api_key.clone(),
+            model_def.base_url.as_deref(),
+        ) {
             Ok(c) => c,
             Err(e) => {
                 let _ = send_to_client(
@@ -163,7 +167,8 @@ impl OrchestratorManager {
                         -32000,
                         &format!("Failed to create AI client: {}", e),
                     ),
-                ).await;
+                )
+                .await;
                 return;
             }
         };
@@ -197,10 +202,10 @@ impl OrchestratorManager {
             session_id: session_id_owned.clone(),
             prompt_tx,
             task_handle: tokio::spawn(async move {
-
                 macro_rules! send_msg {
                     ($msg:expr) => {{
-                        let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
+                        let _ =
+                            send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
                     }};
                 }
 
@@ -214,10 +219,10 @@ impl OrchestratorManager {
                     Err(e) => {
                         common::log_error!("Failed to initialize MCP client: {}", e);
                         send_msg!(acp_error_response(
-                                Value::Null,
-                                -32000,
-                                &format!("Failed to initialize MCP client: {}", e),
-                            ));
+                            Value::Null,
+                            -32000,
+                            &format!("Failed to initialize MCP client: {}", e),
+                        ));
                         return;
                     }
                 };
@@ -229,15 +234,18 @@ impl OrchestratorManager {
                     Err(e) => {
                         common::log_error!("Failed to list MCP tools: {}", e);
                         send_msg!(acp_error_response(
-                                Value::Null,
-                                -32000,
-                                &format!("Failed to list MCP tools: {}", e),
-                            ));
+                            Value::Null,
+                            -32000,
+                            &format!("Failed to list MCP tools: {}", e),
+                        ));
                         return;
                     }
                 };
 
-                common::log_info!("Orchestrator fetched {} tools from MCP server", mcp_tools.len());
+                common::log_info!(
+                    "Orchestrator fetched {} tools from MCP server",
+                    mcp_tools.len()
+                );
 
                 let mut tools = convert_mcp_tools(mcp_tools);
                 tools.extend(get_local_tool_definitions());
@@ -246,8 +254,13 @@ impl OrchestratorManager {
 
                 common::log_info!(
                     "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
-                    common::short_id(&client_id_owned), common::short_id(&sid),
-                    provider, model, max_tokens, tools.len(), history.len()
+                    common::short_id(&client_id_owned),
+                    common::short_id(&sid),
+                    provider,
+                    model,
+                    max_tokens,
+                    tools.len(),
+                    history.len()
                 );
 
                 let mut conversation_history: Vec<Message> = Vec::new();
@@ -284,20 +297,23 @@ impl OrchestratorManager {
                     let max_history = history_count + 1;
                     if conversation_history.len() > max_history {
                         let system_msg = conversation_history.remove(0);
-                        conversation_history = conversation_history.split_off(conversation_history.len() - history_count);
+                        conversation_history = conversation_history
+                            .split_off(conversation_history.len() - history_count);
                         conversation_history.insert(0, system_msg);
                     }
 
                     let mut early_response_sent = false;
 
                     loop {
-                        if stop_flag_clone.load(Ordering::SeqCst) ||
-                           cancel_flag_clone.load(Ordering::SeqCst) {
+                        if stop_flag_clone.load(Ordering::SeqCst)
+                            || cancel_flag_clone.load(Ordering::SeqCst)
+                        {
                             break;
                         }
 
-                        let request = ChatCompletionRequest::new(model.clone(), conversation_history.clone())
-                            .with_max_tokens(max_tokens);
+                        let request =
+                            ChatCompletionRequest::new(model.clone(), conversation_history.clone())
+                                .with_max_tokens(max_tokens);
 
                         let mut stream = client.chat_completion_stream(request);
                         let mut full_response = String::new();
@@ -308,8 +324,9 @@ impl OrchestratorManager {
                         let mut bytes_sent: usize = 0;
 
                         while let Some(result) = stream.next().await {
-                            if stop_flag_clone.load(Ordering::SeqCst) ||
-                               cancel_flag_clone.load(Ordering::SeqCst) {
+                            if stop_flag_clone.load(Ordering::SeqCst)
+                                || cancel_flag_clone.load(Ordering::SeqCst)
+                            {
                                 break;
                             }
 
@@ -321,36 +338,60 @@ impl OrchestratorManager {
                                         if !held_back {
                                             send_buffer.push_str(&delta.content);
 
-                                            let tool_marker = send_buffer.find("{\"tool\"")
+                                            let tool_marker = send_buffer
+                                                .find("{\"tool\"")
                                                 .or_else(|| send_buffer.find("```"));
 
                                             if let Some(marker_pos) = tool_marker {
                                                 if marker_pos > 0 {
-                                                    let pre_tool = send_buffer[..marker_pos].to_string();
-                                                    let cleaned = pre_tool.trim_end_matches(|c: char| c == '`' || c == '\n' || c == '\r');
-                                                    let cleaned = cleaned.trim_end_matches("json").trim_end_matches(|c: char| c == '`');
+                                                    let pre_tool =
+                                                        send_buffer[..marker_pos].to_string();
+                                                    let cleaned =
+                                                        pre_tool.trim_end_matches(|c: char| {
+                                                            c == '`' || c == '\n' || c == '\r'
+                                                        });
+                                                    let cleaned = cleaned
+                                                        .trim_end_matches("json")
+                                                        .trim_end_matches(|c: char| c == '`');
                                                     if !cleaned.trim().is_empty() {
                                                         bytes_sent += cleaned.len();
-                                                        send_msg!(session_update_text(&sid, cleaned));
+                                                        send_msg!(session_update_text(
+                                                            &sid, cleaned
+                                                        ));
                                                     }
                                                 }
                                                 held_back = true;
                                                 send_buffer.clear();
-                                            } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
-                                                let trailing_backticks = send_buffer.as_bytes().iter().rev()
-                                                    .take_while(|&&b| b == b'`').count();
+                                            } else if send_buffer.len() >= 50
+                                                || delta.content.contains('\n')
+                                            {
+                                                let trailing_backticks = send_buffer
+                                                    .as_bytes()
+                                                    .iter()
+                                                    .rev()
+                                                    .take_while(|&&b| b == b'`')
+                                                    .count();
 
-                                                if trailing_backticks > 0 && trailing_backticks < 4 {
-                                                    let split = send_buffer.len() - trailing_backticks;
+                                                if trailing_backticks > 0 && trailing_backticks < 4
+                                                {
+                                                    let split =
+                                                        send_buffer.len() - trailing_backticks;
                                                     if split > 0 {
                                                         let to_send = &send_buffer[..split];
                                                         bytes_sent += to_send.len();
-                                                        send_msg!(session_update_text(&sid, to_send));
+                                                        send_msg!(session_update_text(
+                                                            &sid, to_send
+                                                        ));
                                                     }
-                                                    send_buffer = send_buffer[send_buffer.len() - trailing_backticks..].to_string();
+                                                    send_buffer = send_buffer
+                                                        [send_buffer.len() - trailing_backticks..]
+                                                        .to_string();
                                                 } else {
                                                     bytes_sent += send_buffer.len();
-                                                    send_msg!(session_update_text(&sid, &send_buffer));
+                                                    send_msg!(session_update_text(
+                                                        &sid,
+                                                        &send_buffer
+                                                    ));
                                                     send_buffer.clear();
                                                 }
                                             }
@@ -364,10 +405,10 @@ impl OrchestratorManager {
                                     let err_msg = format!("AI request failed: {}", e);
                                     common::log_error!("{}", err_msg);
                                     send_msg!(acp_error_response(
-                                            prompt_id_to_json_rpc_id(&prompt_id),
-                                            -32000,
-                                            &err_msg,
-                                        ));
+                                        prompt_id_to_json_rpc_id(&prompt_id),
+                                        -32000,
+                                        &err_msg,
+                                    ));
                                     stream_error = true;
                                     early_response_sent = true;
                                     break;
@@ -389,9 +430,12 @@ impl OrchestratorManager {
                         let mut response_text = full_response.clone();
                         let mut tool_results: Vec<(String, String)> = Vec::new();
 
-                        while let Some((tool_name, tool_args, remaining_text)) = parse_manual_tool_call(&response_text) {
-                            if stop_flag_clone.load(Ordering::SeqCst) ||
-                               cancel_flag_clone.load(Ordering::SeqCst) {
+                        while let Some((tool_name, tool_args, remaining_text)) =
+                            parse_manual_tool_call(&response_text)
+                        {
+                            if stop_flag_clone.load(Ordering::SeqCst)
+                                || cancel_flag_clone.load(Ordering::SeqCst)
+                            {
                                 break;
                             }
 
@@ -401,27 +445,38 @@ impl OrchestratorManager {
 
                             send_msg!(session_update_tool_call(&sid, &tool_name, tool_input_value));
 
-                            let (result, is_error) = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
+                            let (result, is_error) = if let Some(local_result) =
+                                execute_local_tool(&tool_name, &tool_args).await
+                            {
                                 let err = result_is_error(&local_result);
                                 (local_result, err)
                             } else {
                                 execute_mcp_tool(&peer, &tool_name, &tool_args).await
                             };
 
-                            common::log_info!("Tool {} result: {}", tool_name, common::truncate_str(&result, 100));
+                            common::log_info!(
+                                "Tool {} result: {}",
+                                tool_name,
+                                common::truncate_str(&result, 100)
+                            );
 
                             if tool_name == "report_plan" {
                                 if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
                                     if let Some(plan_obj) = result_json.get("plan") {
-                                        if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(plan_obj.clone()) {
-                                            let plan_json = serde_json::to_value(&plan).unwrap_or(Value::Null);
+                                        if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(
+                                            plan_obj.clone(),
+                                        ) {
+                                            let plan_json =
+                                                serde_json::to_value(&plan).unwrap_or(Value::Null);
                                             send_msg!(session_update_plan(&sid, &plan_json));
                                         }
                                     }
                                 }
                             }
 
-                            send_msg!(session_update_tool_result(&sid, &tool_name, &result, is_error));
+                            send_msg!(session_update_tool_result(
+                                &sid, &tool_name, &result, is_error
+                            ));
 
                             tool_results.push((tool_name, result));
                             response_text = remaining_text;
@@ -429,13 +484,21 @@ impl OrchestratorManager {
 
                         if !tool_results.is_empty() {
                             if let Some(usage) = &stream_usage {
-                                send_msg!(session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
+                                send_msg!(session_update_usage(
+                                    &sid,
+                                    usage.prompt_tokens,
+                                    usage.completion_tokens,
+                                    usage.total_tokens
+                                ));
                             }
 
                             conversation_history.push(Message::assistant(&full_response));
 
-                            let combined_results: String = tool_results.iter()
-                                .map(|(name, result)| format!("Tool '{}' result:\n{}", name, result))
+                            let combined_results: String = tool_results
+                                .iter()
+                                .map(|(name, result)| {
+                                    format!("Tool '{}' result:\n{}", name, result)
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n\n");
                             conversation_history.push(Message::user(combined_results));
@@ -451,7 +514,12 @@ impl OrchestratorManager {
                         }
 
                         if let Some(usage) = &stream_usage {
-                            send_msg!(session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
+                            send_msg!(session_update_usage(
+                                &sid,
+                                usage.prompt_tokens,
+                                usage.completion_tokens,
+                                usage.total_tokens
+                            ));
                         }
 
                         conversation_history.push(Message::assistant(&full_response));
@@ -464,9 +532,12 @@ impl OrchestratorManager {
                     if !already_responded {
                         send_msg!(acp_response(
                             prompt_id_to_json_rpc_id(&prompt_id),
-                            serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
-                                agent_client_protocol::schema::StopReason::EndTurn,
-                            )).unwrap(),
+                            serde_json::to_value(
+                                agent_client_protocol::schema::PromptResponse::new(
+                                    agent_client_protocol::schema::StopReason::EndTurn,
+                                )
+                            )
+                            .unwrap(),
                         ));
                     }
                 }
@@ -506,7 +577,8 @@ impl OrchestratorManager {
                             -32000,
                             &format!("Failed to send prompt: {}", e),
                         ),
-                    ).await;
+                    )
+                    .await;
                 }
             }
             _ => {
@@ -518,7 +590,8 @@ impl OrchestratorManager {
                         -32000,
                         "No active Orchestrator session for this client.",
                     ),
-                ).await;
+                )
+                .await;
             }
         }
     }
@@ -577,9 +650,11 @@ impl OrchestratorManager {
                     prompt_id_to_json_rpc_id(&prompt_id),
                     serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
                         agent_client_protocol::schema::StopReason::Cancelled,
-                    )).unwrap(),
+                    ))
+                    .unwrap(),
                 ),
-            ).await;
+            )
+            .await;
         }
     }
 }
@@ -651,7 +726,8 @@ fn get_local_tool_definitions() -> Vec<Tool> {
 async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<String> {
     match tool_name {
         "wait" => {
-            let seconds = tool_input.get("seconds")
+            let seconds = tool_input
+                .get("seconds")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
 
@@ -664,20 +740,32 @@ async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<Strin
 
             tokio::time::sleep(std::time::Duration::from_secs(seconds as u64)).await;
 
-            Some(json!({
-                "status": "success",
-                "message": format!("Waited for {} seconds", seconds),
-                "seconds": seconds,
-                "display": format!("Waited {}s", seconds)
-            }).to_string())
+            Some(
+                json!({
+                    "status": "success",
+                    "message": format!("Waited for {} seconds", seconds),
+                    "seconds": seconds,
+                    "display": format!("Waited {}s", seconds)
+                })
+                .to_string(),
+            )
         }
         "report_plan" => {
             let steps_value = tool_input.get("steps").cloned().unwrap_or(json!([]));
             let steps: Vec<PlanStep> = serde_json::from_value(steps_value).unwrap_or_default();
-            let summary = tool_input.get("summary").and_then(|v| v.as_str()).map(String::from);
-            let current_step_description = tool_input.get("current_step_description").and_then(|v| v.as_str()).map(String::from);
+            let summary = tool_input
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let current_step_description = tool_input
+                .get("current_step_description")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
-            let done_count = steps.iter().filter(|s| s.status == PlanStepStatus::Done).count();
+            let done_count = steps
+                .iter()
+                .filter(|s| s.status == PlanStepStatus::Done)
+                .count();
             let total_count = steps.len();
 
             let display = if total_count == 0 {
@@ -686,18 +774,21 @@ async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<Strin
                 format!("Plan updated: {}/{} done", done_count, total_count)
             };
 
-            Some(json!({
-                "status": "success",
-                "message": "Plan updated",
-                "display": display,
-                "plan": {
-                    "steps": steps,
-                    "summary": summary,
-                    "current_step_description": current_step_description,
-                    "done_count": done_count,
-                    "total_count": total_count
-                }
-            }).to_string())
+            Some(
+                json!({
+                    "status": "success",
+                    "message": "Plan updated",
+                    "display": display,
+                    "plan": {
+                        "steps": steps,
+                        "summary": summary,
+                        "current_step_description": current_step_description,
+                        "done_count": done_count,
+                        "total_count": total_count
+                    }
+                })
+                .to_string(),
+            )
         }
         _ => None,
     }
@@ -709,7 +800,11 @@ async fn execute_mcp_tool(
     tool_input: &Value,
 ) -> (String, bool) {
     let arguments = if let Some(obj) = tool_input.as_object() {
-        if obj.is_empty() { None } else { Some(obj.clone()) }
+        if obj.is_empty() {
+            None
+        } else {
+            Some(obj.clone())
+        }
     } else {
         None
     };
@@ -719,7 +814,9 @@ async fn execute_mcp_tool(
 
     match peer.call_tool(request).await {
         Ok(result) => {
-            let text = result.content.iter()
+            let text = result
+                .content
+                .iter()
                 .find_map(|c| match &c.raw {
                     RawContent::Text(t) => Some(t.text.clone()),
                     _ => None,
@@ -733,7 +830,8 @@ async fn execute_mcp_tool(
                 "status": "error",
                 "message": format!("MCP tool call failed: {}", e),
                 "display": format!("Error: {}", e)
-            }).to_string();
+            })
+            .to_string();
             (payload, true)
         }
     }
@@ -754,17 +852,20 @@ fn result_is_error(result: &str) -> bool {
 }
 
 fn convert_mcp_tools(mcp_tools: Vec<rmcp::model::Tool>) -> Vec<Tool> {
-    mcp_tools.into_iter().map(|t| {
-        let parameters = if t.input_schema.is_empty() {
-            None
-        } else {
-            Some(Value::Object((*t.input_schema).clone()))
-        };
+    mcp_tools
+        .into_iter()
+        .map(|t| {
+            let parameters = if t.input_schema.is_empty() {
+                None
+            } else {
+                Some(Value::Object((*t.input_schema).clone()))
+            };
 
-        Tool {
-            name: t.name.to_string(),
-            description: t.description.map(|d| d.to_string()),
-            parameters,
-        }
-    }).collect()
+            Tool {
+                name: t.name.to_string(),
+                description: t.description.map(|d| d.to_string()),
+                parameters,
+            }
+        })
+        .collect()
 }

@@ -1,25 +1,25 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::{
+    Json, Router,
     extract::{ConnectInfo, Request, State},
     http::{Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{get, post},
-    Json, Router,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Notify};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::state::NodeRegistry;
 use super::{BridgeSession, Transport};
+use crate::state::NodeRegistry;
 
 //
 // HttpTransport bridges the axum HTTP endpoints to the BridgeSession by
@@ -156,7 +156,11 @@ impl AppState {
         if !self.accepting.swap(false, Ordering::SeqCst) {
             return;
         }
-        let _ = self.inbound_tx.lock().unwrap().try_send(json!({"type": "worker_connected"}));
+        let _ = self
+            .inbound_tx
+            .lock()
+            .unwrap()
+            .try_send(json!({"type": "worker_connected"}));
         self.worker_ready.notify_one();
     }
 
@@ -293,14 +297,18 @@ async fn handle_post_events(
         for event in events {
             if let Some(payload) = event.get("payload") {
                 if !payload.is_null() {
-                    if let Err(mpsc::error::TrySendError::Full(_)) = state.inbound_tx.lock().unwrap().try_send(payload.clone()) {
+                    if let Err(mpsc::error::TrySendError::Full(_)) =
+                        state.inbound_tx.lock().unwrap().try_send(payload.clone())
+                    {
                         common::log_warn!("CCRv2: inbound channel full, dropping message");
                     }
                 }
             }
         }
     } else if body.get("type").is_some() {
-        if let Err(mpsc::error::TrySendError::Full(_)) = state.inbound_tx.lock().unwrap().try_send(body) {
+        if let Err(mpsc::error::TrySendError::Full(_)) =
+            state.inbound_tx.lock().unwrap().try_send(body)
+        {
             common::log_warn!("CCRv2: inbound channel full, dropping message");
         }
     } else {
@@ -438,7 +446,8 @@ impl CcrV2Manager {
         let rabbitmq_url = rabbitmq_url.to_string();
 
         tokio::spawn(async move {
-            if let Err(e) = run_ccrv2_server(port, &rabbitmq_url, node_registry, cancel, tls).await {
+            if let Err(e) = run_ccrv2_server(port, &rabbitmq_url, node_registry, cancel, tls).await
+            {
                 common::log_error!("CCRv2 server error: {}", e);
             }
         });
@@ -507,7 +516,10 @@ async fn run_ccrv2_server(
     let addr: std::net::SocketAddr = format!("0.0.0.0:{}", port).parse()?;
     let tcp_listener = tokio::net::TcpListener::bind(&addr).await?;
     let actual_addr = tcp_listener.local_addr().unwrap_or(addr);
-    common::log_info!("Claude CCRv2 server listening on {} (https://)", actual_addr);
+    common::log_info!(
+        "Claude CCRv2 server listening on {} (https://)",
+        actual_addr
+    );
 
     //
     // Serve HTTPS in the background using axum::serve over a custom TLS
@@ -550,11 +562,15 @@ async fn run_ccrv2_server(
             }
         }
 
-        let mut transport = HttpTransport::new(outbound_tx.clone(), inbound_rx, last_activity.clone());
+        let mut transport =
+            HttpTransport::new(outbound_tx.clone(), inbound_rx, last_activity.clone());
         let peer_ip = state.take_peer_ip();
         let session = BridgeSession::new("claude-ccrv2", node_registry.clone(), peer_ip);
 
-        if let Err(e) = session.run(&mut transport, rabbitmq_url, cancel.clone()).await {
+        if let Err(e) = session
+            .run(&mut transport, rabbitmq_url, cancel.clone())
+            .await
+        {
             common::log_error!("CCRv2 bridge session error: {}", e);
         }
 

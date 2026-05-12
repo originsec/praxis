@@ -11,7 +11,11 @@ use sqlx::Row;
 /// Execute a query that works across both SQLite and PostgreSQL
 /// Returns the number of rows affected
 #[allow(dead_code)]
-pub async fn execute_multi(pool: &DatabasePool, sqlite_sql: &str, postgres_sql: &str) -> Result<u64> {
+pub async fn execute_multi(
+    pool: &DatabasePool,
+    sqlite_sql: &str,
+    postgres_sql: &str,
+) -> Result<u64> {
     match pool {
         DatabasePool::Sqlite(p) => {
             let result = sqlx::query(sqlite_sql).execute(p).await?;

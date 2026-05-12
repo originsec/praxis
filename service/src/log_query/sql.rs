@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 use sqlx::Row;
 
@@ -54,12 +54,42 @@ impl VirtualTable {
             VirtualTable::EventLogs => Some(SqlTableConfig {
                 from_clause: "event_log",
                 columns: vec![
-                    SqlColumn { kql_name: "timestamp", sql_expr: "timestamp", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "source", sql_expr: "source", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "source_id", sql_expr: "source_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "level", sql_expr: "level", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "target", sql_expr: "target", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "message", sql_expr: "message", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "timestamp",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "source",
+                        sql_expr: "source",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "source_id",
+                        sql_expr: "source_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "level",
+                        sql_expr: "level",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "target",
+                        sql_expr: "target",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "message",
+                        sql_expr: "message",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
                 ],
                 order_by: "timestamp DESC",
             }),
@@ -67,20 +97,90 @@ impl VirtualTable {
             VirtualTable::TrafficLogs => Some(SqlTableConfig {
                 from_clause: "intercepted_traffic",
                 columns: vec![
-                    SqlColumn { kql_name: "timestamp", sql_expr: "timestamp", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "traffic_id", sql_expr: "id", col_type: SqlColumnType::Integer, nullable: false },
-                    SqlColumn { kql_name: "node_id", sql_expr: "node_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "agent_short_name", sql_expr: "agent_short_name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "intercept_method", sql_expr: "intercept_method", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "direction", sql_expr: "direction", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "method", sql_expr: "method", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "url", sql_expr: "url", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "host", sql_expr: "host", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "request_headers", sql_expr: "request_headers", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "request_body", sql_expr: "request_body", col_type: SqlColumnType::Blob, nullable: true },
-                    SqlColumn { kql_name: "response_status", sql_expr: "response_status", col_type: SqlColumnType::Integer, nullable: true },
-                    SqlColumn { kql_name: "response_headers", sql_expr: "response_headers", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "response_body", sql_expr: "response_body", col_type: SqlColumnType::Blob, nullable: true },
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "timestamp",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "traffic_id",
+                        sql_expr: "id",
+                        col_type: SqlColumnType::Integer,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "node_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "agent_short_name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "intercept_method",
+                        sql_expr: "intercept_method",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "direction",
+                        sql_expr: "direction",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "method",
+                        sql_expr: "method",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "url",
+                        sql_expr: "url",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "host",
+                        sql_expr: "host",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "request_headers",
+                        sql_expr: "request_headers",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "request_body",
+                        sql_expr: "request_body",
+                        col_type: SqlColumnType::Blob,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "response_status",
+                        sql_expr: "response_status",
+                        col_type: SqlColumnType::Integer,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "response_headers",
+                        sql_expr: "response_headers",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "response_body",
+                        sql_expr: "response_body",
+                        col_type: SqlColumnType::Blob,
+                        nullable: true,
+                    },
                 ],
                 order_by: "timestamp DESC",
             }),
@@ -90,18 +190,78 @@ impl VirtualTable {
                     JOIN intercepted_traffic it ON tm.traffic_id = it.id \
                     JOIN intercept_rules ir ON tm.rule_id = ir.id",
                 columns: vec![
-                    SqlColumn { kql_name: "timestamp", sql_expr: "tm.matched_at", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "traffic_id", sql_expr: "tm.traffic_id", col_type: SqlColumnType::Integer, nullable: false },
-                    SqlColumn { kql_name: "node_id", sql_expr: "it.node_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "agent_short_name", sql_expr: "it.agent_short_name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "rule_id", sql_expr: "tm.rule_id", col_type: SqlColumnType::Integer, nullable: false },
-                    SqlColumn { kql_name: "rule_name", sql_expr: "ir.name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "summary", sql_expr: "tm.summary", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "method", sql_expr: "it.method", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "url", sql_expr: "it.url", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "host", sql_expr: "it.host", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "direction", sql_expr: "it.direction", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "response_status", sql_expr: "it.response_status", col_type: SqlColumnType::Integer, nullable: true },
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "tm.matched_at",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "traffic_id",
+                        sql_expr: "tm.traffic_id",
+                        col_type: SqlColumnType::Integer,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "it.node_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "it.agent_short_name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "rule_id",
+                        sql_expr: "tm.rule_id",
+                        col_type: SqlColumnType::Integer,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "rule_name",
+                        sql_expr: "ir.name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "summary",
+                        sql_expr: "tm.summary",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "method",
+                        sql_expr: "it.method",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "url",
+                        sql_expr: "it.url",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "host",
+                        sql_expr: "it.host",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "direction",
+                        sql_expr: "it.direction",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "response_status",
+                        sql_expr: "it.response_status",
+                        col_type: SqlColumnType::Integer,
+                        nullable: true,
+                    },
                 ],
                 order_by: "tm.matched_at DESC",
             }),
@@ -109,17 +269,72 @@ impl VirtualTable {
             VirtualTable::SemanticOperationLogs => Some(SqlTableConfig {
                 from_clause: "operations",
                 columns: vec![
-                    SqlColumn { kql_name: "timestamp", sql_expr: "created_at", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "operation_id", sql_expr: "operation_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "node_id", sql_expr: "node_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "agent_short_name", sql_expr: "agent_short_name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "status", sql_expr: "status", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "operation_spec", sql_expr: "operation_spec", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "start_time", sql_expr: "start_time", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "end_time", sql_expr: "end_time", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "summary", sql_expr: "summary", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "result", sql_expr: "result", col_type: SqlColumnType::Text, nullable: true },
-                    SqlColumn { kql_name: "chain_execution_id", sql_expr: "chain_execution_id", col_type: SqlColumnType::Text, nullable: true },
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "created_at",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "operation_id",
+                        sql_expr: "operation_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "node_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "agent_short_name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "status",
+                        sql_expr: "status",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "operation_spec",
+                        sql_expr: "operation_spec",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "start_time",
+                        sql_expr: "start_time",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "end_time",
+                        sql_expr: "end_time",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "summary",
+                        sql_expr: "summary",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "result",
+                        sql_expr: "result",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
+                    SqlColumn {
+                        kql_name: "chain_execution_id",
+                        sql_expr: "chain_execution_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
                 ],
                 order_by: "created_at DESC",
             }),
@@ -127,17 +342,72 @@ impl VirtualTable {
             VirtualTable::SemanticOperationChainLogs => Some(SqlTableConfig {
                 from_clause: "chain_executions",
                 columns: vec![
-                    SqlColumn { kql_name: "timestamp", sql_expr: "created_at", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "execution_id", sql_expr: "execution_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "chain_id", sql_expr: "chain_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "chain_name", sql_expr: "chain_name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "node_id", sql_expr: "node_id", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "agent_short_name", sql_expr: "agent_short_name", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "status", sql_expr: "status", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "elements", sql_expr: "elements", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "outputs", sql_expr: "outputs", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "started_at", sql_expr: "started_at", col_type: SqlColumnType::Text, nullable: false },
-                    SqlColumn { kql_name: "ended_at", sql_expr: "ended_at", col_type: SqlColumnType::Text, nullable: true },
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "created_at",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "execution_id",
+                        sql_expr: "execution_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "chain_id",
+                        sql_expr: "chain_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "chain_name",
+                        sql_expr: "chain_name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "node_id",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "agent_short_name",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "status",
+                        sql_expr: "status",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "elements",
+                        sql_expr: "elements",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "outputs",
+                        sql_expr: "outputs",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "started_at",
+                        sql_expr: "started_at",
+                        col_type: SqlColumnType::Text,
+                        nullable: false,
+                    },
+                    SqlColumn {
+                        kql_name: "ended_at",
+                        sql_expr: "ended_at",
+                        col_type: SqlColumnType::Text,
+                        nullable: true,
+                    },
                 ],
                 order_by: "created_at DESC",
             }),
@@ -223,7 +493,9 @@ fn expr_to_sql(
 }
 
 fn binary_op(
-    l: &Expr, r: &Expr, op: &str,
+    l: &Expr,
+    r: &Expr,
+    op: &str,
     idx: &mut usize,
     col_map: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(String, Vec<SqlParam>)> {
@@ -255,8 +527,11 @@ fn literal_to_sql(lit: &Literal, idx: &mut usize) -> Result<(String, Vec<SqlPara
             Ok((format!("${}", *idx), vec![SqlParam::Float(*n)]))
         }
         Literal::Bool(Some(b)) => Ok((if *b { "1" } else { "0" }.to_string(), vec![])),
-        Literal::Bool(None) | Literal::Int(None) | Literal::Long(None)
-        | Literal::Real(None) | Literal::Decimal(None) => Ok(("NULL".to_string(), vec![])),
+        Literal::Bool(None)
+        | Literal::Int(None)
+        | Literal::Long(None)
+        | Literal::Real(None)
+        | Literal::Decimal(None) => Ok(("NULL".to_string(), vec![])),
         _ => Err(anyhow!("Unsupported literal type for SQL")),
     }
 }
@@ -281,11 +556,17 @@ fn func_to_sql(
 
         "isnull" | "isempty" => {
             let (col_sql, col_params) = single_arg_sql(args, idx, col_map)?;
-            Ok((format!("({} IS NULL OR {} = '')", col_sql, col_sql), col_params))
+            Ok((
+                format!("({} IS NULL OR {} = '')", col_sql, col_sql),
+                col_params,
+            ))
         }
         "isnotnull" | "isnotempty" => {
             let (col_sql, col_params) = single_arg_sql(args, idx, col_map)?;
-            Ok((format!("({} IS NOT NULL AND {} != '')", col_sql, col_sql), col_params))
+            Ok((
+                format!("({} IS NOT NULL AND {} != '')", col_sql, col_sql),
+                col_params,
+            ))
         }
         "tolower" => {
             let (inner, p) = single_arg_sql(args, idx, col_map)?;
@@ -348,7 +629,10 @@ fn like_func(
     params.push(SqlParam::String(pattern));
 
     let op = if negate { "NOT LIKE" } else { "LIKE" };
-    Ok((format!("LOWER({}) {} ${} ESCAPE '\\'", col_sql, op, *idx), params))
+    Ok((
+        format!("LOWER({}) {} ${} ESCAPE '\\'", col_sql, op, *idx),
+        params,
+    ))
 }
 
 fn single_arg_sql(
@@ -374,7 +658,11 @@ pub async fn materialize_sql_table(
     params: &[SqlParam],
     limit: usize,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
-    let kql_columns: Vec<String> = config.columns.iter().map(|c| c.kql_name.to_string()).collect();
+    let kql_columns: Vec<String> = config
+        .columns
+        .iter()
+        .map(|c| c.kql_name.to_string())
+        .collect();
     let select_exprs: Vec<&str> = config.columns.iter().map(|c| c.sql_expr).collect();
 
     let mut sql = format!(
@@ -424,64 +712,68 @@ fn convert_rows_sqlite(
     db_rows: &[sqlx::sqlite::SqliteRow],
     columns: &[SqlColumn],
 ) -> Vec<Vec<Value>> {
-    db_rows.iter().map(|row| {
-        columns.iter().enumerate().map(|(i, col)| {
-            match col.col_type {
-                SqlColumnType::Text => {
-                    row.try_get::<Option<String>, _>(i)
+    db_rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| match col.col_type {
+                    SqlColumnType::Text => row
+                        .try_get::<Option<String>, _>(i)
                         .ok()
                         .flatten()
                         .map(Value::String)
-                        .unwrap_or(Value::Null)
-                }
-                SqlColumnType::Integer => {
-                    row.try_get::<Option<i64>, _>(i)
+                        .unwrap_or(Value::Null),
+                    SqlColumnType::Integer => row
+                        .try_get::<Option<i64>, _>(i)
                         .ok()
                         .flatten()
                         .map(|n| Value::Number(n.into()))
-                        .unwrap_or(Value::Null)
-                }
-                SqlColumnType::Blob => {
-                    row.try_get::<Option<Vec<u8>>, _>(i)
+                        .unwrap_or(Value::Null),
+                    SqlColumnType::Blob => row
+                        .try_get::<Option<Vec<u8>>, _>(i)
                         .ok()
                         .flatten()
                         .map(|b| Value::String(String::from_utf8_lossy(&b).to_string()))
-                        .unwrap_or(Value::Null)
-                }
-            }
-        }).collect()
-    }).collect()
+                        .unwrap_or(Value::Null),
+                })
+                .collect()
+        })
+        .collect()
 }
 
 fn convert_rows_postgres(
     db_rows: &[sqlx::postgres::PgRow],
     columns: &[SqlColumn],
 ) -> Vec<Vec<Value>> {
-    db_rows.iter().map(|row| {
-        columns.iter().enumerate().map(|(i, col)| {
-            match col.col_type {
-                SqlColumnType::Text => {
-                    row.try_get::<Option<String>, _>(i)
+    db_rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| match col.col_type {
+                    SqlColumnType::Text => row
+                        .try_get::<Option<String>, _>(i)
                         .ok()
                         .flatten()
                         .map(Value::String)
-                        .unwrap_or(Value::Null)
-                }
-                SqlColumnType::Integer => {
-                    row.try_get::<Option<i64>, _>(i)
+                        .unwrap_or(Value::Null),
+                    SqlColumnType::Integer => row
+                        .try_get::<Option<i64>, _>(i)
                         .ok()
                         .flatten()
                         .map(|n| Value::Number(n.into()))
-                        .unwrap_or(Value::Null)
-                }
-                SqlColumnType::Blob => {
-                    row.try_get::<Option<Vec<u8>>, _>(i)
+                        .unwrap_or(Value::Null),
+                    SqlColumnType::Blob => row
+                        .try_get::<Option<Vec<u8>>, _>(i)
                         .ok()
                         .flatten()
                         .map(|b| Value::String(String::from_utf8_lossy(&b).to_string()))
-                        .unwrap_or(Value::Null)
-                }
-            }
-        }).collect()
-    }).collect()
+                        .unwrap_or(Value::Null),
+                })
+                .collect()
+        })
+        .collect()
 }

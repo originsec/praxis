@@ -1,25 +1,25 @@
-mod operations;
-mod definitions;
-mod traffic;
-mod rules;
-mod transactions;
-mod chains;
 mod chain_executions;
 mod chain_memories;
 mod chain_payloads;
 mod chain_triggers;
+mod chains;
+pub mod config;
+mod definitions;
 mod event_log;
 mod intercept_targets;
 mod lua_agent_scripts;
+mod operations;
+mod queries;
 mod recon;
 mod remote_nodes;
+mod rules;
 mod service_config;
 mod toolkit_actions;
-pub mod config;
-mod queries;
+mod traffic;
+mod transactions;
 
-use anyhow::{anyhow, Result};
-use sqlx::{Pool, Sqlite, Postgres};
+use anyhow::{Result, anyhow};
+use sqlx::{Pool, Postgres, Sqlite};
 use std::time::Duration;
 
 pub use config::DatabaseConfig;
@@ -27,23 +27,23 @@ pub use config::DatabaseConfig;
 //
 // Re-export types that are used externally.
 //
-pub use operations::OperationRecord;
-pub use definitions::OperationDefinition;
-#[allow(unused_imports)]
-pub use transactions::{TransactionRecord, TransactionStatus};
+pub use chain_executions::ChainExecutionRecord;
+pub use chain_payloads::PayloadRecord;
 #[allow(unused_imports)]
 pub use chains::{
-    BlockConfig, ChainDefinition, ChainDefinitionInfo, ChainElement, ChainConnection,
-    ConnectionCondition, ElementPosition, MemoryMode, TriggerType, ElementId, ModelRef,
-    SessionGroup,
+    BlockConfig, ChainConnection, ChainDefinition, ChainDefinitionInfo, ChainElement,
+    ConnectionCondition, ElementId, ElementPosition, MemoryMode, ModelRef, SessionGroup,
+    TriggerType,
 };
-pub use chain_executions::ChainExecutionRecord;
+pub use definitions::OperationDefinition;
+pub use operations::OperationRecord;
 #[allow(unused_imports)]
 pub use recon::StoredReconResult;
-pub use chain_payloads::PayloadRecord;
 #[allow(unused_imports)]
 pub use remote_nodes::RemoteNodeRecord;
 pub use toolkit_actions::ToolkitActionRecord;
+#[allow(unused_imports)]
+pub use transactions::{TransactionRecord, TransactionStatus};
 
 //
 // Constants.
@@ -137,7 +137,8 @@ impl Database {
                         Err(e) => {
                             common::log_warn!(
                                 "PostgreSQL connection attempt {}/30 failed: {}",
-                                attempt, e
+                                attempt,
+                                e
                             );
                             last_error = Some(e);
                             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -196,10 +197,9 @@ impl Database {
                 for statement in SQLITE_SCHEMA.split(';') {
                     let stmt = strip_comments(statement);
                     if !stmt.is_empty() {
-                        sqlx::query(stmt)
-                            .execute(pool)
-                            .await
-                            .map_err(|e| anyhow!("SQLite schema error: {} in statement: {}", e, stmt))?;
+                        sqlx::query(stmt).execute(pool).await.map_err(|e| {
+                            anyhow!("SQLite schema error: {} in statement: {}", e, stmt)
+                        })?;
                     }
                 }
             }
@@ -210,10 +210,9 @@ impl Database {
                 for statement in POSTGRES_SCHEMA.split(';') {
                     let stmt = strip_comments(statement);
                     if !stmt.is_empty() {
-                        sqlx::query(stmt)
-                            .execute(pool)
-                            .await
-                            .map_err(|e| anyhow!("PostgreSQL schema error: {} in statement: {}", e, stmt))?;
+                        sqlx::query(stmt).execute(pool).await.map_err(|e| {
+                            anyhow!("PostgreSQL schema error: {} in statement: {}", e, stmt)
+                        })?;
                     }
                 }
             }
@@ -254,9 +253,11 @@ impl Database {
         //
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let added = sqlx::query("ALTER TABLE event_log ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
-                    .execute(pool)
-                    .await;
+                let added = sqlx::query(
+                    "ALTER TABLE event_log ADD COLUMN source_id TEXT NOT NULL DEFAULT ''",
+                )
+                .execute(pool)
+                .await;
                 if added.is_ok() {
                     let _ = sqlx::query(
                         "UPDATE event_log SET source_id = source, source = 'node' WHERE source NOT IN ('web', 'service')"
@@ -281,9 +282,11 @@ impl Database {
         //
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
-                    .execute(pool)
-                    .await;
+                let _ = sqlx::query(
+                    "ALTER TABLE lua_agent_scripts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0",
+                )
+                .execute(pool)
+                .await;
                 let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0")
                     .execute(pool)
                     .await;
@@ -298,9 +301,11 @@ impl Database {
                 let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS is_builtin SMALLINT NOT NULL DEFAULT 0")
                     .execute(pool)
                     .await;
-                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS version TEXT")
-                    .execute(pool)
-                    .await;
+                let _ = sqlx::query(
+                    "ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS version TEXT",
+                )
+                .execute(pool)
+                .await;
             }
         }
 
@@ -320,8 +325,10 @@ impl Database {
                         next_fire_at TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at)").execute(pool).await;
@@ -338,8 +345,10 @@ impl Database {
                         next_fire_at TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at)").execute(pool).await;
@@ -374,8 +383,10 @@ impl Database {
                         content TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
             }
             DatabasePool::Postgres(pool) => {
                 let _ = sqlx::query(
@@ -385,8 +396,10 @@ impl Database {
                         content TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
             }
         }
 
@@ -405,19 +418,23 @@ impl Database {
                         url TEXT NOT NULL,
                         token TEXT,
                         created_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
                 //
                 // Idempotent column adds/drops for installs that predate
                 // the current schema. SQLite doesn't support IF NOT
                 // EXISTS on columns — both errors are ignored.
                 //
                 let _ = sqlx::query(
-                    "ALTER TABLE remote_nodes ADD COLUMN kind TEXT NOT NULL DEFAULT 'codex'"
-                ).execute(pool).await;
-                let _ = sqlx::query(
-                    "ALTER TABLE remote_nodes DROP COLUMN label"
-                ).execute(pool).await;
+                    "ALTER TABLE remote_nodes ADD COLUMN kind TEXT NOT NULL DEFAULT 'codex'",
+                )
+                .execute(pool)
+                .await;
+                let _ = sqlx::query("ALTER TABLE remote_nodes DROP COLUMN label")
+                    .execute(pool)
+                    .await;
             }
             DatabasePool::Postgres(pool) => {
                 let _ = sqlx::query(
@@ -428,14 +445,16 @@ impl Database {
                         url TEXT NOT NULL,
                         token TEXT,
                         created_at TEXT NOT NULL
-                    )"
-                ).execute(pool).await;
+                    )",
+                )
+                .execute(pool)
+                .await;
                 let _ = sqlx::query(
                     "ALTER TABLE remote_nodes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'codex'"
                 ).execute(pool).await;
-                let _ = sqlx::query(
-                    "ALTER TABLE remote_nodes DROP COLUMN IF EXISTS label"
-                ).execute(pool).await;
+                let _ = sqlx::query("ALTER TABLE remote_nodes DROP COLUMN IF EXISTS label")
+                    .execute(pool)
+                    .await;
             }
         }
 
@@ -464,9 +483,10 @@ impl Database {
                     .await;
             }
             DatabasePool::Postgres(pool) => {
-                let _ = sqlx::query("ALTER TABLE recon_results DROP COLUMN IF EXISTS metadata_json")
-                    .execute(pool)
-                    .await;
+                let _ =
+                    sqlx::query("ALTER TABLE recon_results DROP COLUMN IF EXISTS metadata_json")
+                        .execute(pool)
+                        .await;
                 let _ = sqlx::query(
                     "ALTER TABLE recon_results DROP COLUMN IF EXISTS project_paths_json",
                 )
@@ -498,30 +518,46 @@ impl Database {
                 DatabasePool::Sqlite(pool) => {
                     match sqlx::query(
                         "SELECT name, agent_short_name, domains, url_pattern, disabled \
-                         FROM intercept_targets ORDER BY agent_short_name"
-                    ).fetch_all(pool).await {
-                        Ok(rs) => rs.into_iter().map(|r| (
-                            r.get::<String, _>(0),
-                            r.get::<String, _>(1),
-                            r.get::<String, _>(2),
-                            r.get::<Option<String>, _>(3),
-                            r.get::<bool, _>(4),
-                        )).collect(),
+                         FROM intercept_targets ORDER BY agent_short_name",
+                    )
+                    .fetch_all(pool)
+                    .await
+                    {
+                        Ok(rs) => rs
+                            .into_iter()
+                            .map(|r| {
+                                (
+                                    r.get::<String, _>(0),
+                                    r.get::<String, _>(1),
+                                    r.get::<String, _>(2),
+                                    r.get::<Option<String>, _>(3),
+                                    r.get::<bool, _>(4),
+                                )
+                            })
+                            .collect(),
                         Err(_) => Vec::new(),
                     }
                 }
                 DatabasePool::Postgres(pool) => {
                     match sqlx::query(
                         "SELECT name, agent_short_name, domains, url_pattern, disabled \
-                         FROM intercept_targets ORDER BY agent_short_name"
-                    ).fetch_all(pool).await {
-                        Ok(rs) => rs.into_iter().map(|r| (
-                            r.get::<String, _>(0),
-                            r.get::<String, _>(1),
-                            r.get::<String, _>(2),
-                            r.get::<Option<String>, _>(3),
-                            r.get::<i16, _>(4) != 0,
-                        )).collect(),
+                         FROM intercept_targets ORDER BY agent_short_name",
+                    )
+                    .fetch_all(pool)
+                    .await
+                    {
+                        Ok(rs) => rs
+                            .into_iter()
+                            .map(|r| {
+                                (
+                                    r.get::<String, _>(0),
+                                    r.get::<String, _>(1),
+                                    r.get::<String, _>(2),
+                                    r.get::<Option<String>, _>(3),
+                                    r.get::<i16, _>(4) != 0,
+                                )
+                            })
+                            .collect(),
                         Err(_) => Vec::new(),
                     }
                 }
@@ -552,13 +588,19 @@ impl Database {
         //
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets").execute(pool).await;
+                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets")
+                    .execute(pool)
+                    .await;
             }
             DatabasePool::Postgres(pool) => {
-                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets").execute(pool).await;
+                let _ = sqlx::query("DROP TABLE IF EXISTS intercept_targets")
+                    .execute(pool)
+                    .await;
             }
         }
-        let _ = self.delete_config("builtin_intercept_targets_version").await;
+        let _ = self
+            .delete_config("builtin_intercept_targets_version")
+            .await;
     }
 
     /// Check if using PostgreSQL backend
@@ -606,12 +648,14 @@ impl Database {
 // users see them and can re-enable by uncommenting.
 //
 
-fn render_legacy_rows_as_toml(
-    rows: &[(String, String, String, Option<String>, bool)],
-) -> String {
-    let mut out = String::from(crate::intercept_targets::default_text().lines()
-        .take_while(|l| l.starts_with('#') || l.is_empty())
-        .collect::<Vec<_>>().join("\n"));
+fn render_legacy_rows_as_toml(rows: &[(String, String, String, Option<String>, bool)]) -> String {
+    let mut out = String::from(
+        crate::intercept_targets::default_text()
+            .lines()
+            .take_while(|l| l.starts_with('#') || l.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
     out.push_str("\n\n");
 
     for (legacy_name, short_name, domains_json, url_pattern, disabled) in rows {
@@ -624,7 +668,10 @@ fn render_legacy_rows_as_toml(
         // so the user can still see the original label.
         //
         if legacy_name != short_name && !legacy_name.is_empty() {
-            out.push_str(&format!("{}[{}] # was: {}\n", prefix, short_name, legacy_name));
+            out.push_str(&format!(
+                "{}[{}] # was: {}\n",
+                prefix, short_name, legacy_name
+            ));
         } else {
             out.push_str(&format!("{}[{}]\n", prefix, short_name));
         }
@@ -643,13 +690,16 @@ fn render_legacy_rows_as_toml(
 }
 
 fn toml_str(s: &str) -> String {
-    let escaped: String = s.chars().flat_map(|c| match c {
-        '\\' => "\\\\".chars().collect::<Vec<_>>(),
-        '"' => "\\\"".chars().collect::<Vec<_>>(),
-        '\n' => "\\n".chars().collect::<Vec<_>>(),
-        '\r' => "\\r".chars().collect::<Vec<_>>(),
-        '\t' => "\\t".chars().collect::<Vec<_>>(),
-        c => vec![c],
-    }).collect();
+    let escaped: String = s
+        .chars()
+        .flat_map(|c| match c {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            '\r' => "\\r".chars().collect::<Vec<_>>(),
+            '\t' => "\\t".chars().collect::<Vec<_>>(),
+            c => vec![c],
+        })
+        .collect();
     format!("\"{}\"", escaped)
 }

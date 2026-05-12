@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-    IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
+use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -129,7 +129,8 @@ impl DynamicResolver {
     fn load_or_create() -> Result<Arc<Self>> {
         let (issuer, ca_der) = match load_ca_pem() {
             Some((cert_pem, key_pem)) => {
-                let key = KeyPair::from_pem(&key_pem).context("Failed to parse bridge CA key PEM")?;
+                let key =
+                    KeyPair::from_pem(&key_pem).context("Failed to parse bridge CA key PEM")?;
                 let der = parse_first_cert_der(&cert_pem)?;
                 (Issuer::new(ca_params(), key), der)
             }

@@ -1,16 +1,16 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use common::SemanticOperationSpec;
 use lapin::Channel;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{oneshot, RwLock as TokioRwLock};
+use tokio::sync::{RwLock as TokioRwLock, oneshot};
 use uuid::Uuid;
 
 use common::ai::{
-    create_ai_client, fmt_agent_start, fmt_complete, fmt_error, fmt_incoming, fmt_iteration,
-    fmt_outgoing, get_system_prompt_with_tools_and_completion, parse_completion_signal,
-    parse_manual_tool_call, ChatCompletionRequest, Message, Provider, Tool,
+    ChatCompletionRequest, Message, Provider, Tool, create_ai_client, fmt_agent_start,
+    fmt_complete, fmt_error, fmt_incoming, fmt_iteration, fmt_outgoing,
+    get_system_prompt_with_tools_and_completion, parse_completion_signal, parse_manual_tool_call,
 };
 
 //
@@ -303,7 +303,8 @@ pub async fn execute_one_shot(
     //
 
     let timeout_duration = Duration::from_secs(spec.timeout);
-    let prompt_fut = send_session_prompt(node_id, &session_id, &spec.operation_prompt, channel, proxy);
+    let prompt_fut =
+        send_session_prompt(node_id, &session_id, &spec.operation_prompt, channel, proxy);
 
     let outcome: Result<(String, String)> = tokio::select! {
         result = tokio::time::timeout(timeout_duration, prompt_fut) => {
@@ -457,7 +458,9 @@ pub async fn execute_agent_mode(
             })?
         } else {
             cfg.get_semantic_ops_model_def().ok_or_else(|| {
-                anyhow!("No LLM configured for Semantic Ops. Configure in Settings > LLM Providers.")
+                anyhow!(
+                    "No LLM configured for Semantic Ops. Configure in Settings > LLM Providers."
+                )
             })?
         };
         (
@@ -494,7 +497,8 @@ pub async fn execute_agent_mode(
         })),
     }];
 
-    let system_prompt = get_system_prompt_with_tools_and_completion(SEMANTIC_OP_AGENT_PROMPT, &tools);
+    let system_prompt =
+        get_system_prompt_with_tools_and_completion(SEMANTIC_OP_AGENT_PROMPT, &tools);
 
     let mut conversation_history: Vec<Message> = vec![
         Message::system(&system_prompt),
@@ -576,8 +580,8 @@ pub async fn execute_agent_mode(
             )
             .await;
 
-        let request =
-            ChatCompletionRequest::new(model.clone(), conversation_history.clone()).with_max_tokens(4096);
+        let request = ChatCompletionRequest::new(model.clone(), conversation_history.clone())
+            .with_max_tokens(4096);
 
         let response = tokio::select! {
             result = client.chat_completion(request) => {
@@ -606,17 +610,15 @@ pub async fn execute_agent_mode(
         // emits both, the completion is hallucinated.
         //
 
-        if let Some((tool_name, tool_args, remaining_text)) = parse_manual_tool_call(&text_content) {
+        if let Some((tool_name, tool_args, remaining_text)) = parse_manual_tool_call(&text_content)
+        {
             if !remaining_text.is_empty() {
                 final_summary = remaining_text.clone();
             }
             conversation_history.push(Message::assistant(&text_content));
 
             let tool_result = if tool_name == "session_prompt" {
-                let prompt_text = tool_args
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("");
+                let prompt_text = tool_args.get("text").and_then(|t| t.as_str()).unwrap_or("");
                 common::log_debug!(
                     "[semop {}] tool call session_prompt: {} bytes\n{}",
                     common::short_id(&operation_id),
@@ -671,12 +673,16 @@ pub async fn execute_agent_mode(
                 }
             } else {
                 let error_msg = format!("Unknown tool: {}", tool_name);
-                let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
+                let _ = database
+                    .append_output(operation_id, &fmt_error(&error_msg))
+                    .await;
                 error_msg
             };
 
-            conversation_history
-                .push(Message::user(format!("Tool '{}' result: {}", tool_name, tool_result)));
+            conversation_history.push(Message::user(format!(
+                "Tool '{}' result: {}",
+                tool_name, tool_result
+            )));
             continue;
         }
 
@@ -798,4 +804,3 @@ async fn send_remote_prompt(
         }
     }
 }
-

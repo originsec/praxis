@@ -24,7 +24,7 @@ enum AcpCommand {
     },
     Prompt {
         prompt: String,
-        update_tx: mpsc::UnboundedSender<SessionUpdateKind>,
+        update_tx: mpsc::Sender<SessionUpdateKind>,
         permission_rx: std::sync::mpsc::Receiver<(String, PermissionDecision)>,
         yolo: bool,
         interactive: bool,
@@ -76,7 +76,7 @@ impl AcpHandle {
     pub fn send_prompt(
         &self,
         prompt: &str,
-        update_tx: &mpsc::UnboundedSender<SessionUpdateKind>,
+        update_tx: &mpsc::Sender<SessionUpdateKind>,
         permission_rx: std::sync::mpsc::Receiver<(String, PermissionDecision)>,
         yolo: bool,
         interactive: bool,
@@ -149,7 +149,7 @@ impl AcpHandle {
 
 #[derive(Default)]
 struct PromptCtx {
-    update_tx: Option<mpsc::UnboundedSender<SessionUpdateKind>>,
+    update_tx: Option<mpsc::Sender<SessionUpdateKind>>,
     permission_rx:
         Option<Arc<Mutex<Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>>>>,
     yolo: bool,
@@ -264,7 +264,7 @@ async fn run_acp_driver(
                             SessionUpdate::AgentMessageChunk(chunk) => {
                                 if let ContentBlock::Text(text_content) = &chunk.content {
                                     guard.assembled_text.push_str(&text_content.text);
-                                    let _ = tx.send(SessionUpdateKind::TextChunk {
+                                    let _ = tx.try_send(SessionUpdateKind::TextChunk {
                                         text: text_content.text.clone(),
                                     });
                                 }
@@ -275,7 +275,7 @@ async fn run_acp_driver(
                                     .as_ref()
                                     .map(|v| v.to_string())
                                     .unwrap_or_default();
-                                let _ = tx.send(SessionUpdateKind::ToolCall {
+                                let _ = tx.try_send(SessionUpdateKind::ToolCall {
                                     tool_name: tool_call.title.clone(),
                                     tool_id: tool_call.tool_call_id.0.to_string(),
                                     input,
@@ -293,7 +293,7 @@ async fn run_acp_driver(
                                         .as_ref()
                                         .map(|v| v.to_string())
                                         .unwrap_or_default();
-                                    let _ = tx.send(SessionUpdateKind::ToolResult {
+                                    let _ = tx.try_send(SessionUpdateKind::ToolResult {
                                         tool_id: update.tool_call_id.0.to_string(),
                                         output,
                                         is_error,
@@ -374,7 +374,7 @@ async fn run_acp_driver(
                             deny_id.unwrap_or_else(empty_id)
                         } else {
                             if let Some(tx) = update_tx.as_ref() {
-                                let _ = tx.send(SessionUpdateKind::PermissionRequest {
+                                let _ = tx.try_send(SessionUpdateKind::PermissionRequest {
                                     permission_id: tool_call_id.clone(),
                                     tool_name,
                                     tool_input,

@@ -1,3 +1,6 @@
+mod forwarders;
+mod info;
+
 use crate::agent_connectors::{AgentFactory, AgentRegistry};
 use crate::app::{NodeState, registration::publish_registration};
 use crate::handlers::{
@@ -6,18 +9,21 @@ use crate::handlers::{
 };
 use crate::terminal::TerminalOutputEvent;
 use crate::utils::semantic_parser::{self, SemanticParserTracker};
-use chrono::Utc;
 use common::{
-    publish_json, CommandRequest, CommandResponse, DiscoveredAgent,
-    InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE, NODE_EVENT_LOG_QUEUE, NODE_SIGNAL_QUEUE,
-    NodeBroadcastMessage, NodeCommand, NodeDirectMessage, NodeInformationUpdate,
-    NodeSignalMessage, TerminalCommand, TerminalOutput,
+    CommandRequest, CommandResponse, InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE,
+    NODE_SIGNAL_QUEUE, NodeBroadcastMessage, NodeCommand, NodeDirectMessage, NodeSignalMessage,
+    TerminalCommand, publish_json,
 };
 use futures::StreamExt;
-use lapin::{options::*, types::FieldTable, Channel};
+use info::{fingerprint_all_agents, send_node_information_update};
+use lapin::{Channel, options::*, types::FieldTable};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
+
+const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 4096;
+const TRAFFIC_CHANNEL_CAPACITY: usize = 4096;
+const EVENT_LOG_CHANNEL_CAPACITY: usize = 1024;
 
 pub enum RuntimeExit {
     Shutdown,
@@ -38,9 +44,18 @@ pub async fn run(
     praxis_agent_config: Option<common::PraxisAgentConfig>,
 ) -> anyhow::Result<RuntimeExit> {
     listen_to_queues(
-        channel, node_id, node_queue, registry, factory, shutdown_token,
-        lua_scripts, intercept_targets, praxis_agent_enabled, praxis_agent_config,
-    ).await
+        channel,
+        node_id,
+        node_queue,
+        registry,
+        factory,
+        shutdown_token,
+        lua_scripts,
+        intercept_targets,
+        praxis_agent_enabled,
+        praxis_agent_config,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,7 +108,9 @@ async fn listen_to_queues(
     let mut broadcast_consumer = channel
         .basic_consume(
             broadcast_queue.name().as_str().into(),
-            format!("node-broadcast-consumer-{}", node_id).as_str().into(),
+            format!("node-broadcast-consumer-{}", node_id)
+                .as_str()
+                .into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -111,18 +128,20 @@ async fn listen_to_queues(
     //
     // Create terminal output channel for forwarding PTY output to the server.
     //
-    let (terminal_output_tx, mut terminal_output_rx) =
-        mpsc::unbounded_channel::<TerminalOutputEvent>();
+    let (terminal_output_tx, terminal_output_rx) =
+        mpsc::channel::<TerminalOutputEvent>(TERMINAL_OUTPUT_CHANNEL_CAPACITY);
 
     //
     // Create traffic channel for forwarding intercepted traffic to the service.
     //
-    let (traffic_tx, mut traffic_rx) = mpsc::unbounded_channel::<InterceptedTrafficEntry>();
+    let (traffic_tx, traffic_rx) =
+        mpsc::channel::<InterceptedTrafficEntry>(TRAFFIC_CHANNEL_CAPACITY);
 
     //
     // Create event log channel for forwarding log entries to the service.
     //
-    let (event_log_tx, mut event_log_rx) = mpsc::unbounded_channel::<common::ApplicationLogEntry>();
+    let (event_log_tx, event_log_rx) =
+        mpsc::channel::<common::ApplicationLogEntry>(EVENT_LOG_CHANNEL_CAPACITY);
 
     //
     // Initialize the global event log sender.
@@ -134,11 +153,7 @@ async fn listen_to_queues(
     // initial intercept target list from the registration ack.
     //
     let node_state = Arc::new(RwLock::new({
-        let mut state = NodeState::new(
-            node_id.clone(),
-            terminal_output_tx,
-            traffic_tx,
-        );
+        let mut state = NodeState::new(node_id.clone(), terminal_output_tx, traffic_tx);
         state.intercept_targets = intercept_targets;
         state.factory_config.praxis_agent_config = if praxis_agent_enabled {
             praxis_agent_config
@@ -155,37 +170,12 @@ async fn listen_to_queues(
     // forwarder task below.
     //
 
-    let (acp_outbound_tx, mut acp_outbound_rx) = crate::acp_server::outbound_channel();
+    let (acp_outbound_tx, acp_outbound_rx) = crate::acp_server::outbound_channel();
     let acp_server = crate::acp_server::NodeAcpServer::new(
         Arc::clone(&registry),
         acp_outbound_tx,
         node_id.clone(),
     );
-
-    //
-    // Drain outbound ACP frames and publish them on NODE_SIGNAL_QUEUE as
-    // NodeSignalMessage::Acp. The service's dispatcher forwards these to
-    // the external client that originated the session.
-    //
-
-    let channel_for_acp = channel.clone();
-    let node_id_for_acp = node_id.clone();
-    tokio::spawn(async move {
-        common::log_info!("ACP outbound forwarder task started");
-        while let Some(frame) = acp_outbound_rx.recv().await {
-            let message = NodeSignalMessage::Acp {
-                node_id: node_id_for_acp.clone(),
-                client_id: frame.client_id,
-                json_rpc: frame.json_rpc,
-            };
-            if let Err(e) =
-                publish_json(&channel_for_acp, NODE_SIGNAL_QUEUE, &message).await
-            {
-                common::log_warn!("Failed to forward ACP outbound frame: {}", e);
-            }
-        }
-        common::log_info!("ACP outbound forwarder task ended");
-    });
 
     //
     // Semantic parser tracker for async parser requests.
@@ -297,7 +287,9 @@ async fn listen_to_queues(
             let mut consumer = match reset_channel
                 .basic_consume(
                     reset_queue_for_consumer.as_str().into(),
-                    format!("reset-consumer-{}", uuid::Uuid::new_v4()).as_str().into(),
+                    format!("reset-consumer-{}", uuid::Uuid::new_v4())
+                        .as_str()
+                        .into(),
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )
@@ -310,7 +302,10 @@ async fn listen_to_queues(
                 }
             };
 
-            common::log_info!("Reset consumer started on queue {}", reset_queue_for_consumer);
+            common::log_info!(
+                "Reset consumer started on queue {}",
+                reset_queue_for_consumer
+            );
 
             while let Some(delivery_result) = consumer.next().await {
                 match delivery_result {
@@ -329,158 +324,15 @@ async fn listen_to_queues(
         });
     }
 
-    //
-    // Spawn task to forward terminal output to server.
-    //
-    let channel_for_terminal = channel.clone();
-    let node_id_for_terminal = node_id.clone();
-    tokio::spawn(async move {
-        common::log_info!("Terminal output forwarder task started");
-        let mut consecutive_failures = 0u32;
-        let mut last_error_log_time = std::time::Instant::now();
-
-        while let Some(event) = terminal_output_rx.recv().await {
-            if event.closed {
-                common::log_info!("Terminal {} closed event received", event.terminal_id);
-                continue;
-            }
-
-            if let Some(data) = event.data {
-                common::log_debug!("Forwarding {} bytes of terminal output to server", data.len());
-                let output = TerminalOutput {
-                    node_id: node_id_for_terminal.clone(),
-                    terminal_id: event.terminal_id,
-                    client_id: event.client_id,
-                    data,
-                };
-
-                let message = NodeSignalMessage::TerminalOutput(output);
-                match publish_json(&channel_for_terminal, NODE_SIGNAL_QUEUE, &message).await {
-                    Ok(_) => {
-                        if consecutive_failures > 0 {
-                            common::log_info!(
-                                "Terminal forwarder recovered after {} failures",
-                                consecutive_failures
-                            );
-                            consecutive_failures = 0;
-                        }
-                    }
-                    Err(e) => {
-                        consecutive_failures += 1;
-                        let should_log = consecutive_failures <= 3
-                            || last_error_log_time.elapsed().as_secs() >= 10;
-
-                        if should_log {
-                            common::log_error!(
-                                "Failed to send terminal output (failure #{}): {}",
-                                consecutive_failures,
-                                e
-                            );
-                            last_error_log_time = std::time::Instant::now();
-                        }
-
-                        if consecutive_failures > 3 {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        }
-                    }
-                }
-            }
-        }
-        common::log_info!("Terminal output forwarder task ended");
-    });
-
-    //
-    // Spawn task to forward intercepted traffic to service.
-    //
-    let channel_for_traffic = channel.clone();
-    tokio::spawn(async move {
-        common::log_info!("Traffic forwarder task started");
-        let mut consecutive_failures = 0u32;
-        let mut last_error_log_time = std::time::Instant::now();
-
-        while let Some(entry) = traffic_rx.recv().await {
-            common::log_debug!(
-                "Forwarding intercepted traffic: {} {} to {}",
-                entry.method.as_deref().unwrap_or("?"),
-                entry.url,
-                entry.host
-            );
-
-            let message = NodeSignalMessage::InterceptedTraffic(entry);
-            match publish_json(&channel_for_traffic, NODE_SIGNAL_QUEUE, &message).await {
-                Ok(_) => {
-                    if consecutive_failures > 0 {
-                        common::log_info!(
-                            "Traffic forwarder recovered after {} failures",
-                            consecutive_failures
-                        );
-                        consecutive_failures = 0;
-                    }
-                }
-                Err(e) => {
-                    consecutive_failures += 1;
-                    let should_log = consecutive_failures <= 3
-                        || last_error_log_time.elapsed().as_secs() >= 10;
-
-                    if should_log {
-                        common::log_error!(
-                            "Failed to send intercepted traffic (failure #{}): {}",
-                            consecutive_failures,
-                            e
-                        );
-                        last_error_log_time = std::time::Instant::now();
-                    }
-
-                    if consecutive_failures > 3 {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    }
-                }
-            }
-        }
-        common::log_info!("Traffic forwarder task ended");
-    });
-
-    //
-    // Spawn task to forward event log entries to service via dedicated queue.
-    // Note: This task uses tracing::* directly instead of common::log_* to avoid
-    // recursion - using common::log_* would send to the event log channel, which
-    // this task processes, creating an infinite loop on failures.
-    //
-    let channel_for_event_log = channel.clone();
-    tokio::spawn(async move {
-        tracing::info!("Event log forwarder task started");
-        let mut consecutive_failures = 0u32;
-
-        while let Some(entry) = event_log_rx.recv().await {
-            match publish_json(&channel_for_event_log, NODE_EVENT_LOG_QUEUE, &entry).await {
-                Ok(_) => {
-                    if consecutive_failures > 0 {
-                        tracing::info!(
-                            "Event log forwarder recovered after {} failures",
-                            consecutive_failures
-                        );
-                        consecutive_failures = 0;
-                    }
-                }
-                Err(_) => {
-                    //
-                    // Silently increment failure counter. We don't log here to
-                    // avoid recursion and because event log failures shouldn't
-                    // disrupt normal operation.
-                    //
-                    consecutive_failures += 1;
-
-                    //
-                    // Add delay after repeated failures to avoid tight loops.
-                    //
-                    if consecutive_failures > 3 {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    }
-                }
-            }
-        }
-        tracing::info!("Event log forwarder task ended");
-    });
+    let mut forwarders = Some(forwarders::RuntimeForwarders::spawn(
+        channel.clone(),
+        node_id.clone(),
+        acp_outbound_rx,
+        terminal_output_rx,
+        traffic_rx,
+        event_log_rx,
+        &shutdown_token,
+    ));
 
     //
     // Set up periodic information updates using tokio interval.
@@ -544,8 +396,14 @@ async fn listen_to_queues(
     fingerprint_all_agents(&registry, &fingerprint_cache).await;
 
     if let Err(e) = send_node_information_update(
-        &channel, &node_id, &registry, &node_state, &fingerprint_cache,
-    ).await {
+        &channel,
+        &node_id,
+        &registry,
+        &node_state,
+        &fingerprint_cache,
+    )
+    .await
+    {
         common::log_error!("Failed to send initial information update: {}", e);
     }
 
@@ -567,12 +425,16 @@ async fn listen_to_queues(
                 //
 
                 {
-                    let mut state = node_state.write().await;
-                    state.terminal_manager.close_all();
+                    let (terminal_manager, intercept_manager) = {
+                        let state = node_state.read().await;
+                        (state.terminal_manager.clone(), state.intercept_manager.clone())
+                    };
+                    terminal_manager.lock().await.close_all();
 
-                    if state.intercept_manager.is_enabled() {
+                    let mut intercept_manager = intercept_manager.lock().await;
+                    if intercept_manager.is_enabled() {
                         common::log_info!("Disabling intercept and restoring system settings...");
-                        if let Err(e) = state.intercept_manager.disable().await {
+                        if let Err(e) = intercept_manager.disable().await {
                             common::log_error!("Failed to disable intercept during shutdown: {}", e);
                         } else {
                             common::log_info!("Intercept disabled, system settings restored");
@@ -581,6 +443,9 @@ async fn listen_to_queues(
                 }
 
                 common::log_info!("Shutdown complete");
+                if let Some(forwarders) = forwarders.take() {
+                    forwarders.shutdown().await;
+                }
                 return Ok(RuntimeExit::Shutdown);
             }
 
@@ -595,17 +460,24 @@ async fn listen_to_queues(
                 crate::agent_connectors::lua::runtime::signal_reset();
 
                 {
-                    let mut state = node_state.write().await;
-                    state.terminal_manager.close_all();
+                    let (terminal_manager, intercept_manager) = {
+                        let state = node_state.read().await;
+                        (state.terminal_manager.clone(), state.intercept_manager.clone())
+                    };
+                    terminal_manager.lock().await.close_all();
 
-                    if state.intercept_manager.is_enabled() {
-                        if let Err(e) = state.intercept_manager.disable().await {
+                    let mut intercept_manager = intercept_manager.lock().await;
+                    if intercept_manager.is_enabled() {
+                        if let Err(e) = intercept_manager.disable().await {
                             common::log_error!("Failed to disable intercept during reset: {}", e);
                         }
                     }
                 }
 
                 common::log_info!("Reset cleanup complete, will re-register");
+                if let Some(forwarders) = forwarders.take() {
+                    forwarders.shutdown().await;
+                }
                 return Ok(RuntimeExit::Reset);
             }
             _ = update_interval.tick() => {
@@ -662,6 +534,9 @@ async fn listen_to_queues(
                     }
                     Err(e) => {
                         common::log_error!("Broadcast consumer error: {}", e);
+                        if let Some(forwarders) = forwarders.take() {
+                            forwarders.shutdown().await;
+                        }
                         return Err(anyhow::anyhow!("Connection lost: {}", e));
                     }
                 }
@@ -760,6 +635,9 @@ async fn listen_to_queues(
                     }
                     Err(e) => {
                         common::log_error!("Node consumer error: {}", e);
+                        if let Some(forwarders) = forwarders.take() {
+                            forwarders.shutdown().await;
+                        }
                         return Err(anyhow::anyhow!("Connection lost: {}", e));
                     }
                 }
@@ -768,6 +646,9 @@ async fn listen_to_queues(
                 //
                 // Both consumers closed unexpectedly - connection lost.
                 //
+                if let Some(forwarders) = forwarders.take() {
+                    forwarders.shutdown().await;
+                }
                 return Err(anyhow::anyhow!("Connection lost: consumers closed"));
             }
         }
@@ -786,9 +667,14 @@ async fn handle_broadcast_message(
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
             fingerprint_all_agents(registry, fingerprint_cache).await;
-            if let Err(e) =
-                send_node_information_update(channel, node_id, registry, node_state, fingerprint_cache)
-                    .await
+            if let Err(e) = send_node_information_update(
+                channel,
+                node_id,
+                registry,
+                node_state,
+                fingerprint_cache,
+            )
+            .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
             }
@@ -810,12 +696,15 @@ async fn handle_broadcast_message(
             common::log_info!(
                 "Received PraxisAgentEnabled: {} (config: {})",
                 if enabled { "enabled" } else { "disabled" },
-                if config.is_some() { "present" } else { "absent" },
+                if config.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                },
             );
             let lua_scripts = {
                 let mut state = node_state.write().await;
-                state.factory_config.praxis_agent_config =
-                    if enabled { config } else { None };
+                state.factory_config.praxis_agent_config = if enabled { config } else { None };
                 factory.set_config(state.factory_config.clone());
                 state.last_lua_scripts.clone()
             };
@@ -824,15 +713,25 @@ async fn handle_broadcast_message(
 
             fingerprint_all_agents(registry, fingerprint_cache).await;
             if let Err(e) = send_node_information_update(
-                channel, node_id, registry, node_state, fingerprint_cache,
+                channel,
+                node_id,
+                registry,
+                node_state,
+                fingerprint_cache,
             )
             .await
             {
-                common::log_error!("Failed to send info update after Praxis agent change: {}", e);
+                common::log_error!(
+                    "Failed to send info update after Praxis agent change: {}",
+                    e
+                );
             }
         }
         NodeBroadcastMessage::AgentRegistryUpdate { scripts } => {
-            common::log_info!("Received AgentRegistryUpdate with {} scripts", scripts.len());
+            common::log_info!(
+                "Received AgentRegistryUpdate with {} scripts",
+                scripts.len()
+            );
             {
                 let mut state = node_state.write().await;
                 state.last_lua_scripts = scripts.clone();
@@ -842,7 +741,11 @@ async fn handle_broadcast_message(
 
             fingerprint_all_agents(registry, fingerprint_cache).await;
             if let Err(e) = send_node_information_update(
-                channel, node_id, registry, node_state, fingerprint_cache,
+                channel,
+                node_id,
+                registry,
+                node_state,
+                fingerprint_cache,
             )
             .await
             {
@@ -882,9 +785,7 @@ async fn handle_command(
     );
 
     let result = match request.command.clone() {
-        NodeCommand::Intercept(cmd) => {
-            handle_intercept_command(cmd, node_state).await
-        }
+        NodeCommand::Intercept(cmd) => handle_intercept_command(cmd, node_state).await,
         NodeCommand::Terminal(cmd) => {
             handle_terminal_command(cmd, &request.client_id, node_state).await
         }
@@ -898,9 +799,7 @@ async fn handle_command(
                 }
                 handle_agent_registry_update(scripts, registry, factory).await
             }
-            common::AgentRegistryCommand::List => {
-                handle_agent_registry_list(registry).await
-            }
+            common::AgentRegistryCommand::List => handle_agent_registry_list(registry).await,
         },
     };
 
@@ -929,106 +828,9 @@ async fn handle_command(
     // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
-        send_node_information_update(channel, node_id, registry, node_state, fingerprint_cache).await
+        send_node_information_update(channel, node_id, registry, node_state, fingerprint_cache)
+            .await
     {
         common::log_error!("Failed to send information update after command: {}", e);
     }
-}
-
-async fn fingerprint_all_agents(
-    registry: &Arc<RwLock<AgentRegistry>>,
-    fingerprint_cache: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, bool>>>,
-) {
-    let agents = registry.read().await.get_all();
-    let mut cache = fingerprint_cache.write().await;
-    let mut available_names: Vec<&str> = Vec::new();
-
-    for agent in &agents {
-        let available = agent.do_fingerprint().await;
-        cache.insert(agent.short_name().to_string(), available);
-        if available {
-            available_names.push(agent.short_name());
-        }
-    }
-
-    common::log_info!(
-        "Fingerprinted {} agents, {} available: [{}]",
-        agents.len(),
-        available_names.len(),
-        available_names.join(", ")
-    );
-}
-
-async fn send_node_information_update(
-    channel: &Channel,
-    node_id: &str,
-    registry: &Arc<RwLock<AgentRegistry>>,
-    node_state: &Arc<RwLock<NodeState>>,
-    fingerprint_cache: &tokio::sync::RwLock<std::collections::HashMap<String, bool>>,
-) -> anyhow::Result<()> {
-    //
-    // Get all agents and use the fingerprint cache for availability.
-    //
-
-    let agents = registry.read().await.get_all();
-    let cache = fingerprint_cache.read().await;
-    let mut discovered_agents = Vec::new();
-
-    for agent in &agents {
-        let available = cache.get(agent.short_name()).copied().unwrap_or(false);
-
-        if available {
-            discovered_agents.push(DiscoveredAgent {
-                name: agent.name().to_string(),
-                short_name: agent.short_name().to_string(),
-                available,
-                version: agent.version(),
-            });
-        }
-    }
-
-    //
-    // Check intercept status (now node-level, not per-agent).
-    //
-    let (intercept_enabled, intercept_method, active_terminal_id) = {
-        let state = node_state.read().await;
-        let enabled = state.intercept_manager.is_enabled();
-        let method = state.intercept_manager.method();
-        let terminal_id = state.terminal_manager.get_active_terminal_id();
-        (enabled, method, terminal_id)
-    };
-
-    //
-    // Determine if interception is supported on this node. Now node-level,
-    // not per-agent: Windows (all methods) and Linux (system proxy / TPROXY
-    // / VPN). The per-target filter is decided server-side via the
-    // configured intercept target list.
-    //
-
-    let intercept_supported = cfg!(any(windows, target_os = "linux"));
-
-    //
-    // Build the update message and publish it to the service. selected_agent
-    // is always None now that session state lives in the ACP server rather
-    // than on a single per-node selection.
-    //
-
-    let update = NodeInformationUpdate {
-        node_id: node_id.to_string(),
-        timestamp: Utc::now(),
-        discovered_agents,
-        selected_agent: None,
-        intercept_supported,
-        intercept_enabled,
-        intercept_method,
-        active_terminal_id,
-        privileged: crate::utils::is_privileged(),
-    };
-
-    let message = NodeSignalMessage::InformationUpdate(update);
-    publish_json(channel, NODE_SIGNAL_QUEUE, &message).await?;
-
-    common::log_info!("Sent NodeInformationUpdate to service");
-
-    Ok(())
 }

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::{
-    publish_json_exchange, ClientBroadcastMessage, InterceptedTrafficEntry,
-    TrafficMatchWithDetails, CLIENT_BROADCAST_EXCHANGE,
+    CLIENT_BROADCAST_EXCHANGE, ClientBroadcastMessage, InterceptedTrafficEntry,
+    TrafficMatchWithDetails, publish_json_exchange,
 };
 use lapin::Channel;
 use tokio::sync::mpsc;
@@ -69,10 +69,7 @@ impl InterceptBroadcaster {
     }
 }
 
-async fn batch_entries(
-    mut rx: mpsc::UnboundedReceiver<InterceptedTrafficEntry>,
-    channel: Channel,
-) {
+async fn batch_entries(mut rx: mpsc::UnboundedReceiver<InterceptedTrafficEntry>, channel: Channel) {
     let mut buffer: Vec<InterceptedTrafficEntry> = Vec::with_capacity(MAX_BATCH);
     let mut flush_timer = tokio::time::interval(FLUSH_INTERVAL);
     flush_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -102,10 +99,7 @@ async fn batch_entries(
     }
 }
 
-async fn batch_matches(
-    mut rx: mpsc::UnboundedReceiver<TrafficMatchWithDetails>,
-    channel: Channel,
-) {
+async fn batch_matches(mut rx: mpsc::UnboundedReceiver<TrafficMatchWithDetails>, channel: Channel) {
     let mut buffer: Vec<TrafficMatchWithDetails> = Vec::with_capacity(MAX_BATCH);
     let mut flush_timer = tokio::time::interval(FLUSH_INTERVAL);
     flush_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

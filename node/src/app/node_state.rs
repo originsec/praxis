@@ -2,13 +2,13 @@ use crate::intercept::NodeInterceptManager;
 use crate::terminal::{TerminalManager, TerminalOutputEvent};
 use common::{FactoryConfig, InterceptTargetConfig, InterceptedTrafficEntry};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 
 /// Node state that tracks intercept manager and terminal sessions
 pub struct NodeState {
-    pub intercept_manager: NodeInterceptManager,
-    pub terminal_manager: TerminalManager,
-    pub terminal_output_tx: Option<mpsc::UnboundedSender<TerminalOutputEvent>>,
+    pub intercept_manager: Arc<Mutex<NodeInterceptManager>>,
+    pub terminal_manager: Arc<Mutex<TerminalManager>>,
+    pub terminal_output_tx: mpsc::Sender<TerminalOutputEvent>,
     pub report_interval_secs: Arc<std::sync::atomic::AtomicU64>,
 
     //
@@ -32,13 +32,13 @@ pub struct NodeState {
 impl NodeState {
     pub fn new(
         node_id: String,
-        terminal_output_tx: mpsc::UnboundedSender<TerminalOutputEvent>,
-        traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+        terminal_output_tx: mpsc::Sender<TerminalOutputEvent>,
+        traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
     ) -> Self {
         Self {
-            intercept_manager: NodeInterceptManager::new(node_id, traffic_tx),
-            terminal_manager: TerminalManager::new(),
-            terminal_output_tx: Some(terminal_output_tx),
+            intercept_manager: Arc::new(Mutex::new(NodeInterceptManager::new(node_id, traffic_tx))),
+            terminal_manager: Arc::new(Mutex::new(TerminalManager::new())),
+            terminal_output_tx,
             report_interval_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)),
             intercept_targets: Vec::new(),
             factory_config: FactoryConfig::default(),

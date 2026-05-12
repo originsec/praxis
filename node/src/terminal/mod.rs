@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 
 pub struct TerminalManager {
     sessions: HashMap<String, TerminalSession>,
@@ -25,7 +26,7 @@ impl TerminalManager {
         &mut self,
         terminal_id: String,
         client_id: String,
-        output_tx: mpsc::UnboundedSender<TerminalOutputEvent>,
+        output_tx: mpsc::Sender<TerminalOutputEvent>,
     ) -> anyhow::Result<String> {
         let pty_system = native_pty_system();
 
@@ -60,7 +61,7 @@ impl TerminalManager {
             cmd
         };
 
-        let _child = pair.slave.spawn_command(cmd)?;
+        let child = pair.slave.spawn_command(cmd)?;
 
         let writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
@@ -72,7 +73,7 @@ impl TerminalManager {
         let scrollback = Arc::new(Mutex::new(Vec::new()));
         let scrollback_writer = scrollback.clone();
 
-        std::thread::spawn(move || {
+        let reader_thread = std::thread::spawn(move || {
             common::log_info!("Terminal {} reader thread started", terminal_id_clone);
             let mut buf = [0u8; 4096];
             loop {
@@ -84,7 +85,7 @@ impl TerminalManager {
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         common::log_info!("Terminal {} EOF", terminal_id_clone);
-                        let _ = output_tx.send(TerminalOutputEvent {
+                        let _ = output_tx.try_send(TerminalOutputEvent {
                             terminal_id: terminal_id_clone.clone(),
                             client_id: client_id_clone.clone(),
                             data: None,
@@ -96,23 +97,29 @@ impl TerminalManager {
                         common::log_info!("Terminal {} read {} bytes", terminal_id_clone, n);
                         let data = buf[..n].to_vec();
                         TerminalSession::append_scrollback(&scrollback_writer, &data);
-                        if output_tx
-                            .send(TerminalOutputEvent {
-                                terminal_id: terminal_id_clone.clone(),
-                                client_id: client_id_clone.clone(),
-                                data: Some(data),
-                                closed: false,
-                            })
-                            .is_err()
-                        {
-                            common::log_warn!("Failed to send terminal output, channel closed");
-                            break;
+                        match output_tx.try_send(TerminalOutputEvent {
+                            terminal_id: terminal_id_clone.clone(),
+                            client_id: client_id_clone.clone(),
+                            data: Some(data),
+                            closed: false,
+                        }) {
+                            Ok(()) => {}
+                            Err(TrySendError::Full(_)) => {
+                                common::log_warn!(
+                                    "Dropping terminal output for {} because output channel is full",
+                                    terminal_id_clone
+                                );
+                            }
+                            Err(TrySendError::Closed(_)) => {
+                                common::log_warn!("Failed to send terminal output, channel closed");
+                                break;
+                            }
                         }
                     }
                     Err(e) => {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
                             common::log_error!("Terminal {} read error: {}", terminal_id_clone, e);
-                            let _ = output_tx.send(TerminalOutputEvent {
+                            let _ = output_tx.try_send(TerminalOutputEvent {
                                 terminal_id: terminal_id_clone.clone(),
                                 client_id: client_id_clone.clone(),
                                 data: None,
@@ -130,8 +137,10 @@ impl TerminalManager {
             terminal_id: terminal_id.clone(),
             client_id,
             master: pair.master,
+            child: Some(child),
             writer,
             shutdown_tx: Some(shutdown_tx),
+            reader_thread: Some(reader_thread),
             scrollback,
         };
 

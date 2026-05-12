@@ -30,7 +30,7 @@ fn setup_shutdown_signal() -> CancellationToken {
     tokio::spawn(async move {
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
             let mut sigterm =
                 signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
             let mut sigint =
@@ -81,9 +81,7 @@ async fn async_main() {
         .add_directive("chromiumoxide::conn=off".parse().unwrap())
         .add_directive("chromiumoxide::handler=off".parse().unwrap());
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -143,7 +141,11 @@ async fn async_main() {
                 common::logging::set_event_log_enabled(result.event_logging_enabled);
                 common::log_info!(
                     "Event logging {} from registration ack",
-                    if result.event_logging_enabled { "enabled" } else { "disabled" }
+                    if result.event_logging_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
                 );
 
                 result

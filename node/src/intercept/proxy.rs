@@ -1,7 +1,8 @@
+mod body;
+
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
-use flate2::read::{DeflateDecoder, GzDecoder};
 use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -9,7 +10,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,8 +20,10 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, timeout};
 use tokio_rustls::TlsAcceptor;
+use tokio_util::sync::CancellationToken;
 
 use super::certificate::CertificateAuthority;
+use body::{decompress_body, decompress_grpc_payload};
 
 /// Configuration for the intercept proxy
 pub struct ProxyConfig {
@@ -45,6 +48,8 @@ pub struct InterceptProxy {
     port: u16,
     /// Shutdown signal sender
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// Shared cancellation token for auxiliary listeners.
+    shutdown_token: CancellationToken,
     /// Handle to the proxy task
     task_handle: Option<tokio::task::JoinHandle<()>>,
     /// Additional task handles for extra listeners (e.g., port 80 for Hosts mode)
@@ -56,9 +61,10 @@ impl InterceptProxy {
     pub async fn start(
         ca: Arc<RwLock<CertificateAuthority>>,
         config: ProxyConfig,
-        traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+        traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
     ) -> Result<Self> {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let shutdown_token = CancellationToken::new();
         let config = Arc::new(config);
         let mut extra_task_handles = Vec::new();
 
@@ -84,6 +90,7 @@ impl InterceptProxy {
                     let ca_clone = Arc::clone(&ca);
                     let config_clone = Arc::clone(&config);
                     let traffic_tx_clone = traffic_tx.clone();
+                    let http_shutdown = shutdown_token.clone();
 
                     //
                     // Spawn a separate task for the HTTP listener.
@@ -93,6 +100,7 @@ impl InterceptProxy {
                         ca_clone,
                         config_clone,
                         traffic_tx_clone,
+                        http_shutdown,
                     ));
                     extra_task_handles.push(http_task);
                 }
@@ -153,6 +161,7 @@ impl InterceptProxy {
         Ok(Self {
             port,
             shutdown_tx: Some(shutdown_tx),
+            shutdown_token,
             task_handle: Some(task_handle),
             extra_task_handles,
         })
@@ -163,6 +172,7 @@ impl InterceptProxy {
     }
 
     pub async fn stop(&mut self) {
+        self.shutdown_token.cancel();
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -177,6 +187,7 @@ impl InterceptProxy {
 
 impl Drop for InterceptProxy {
     fn drop(&mut self) {
+        self.shutdown_token.cancel();
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -191,7 +202,7 @@ async fn run_proxy(
     listener: TcpListener,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     {
@@ -233,23 +244,29 @@ async fn run_proxy_http(
     listener: TcpListener,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
+    shutdown: CancellationToken,
 ) {
     common::log_info!("HTTP proxy server running on port 80 (Hosts mode)");
 
     loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let ca = Arc::clone(&ca);
-                let config = Arc::clone(&config);
-                let traffic_tx = traffic_tx.clone();
+        tokio::select! {
+            _ = shutdown.cancelled() => break,
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, addr)) => {
+                        let ca = Arc::clone(&ca);
+                        let config = Arc::clone(&config);
+                        let traffic_tx = traffic_tx.clone();
 
-                tokio::spawn(async move {
-                    let _ = handle_connection(stream, addr, ca, config, traffic_tx).await;
-                });
-            }
-            Err(e) => {
-                common::log_error!("Failed to accept HTTP connection: {}", e);
+                        tokio::spawn(async move {
+                            let _ = handle_connection(stream, addr, ca, config, traffic_tx).await;
+                        });
+                    }
+                    Err(e) => {
+                        common::log_error!("Failed to accept HTTP connection: {}", e);
+                    }
+                }
             }
         }
     }
@@ -261,7 +278,7 @@ async fn handle_connection(
     addr: SocketAddr,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     //
     // Peek at first byte to detect TLS vs HTTP.
@@ -315,7 +332,7 @@ async fn handle_tls_connection(
     _addr: SocketAddr,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     #![allow(unused_imports)]
     use tokio::io::AsyncReadExt;
@@ -759,7 +776,7 @@ async fn handle_intercepted_tunnel_vpn(
     host: &str,
     port: u16,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     //
     // For Hosts mode, use pre-resolved IP to avoid hosts file loop.
@@ -816,7 +833,7 @@ async fn handle_request(
     _addr: SocketAddr,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     if req.method() == Method::CONNECT {
         //
@@ -836,7 +853,7 @@ async fn handle_connect(
     req: Request<hyper::body::Incoming>,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let host = match req.uri().host() {
         Some(h) => h.to_string(),
@@ -894,7 +911,7 @@ async fn tunnel(
     should_intercept: bool,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: &ProxyConfig,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     let target = format!("{}:{}", host, port);
 
@@ -924,7 +941,7 @@ async fn intercept_tls_traffic(
     port: u16,
     ca: Arc<RwLock<CertificateAuthority>>,
     config: &ProxyConfig,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     //
     // Get leaf certificate for this domain.
@@ -1101,7 +1118,7 @@ async fn proxy_h2_traffic<C, S>(
     mut server_stream: S,
     host: &str,
     config: &ProxyConfig,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()>
 where
     C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -1262,46 +1279,6 @@ async fn write_h2_frame<W: tokio::io::AsyncWrite + Unpin>(
     Ok(())
 }
 
-//
-// Decompress gRPC payload.
-// gRPC DATA frames have a 5-byte prefix:
-//   - Byte 0: Compression flag (0=uncompressed, 1=gzip)
-//   - Bytes 1-4: Message length (big-endian uint32)
-//   - Bytes 5+: Message data (possibly gzip compressed)
-//
-
-fn decompress_grpc_payload(payload: &[u8]) -> Vec<u8> {
-    if payload.len() < 5 {
-        return payload.to_vec();
-    }
-
-    let compressed = payload[0] == 1;
-    let message_len = ((payload[1] as u32) << 24)
-        | ((payload[2] as u32) << 16)
-        | ((payload[3] as u32) << 8)
-        | (payload[4] as u32);
-
-    let message_data = &payload[5..];
-
-    if message_data.len() < message_len as usize {
-        return payload.to_vec();
-    }
-
-    if !compressed {
-        message_data.to_vec()
-    } else {
-        let mut decoder = GzDecoder::new(Cursor::new(message_data));
-        let mut decompressed = Vec::new();
-        match decoder.read_to_end(&mut decompressed) {
-            Ok(_) => decompressed,
-            Err(e) => {
-                common::log_debug!("gRPC decompression failed: {}", e);
-                payload.to_vec()
-            }
-        }
-    }
-}
-
 /// Handle HTTP/2 traffic with frame-level interception.
 async fn handle_h2_traffic<CR, CW, SR, SW>(
     mut client_read: CR,
@@ -1313,7 +1290,7 @@ async fn handle_h2_traffic<CR, CW, SR, SW>(
     node_id: &str,
     intercept_method: InterceptMethod,
     url_pattern: Option<&fancy_regex::Regex>,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()>
 where
     CR: tokio::io::AsyncRead + Unpin + Send,
@@ -1398,7 +1375,7 @@ where
                                     response_headers: None,
                                     response_body: Some(decompressed),
                                 };
-                                let _ = traffic_tx.send(entry);
+                                let _ = traffic_tx.try_send(entry);
                             }
                         }
 
@@ -1435,7 +1412,7 @@ where
                                     response_headers: None,
                                     response_body: Some(frame.payload.clone()),
                                 };
-                                let _ = traffic_tx.send(entry);
+                                let _ = traffic_tx.try_send(entry);
                             }
                         }
 
@@ -1513,7 +1490,7 @@ where
                                     response_headers: None,
                                     response_body: None,
                                 };
-                                let _ = traffic_tx.send(entry);
+                                let _ = traffic_tx.try_send(entry);
                             }
                         }
 
@@ -1556,7 +1533,7 @@ where
                                     response_headers: None,
                                     response_body: None,
                                 };
-                                let _ = traffic_tx.send(entry);
+                                let _ = traffic_tx.try_send(entry);
                             }
                         }
 
@@ -1636,7 +1613,7 @@ async fn proxy_https_traffic<C, S>(
     server_tls: tokio_rustls::client::TlsStream<S>,
     host: &str,
     config: &ProxyConfig,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()>
 where
     C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -1848,7 +1825,7 @@ where
                         response_headers: None,
                         response_body: None,
                     };
-                    let _ = traffic_tx.send(entry);
+                    let _ = traffic_tx.try_send(entry);
                 }
                 continue;
             }
@@ -1891,7 +1868,7 @@ where
                         response_headers: None,
                         response_body: None,
                     };
-                    let _ = traffic_tx.send(entry);
+                    let _ = traffic_tx.try_send(entry);
                 }
                 continue;
             }
@@ -2005,7 +1982,7 @@ where
                     response_headers: Some(response_headers.clone()),
                     response_body: None,
                 };
-                let _ = traffic_tx.send(entry);
+                let _ = traffic_tx.try_send(entry);
             }
 
             //
@@ -2079,7 +2056,7 @@ where
                 },
             };
 
-            let _ = traffic_tx.send(entry);
+            let _ = traffic_tx.try_send(entry);
         }
     }
 
@@ -2098,7 +2075,7 @@ async fn handle_websocket_traffic<CR, CW, SR, SW>(
     node_id: &str,
     intercept_method: InterceptMethod,
     url_pattern: Option<&fancy_regex::Regex>,
-    traffic_tx: &mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: &mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<()>
 where
     CR: tokio::io::AsyncRead + Unpin + Send,
@@ -2162,7 +2139,7 @@ where
                                 response_headers: None,
                                 response_body: Some(payload),
                             };
-                            let _ = traffic_tx.send(entry);
+                            let _ = traffic_tx.try_send(entry);
                         }
 
                         if opcode == 0x8 {
@@ -2211,7 +2188,7 @@ where
                                 response_headers: None,
                                 response_body: None,
                             };
-                            let _ = traffic_tx.send(entry);
+                            let _ = traffic_tx.try_send(entry);
                         }
 
                         if opcode == 0x8 {
@@ -2344,7 +2321,7 @@ async fn write_websocket_frame<W: tokio::io::AsyncWrite + Unpin>(
 async fn handle_http_request(
     req: Request<hyper::body::Incoming>,
     config: Arc<ProxyConfig>,
-    traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -2614,7 +2591,7 @@ async fn handle_http_request(
                 },
             };
 
-            let _ = traffic_tx.send(entry);
+            let _ = traffic_tx.try_send(entry);
         }
     }
 
@@ -3088,56 +3065,4 @@ fn discover_non_tun_ip() -> Option<std::net::IpAddr> {
     }
 
     None
-}
-
-/// Decompress response body based on Content-Encoding header
-fn decompress_body(body: &[u8], content_encoding: Option<&str>) -> Vec<u8> {
-    let encoding = match content_encoding {
-        Some(e) => e.to_lowercase(),
-        None => return body.to_vec(),
-    };
-
-    if encoding.contains("gzip") {
-        let mut decoder = GzDecoder::new(body);
-        let mut decompressed = Vec::new();
-        match decoder.read_to_end(&mut decompressed) {
-            Ok(_) => decompressed,
-            Err(e) => {
-                common::log_debug!("Failed to decompress gzip body: {}", e);
-                body.to_vec()
-            }
-        }
-    } else if encoding.contains("deflate") {
-        let mut decoder = DeflateDecoder::new(body);
-        let mut decompressed = Vec::new();
-        match decoder.read_to_end(&mut decompressed) {
-            Ok(_) => decompressed,
-            Err(e) => {
-                common::log_debug!("Failed to decompress deflate body: {}", e);
-                body.to_vec()
-            }
-        }
-    } else if encoding.contains("br") {
-        let mut decompressed = Vec::new();
-        match brotli::BrotliDecompress(&mut std::io::Cursor::new(body), &mut decompressed) {
-            Ok(_) => decompressed,
-            Err(e) => {
-                common::log_debug!("Failed to decompress brotli body: {}", e);
-                body.to_vec()
-            }
-        }
-    } else if encoding.contains("zstd") {
-        match zstd::decode_all(std::io::Cursor::new(body)) {
-            Ok(decompressed) => decompressed,
-            Err(e) => {
-                common::log_debug!("Failed to decompress zstd body: {}", e);
-                body.to_vec()
-            }
-        }
-    } else {
-        //
-        // Unknown encoding or "identity", return as-is.
-        //
-        body.to_vec()
-    }
 }

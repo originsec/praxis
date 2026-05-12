@@ -1,12 +1,11 @@
 use anyhow::Result;
 use common::{
-    publish_json, client_queue_name, ClientDirectMessage, ClientRegistration,
-    ClientRegistrationAck,
+    ClientDirectMessage, ClientRegistration, ClientRegistrationAck, client_queue_name, publish_json,
 };
 use lapin::Channel;
 use std::sync::Arc;
 
-use crate::state::{NodeRegistry, ClientRegistry};
+use crate::state::{ClientRegistry, NodeRegistry};
 
 pub struct ClientMessageHandler {
     channel: Channel,
@@ -45,7 +44,8 @@ impl ClientMessageHandler {
 
         common::log_info!(
             "Sent ClientRegistrationAck to client {} on queue {}",
-            client_id, queue_name
+            client_id,
+            queue_name
         );
 
         //
@@ -58,10 +58,7 @@ impl ClientMessageHandler {
 
         common::log_info!("Sent initial StateUpdate to client {}", client_id);
 
-        common::log_info!(
-            "Client registered: client_id={}",
-            registration.client_id
-        );
+        common::log_info!("Client registered: client_id={}", registration.client_id);
 
         Ok(())
     }

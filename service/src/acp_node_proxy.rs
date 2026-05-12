@@ -16,12 +16,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use common::acp_ext::EXT_PRAXIS_RECON;
 use common::{AcpFrame, ClientDirectMessage, NodeDirectMessage, ReconResult};
 use lapin::Channel;
-use serde_json::{json, Value};
-use tokio::sync::{oneshot, OnceCell, RwLock};
+use serde_json::{Value, json};
+use tokio::sync::{OnceCell, RwLock, oneshot};
 
 use crate::database::Database;
 use crate::messaging::{send_to_client, send_to_node};
@@ -132,8 +132,7 @@ impl AcpNodeProxy {
         let Some(params) = value.get("params") else {
             return;
         };
-        let Some(agent_short_name) = params.get("agent_short_name").and_then(|v| v.as_str())
-        else {
+        let Some(agent_short_name) = params.get("agent_short_name").and_then(|v| v.as_str()) else {
             return;
         };
         let is_semantic = params
@@ -233,16 +232,14 @@ impl AcpNodeProxy {
         self.sessions.read().await.get(session_id).cloned()
     }
 
-    async fn record_pending_new(
-        &self,
-        client_id: &str,
-        request_id: &Value,
-        node_id: &str,
-    ) {
+    async fn record_pending_new(&self, client_id: &str, request_id: &Value, node_id: &str) {
         let Some(key) = make_pending_key(client_id, request_id) else {
             return;
         };
-        self.pending_new.write().await.insert(key, node_id.to_string());
+        self.pending_new
+            .write()
+            .await
+            .insert(key, node_id.to_string());
     }
 
     async fn take_pending_new(&self, client_id: &str, request_id: &Value) -> Option<String> {
@@ -269,7 +266,8 @@ impl AcpNodeProxy {
         // response can be persisted on the way back, regardless of whether
         // the node is local (RabbitMQ) or a remote bridge.
         //
-        self.track_outbound_recon(client_id, node_id, json_rpc).await;
+        self.track_outbound_recon(client_id, node_id, json_rpc)
+            .await;
 
         //
         // Remote-node bridges don't have a RabbitMQ queue — they
@@ -537,7 +535,8 @@ impl AcpNodeProxy {
             }
         }
 
-        self.forward_to_node(channel, &node_id, client_id, raw_json_rpc).await?;
+        self.forward_to_node(channel, &node_id, client_id, raw_json_rpc)
+            .await?;
         Ok(true)
     }
 
@@ -642,12 +641,8 @@ fn extract_agent_message_text(value: &Value) -> Option<String> {
     if method != "session/update" {
         return None;
     }
-    let update = value
-        .get("params")
-        .and_then(|p| p.get("update"))?;
-    let variant = update
-        .get("sessionUpdate")
-        .and_then(|v| v.as_str())?;
+    let update = value.get("params").and_then(|p| p.get("update"))?;
+    let variant = update.get("sessionUpdate").and_then(|v| v.as_str())?;
     if variant != "agent_message_chunk" {
         return None;
     }

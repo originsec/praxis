@@ -2,24 +2,24 @@ use anyhow::Result;
 use chrono::Utc;
 use futures_util::StreamExt;
 use lapin::{Connection, ConnectionProperties};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use agent_client_protocol as acp;
 use acp::JsonRpcMessage;
 use acp::schema::{
     CloseSessionResponse, Implementation, InitializeResponse, ListSessionsResponse,
-    NewSessionResponse, ProtocolVersion, PromptResponse, SessionInfo, SessionNotification,
+    NewSessionResponse, PromptResponse, ProtocolVersion, SessionInfo, SessionNotification,
     StopReason,
 };
+use agent_client_protocol as acp;
 
 use common::{
-    node_queue_name, publish_json, AcpFrame, DiscoveredAgent, NodeCapability,
-    NodeDirectMessage, NodeInformationUpdate, NodeRegistration, NodeSignalMessage,
-    SelectedAgent, NODE_SIGNAL_QUEUE,
+    AcpFrame, DiscoveredAgent, NODE_SIGNAL_QUEUE, NodeCapability, NodeDirectMessage,
+    NodeInformationUpdate, NodeRegistration, NodeSignalMessage, SelectedAgent, node_queue_name,
+    publish_json,
 };
 
 use super::Transport;
@@ -248,7 +248,8 @@ impl BridgeSession {
         }
         self.publish_agent_update(&pub_channel).await?;
 
-        self.main_loop(transport, pub_channel, consumer, cancel).await
+        self.main_loop(transport, pub_channel, consumer, cancel)
+            .await
     }
 
     async fn main_loop(
@@ -445,10 +446,7 @@ impl BridgeSession {
         };
 
         let id = msg.get("id").cloned();
-        let method = msg
-            .get("method")
-            .and_then(|m| m.as_str())
-            .map(String::from);
+        let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
         if id.is_some() && method.is_none() {
             //
@@ -499,7 +497,8 @@ impl BridgeSession {
                     .await?;
             }
             "session/cancel" => {
-                self.handle_session_cancel(transport, pub_channel, &params).await?;
+                self.handle_session_cancel(transport, pub_channel, &params)
+                    .await?;
             }
             "session/close" => {
                 self.handle_session_close(pub_channel, &frame.client_id, id, &params)
@@ -737,7 +736,8 @@ impl BridgeSession {
         });
         transport.send(&end).await?;
 
-        self.finish_prompt(pub_channel, StopReason::Cancelled).await?;
+        self.finish_prompt(pub_channel, StopReason::Cancelled)
+            .await?;
         Ok(())
     }
 
@@ -762,7 +762,8 @@ impl BridgeSession {
                 .map(|f| f.acp_session_id == session_id)
                 .unwrap_or(false);
             if matches_in_flight {
-                self.finish_prompt(pub_channel, StopReason::Cancelled).await?;
+                self.finish_prompt(pub_channel, StopReason::Cancelled)
+                    .await?;
             }
         }
 
@@ -1029,7 +1030,8 @@ fn json_value<T: serde::Serialize>(v: &T) -> Value {
 // `JsonRpcMessage::wrap(AcpNotif::<AgentNotification> { ... })` helper.
 //
 fn session_notification_to_json(notif: &SessionNotification) -> Result<String> {
-    let untyped = notif.to_untyped_message()
+    let untyped = notif
+        .to_untyped_message()
         .map_err(|e| anyhow::anyhow!("failed to serialize SessionNotification: {}", e))?;
     let params_obj = match untyped.params {
         Value::Object(m) => Some(acp::jsonrpcmsg::Params::Object(m)),
@@ -1040,10 +1042,8 @@ fn session_notification_to_json(notif: &SessionNotification) -> Result<String> {
             Some(acp::jsonrpcmsg::Params::Object(map))
         }
     };
-    let request = acp::jsonrpcmsg::Request::notification_v2(
-        "session/update".to_string(),
-        params_obj,
-    );
+    let request =
+        acp::jsonrpcmsg::Request::notification_v2("session/update".to_string(), params_obj);
     Ok(serde_json::to_string(&request)?)
 }
 

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use common::{
-    InterceptedTrafficEntry, InterceptMethod, InterceptRule, TrafficDirection, TargetDirection, RuleScope,
-    TrafficMatch, TrafficMatchWithDetails,
+    InterceptMethod, InterceptRule, InterceptedTrafficEntry, RuleScope, TargetDirection,
+    TrafficDirection, TrafficMatch, TrafficMatchWithDetails,
 };
 use indexmap::IndexMap;
 use regex::Regex;
@@ -12,7 +12,14 @@ use super::{Database, DatabasePool, MAX_TRAFFIC_QUERY_LIMIT};
 
 impl Database {
     /// Insert a new intercept rule
-    pub async fn insert_rule(&self, name: &str, regex_pattern: &str, target_direction: &TargetDirection, scope: &RuleScope, summarization_prompt: Option<&str>) -> Result<InterceptRule> {
+    pub async fn insert_rule(
+        &self,
+        name: &str,
+        regex_pattern: &str,
+        target_direction: &TargetDirection,
+        scope: &RuleScope,
+        summarization_prompt: Option<&str>,
+    ) -> Result<InterceptRule> {
         let now = Utc::now();
         let (scope_type, scope_node_id, scope_agent) = rule_scope_to_db(scope);
         let target_direction_str = target_direction_to_string(target_direction);
@@ -106,7 +113,9 @@ impl Database {
         }
         if let Some(td) = target_direction {
             updates.push(format!("target_direction = ${}", param_index));
-            bind_values.push(BindValue::String(target_direction_to_string(td).to_string()));
+            bind_values.push(BindValue::String(
+                target_direction_to_string(td).to_string(),
+            ));
             param_index += 1;
         }
         if let Some(s) = scope {
@@ -181,20 +190,14 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 match row {
                     Some(row) => Ok(Some(parse_rule_row_sqlite(&row)?)),
                     None => Ok(None),
                 }
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 match row {
                     Some(row) => Ok(Some(parse_rule_row_postgres(&row)?)),
                     None => Ok(None),
@@ -210,9 +213,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 let mut rules = Vec::new();
                 for row in rows {
                     rules.push(parse_rule_row_sqlite(&row)?);
@@ -220,9 +221,7 @@ impl Database {
                 Ok(rules)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 let mut rules = Vec::new();
                 for row in rows {
                     rules.push(parse_rule_row_postgres(&row)?);
@@ -242,9 +241,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql_sqlite)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql_sqlite).fetch_all(pool).await?;
                 let mut rules = Vec::new();
                 for row in rows {
                     rules.push(parse_rule_row_sqlite(&row)?);
@@ -252,9 +249,7 @@ impl Database {
                 Ok(rules)
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql_postgres)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql_postgres).fetch_all(pool).await?;
                 let mut rules = Vec::new();
                 for row in rows {
                     rules.push(parse_rule_row_postgres(&row)?);
@@ -269,27 +264,28 @@ impl Database {
         let sql = "DELETE FROM intercept_rules WHERE id = $1";
 
         let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(count > 0)
     }
 
     /// Insert a traffic match
-    pub async fn insert_traffic_match(&self, traffic_id: i64, rule_id: i64, summary: Option<&str>) -> Result<i64> {
+    pub async fn insert_traffic_match(
+        &self,
+        traffic_id: i64,
+        rule_id: i64,
+        summary: Option<&str>,
+    ) -> Result<i64> {
         let now = Utc::now();
 
         let sql = "INSERT INTO traffic_matches (traffic_id, rule_id, matched_at, summary) VALUES ($1, $2, $3, $4)";
@@ -327,7 +323,12 @@ impl Database {
     }
 
     /// Query traffic matches with optional rule filter
-    pub async fn query_matches(&self, rule_id: Option<i64>, limit: usize, offset: usize) -> Result<(Vec<TrafficMatchWithDetails>, usize)> {
+    pub async fn query_matches(
+        &self,
+        rule_id: Option<i64>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<TrafficMatchWithDetails>, usize)> {
         let where_clause = if rule_id.is_some() {
             "WHERE m.rule_id = $1"
         } else {
@@ -338,7 +339,8 @@ impl Database {
             "SELECT COUNT(*) FROM traffic_matches m
              JOIN intercepted_traffic t ON m.traffic_id = t.id
              JOIN intercept_rules r ON m.rule_id = r.id
-             {}", where_clause
+             {}",
+            where_clause
         );
 
         let effective_limit = limit.min(MAX_TRAFFIC_QUERY_LIMIT);
@@ -371,15 +373,10 @@ impl Database {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let total_count: i64 = if let Some(rid) = rule_id {
-                    let row = sqlx::query(&count_sql)
-                        .bind(rid)
-                        .fetch_one(pool)
-                        .await?;
+                    let row = sqlx::query(&count_sql).bind(rid).fetch_one(pool).await?;
                     row.get(0)
                 } else {
-                    let row = sqlx::query(&count_sql)
-                        .fetch_one(pool)
-                        .await?;
+                    let row = sqlx::query(&count_sql).fetch_one(pool).await?;
                     row.get(0)
                 };
 
@@ -406,15 +403,10 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 let total_count: i64 = if let Some(rid) = rule_id {
-                    let row = sqlx::query(&count_sql)
-                        .bind(rid)
-                        .fetch_one(pool)
-                        .await?;
+                    let row = sqlx::query(&count_sql).bind(rid).fetch_one(pool).await?;
                     row.get(0)
                 } else {
-                    let row = sqlx::query(&count_sql)
-                        .fetch_one(pool)
-                        .await?;
+                    let row = sqlx::query(&count_sql).fetch_one(pool).await?;
                     row.get(0)
                 };
 
@@ -444,7 +436,11 @@ impl Database {
 
     /// Check traffic against all enabled rules and insert matches
     /// Returns a list of (match_id, rule) for matches that were created
-    pub async fn check_and_insert_matches(&self, traffic_id: i64, entry: &InterceptedTrafficEntry) -> Result<Vec<(i64, InterceptRule)>> {
+    pub async fn check_and_insert_matches(
+        &self,
+        traffic_id: i64,
+        entry: &InterceptedTrafficEntry,
+    ) -> Result<Vec<(i64, InterceptRule)>> {
         let rules = self.list_enabled_rules().await?;
         let mut matches = Vec::new();
 
@@ -555,7 +551,9 @@ fn parse_rule_row_postgres(row: &sqlx::postgres::PgRow) -> Result<InterceptRule>
     })
 }
 
-fn parse_match_with_traffic_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<TrafficMatchWithDetails> {
+fn parse_match_with_traffic_row_sqlite(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<TrafficMatchWithDetails> {
     let match_id: i64 = row.get(0);
     let traffic_id: i64 = row.get(1);
     let rule_id: i64 = row.get(2);
@@ -583,15 +581,16 @@ fn parse_match_with_traffic_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<
     let response_headers_json: Option<String> = row.get(18);
     let response_body: Option<Vec<u8>> = row.get(19);
 
-    let intercept_method = intercept_method_str.parse::<InterceptMethod>()
+    let intercept_method = intercept_method_str
+        .parse::<InterceptMethod>()
         .unwrap_or(InterceptMethod::Proxy);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?.with_timezone(&Utc);
 
-    let request_headers: Option<IndexMap<String, String>> = request_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
-    let response_headers: Option<IndexMap<String, String>> = response_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
+    let request_headers: Option<IndexMap<String, String>> =
+        request_headers_json.and_then(|j| serde_json::from_str(&j).ok());
+    let response_headers: Option<IndexMap<String, String>> =
+        response_headers_json.and_then(|j| serde_json::from_str(&j).ok());
 
     Ok(TrafficMatchWithDetails {
         match_info: TrafficMatch {
@@ -621,7 +620,9 @@ fn parse_match_with_traffic_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<
     })
 }
 
-fn parse_match_with_traffic_row_postgres(row: &sqlx::postgres::PgRow) -> Result<TrafficMatchWithDetails> {
+fn parse_match_with_traffic_row_postgres(
+    row: &sqlx::postgres::PgRow,
+) -> Result<TrafficMatchWithDetails> {
     let match_id: i64 = row.get(0);
     let traffic_id: i64 = row.get(1);
     let rule_id: i64 = row.get(2);
@@ -649,15 +650,16 @@ fn parse_match_with_traffic_row_postgres(row: &sqlx::postgres::PgRow) -> Result<
     let response_headers_json: Option<String> = row.get(18);
     let response_body: Option<Vec<u8>> = row.get(19);
 
-    let intercept_method = intercept_method_str.parse::<InterceptMethod>()
+    let intercept_method = intercept_method_str
+        .parse::<InterceptMethod>()
         .unwrap_or(InterceptMethod::Proxy);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)?.with_timezone(&Utc);
 
-    let request_headers: Option<IndexMap<String, String>> = request_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
-    let response_headers: Option<IndexMap<String, String>> = response_headers_json
-        .and_then(|j| serde_json::from_str(&j).ok());
+    let request_headers: Option<IndexMap<String, String>> =
+        request_headers_json.and_then(|j| serde_json::from_str(&j).ok());
+    let response_headers: Option<IndexMap<String, String>> =
+        response_headers_json.and_then(|j| serde_json::from_str(&j).ok());
 
     Ok(TrafficMatchWithDetails {
         match_info: TrafficMatch {
@@ -702,8 +704,12 @@ fn rule_matches_traffic(rule: &InterceptRule, entry: &InterceptedTrafficEntry) -
     //
     match &rule.scope {
         RuleScope::Node { node_id } if entry.node_id != *node_id => return false,
-        RuleScope::Agent { node_id, agent_short_name }
-            if entry.node_id != *node_id || entry.agent_short_name != *agent_short_name => return false,
+        RuleScope::Agent {
+            node_id,
+            agent_short_name,
+        } if entry.node_id != *node_id || entry.agent_short_name != *agent_short_name => {
+            return false;
+        }
         _ => {}
     }
 
@@ -790,13 +796,22 @@ fn rule_scope_to_db(scope: &RuleScope) -> (String, Option<String>, Option<String
     match scope {
         RuleScope::All => ("all".to_string(), None, None),
         RuleScope::Node { node_id } => ("node".to_string(), Some(node_id.clone()), None),
-        RuleScope::Agent { node_id, agent_short_name } => {
-            ("agent".to_string(), Some(node_id.clone()), Some(agent_short_name.clone()))
-        }
+        RuleScope::Agent {
+            node_id,
+            agent_short_name,
+        } => (
+            "agent".to_string(),
+            Some(node_id.clone()),
+            Some(agent_short_name.clone()),
+        ),
     }
 }
 
-fn db_to_rule_scope(scope_type: &str, scope_node_id: Option<String>, scope_agent: Option<String>) -> RuleScope {
+fn db_to_rule_scope(
+    scope_type: &str,
+    scope_node_id: Option<String>,
+    scope_agent: Option<String>,
+) -> RuleScope {
     match scope_type {
         "node" => RuleScope::Node {
             node_id: scope_node_id.unwrap_or_default(),

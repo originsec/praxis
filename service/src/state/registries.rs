@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use common::{NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, NodeStatus, SystemState};
+use common::{
+    NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, NodeStatus, SystemState,
+};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -63,10 +65,7 @@ impl NodeRegistry {
 
         let mut agents = self.agents.write().await;
         agents.insert(node.id.clone(), node.clone());
-        common::log_info!(
-            "Registered node: {} ({})",
-            node.id, node.node_type
-        );
+        common::log_info!("Registered node: {} ({})", node.id, node.node_type);
 
         node
     }
@@ -106,7 +105,8 @@ impl NodeRegistry {
         agents.insert(node.id.clone(), node.clone());
         common::log_info!(
             "Registered synthetic node: {} ({})",
-            node.id, node.node_type
+            node.id,
+            node.node_type
         );
 
         node
@@ -220,25 +220,30 @@ impl NodeRegistry {
     pub async fn build_system_state(&self) -> SystemState {
         let now = Utc::now();
         let agents = self.agents.read().await;
-        let nodes: Vec<NodeState> = agents.values().map(|node| {
-            let update = node.last_update.as_ref();
-            let age_seconds = (now - node.last_update_received).num_seconds();
-            NodeState {
-                node_id: node.id.clone(),
-                node_type: node.node_type.clone(),
-                capabilities: node.capabilities.clone(),
-                machine_name: node.machine_name.clone(),
-                os_details: node.os_details.clone(),
-                discovered_agents: update.map(|u| u.discovered_agents.clone()).unwrap_or_default(),
-                selected_agent: update.and_then(|u| u.selected_agent.clone()),
-                intercept_active: node.intercept_active,
-                intercept_supported: node.intercept_supported,
-                last_update: node.last_update_received,
-                status: NodeStatus::from_age_seconds(age_seconds),
-                active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
-                privileged: node.privileged,
-            }
-        }).collect();
+        let nodes: Vec<NodeState> = agents
+            .values()
+            .map(|node| {
+                let update = node.last_update.as_ref();
+                let age_seconds = (now - node.last_update_received).num_seconds();
+                NodeState {
+                    node_id: node.id.clone(),
+                    node_type: node.node_type.clone(),
+                    capabilities: node.capabilities.clone(),
+                    machine_name: node.machine_name.clone(),
+                    os_details: node.os_details.clone(),
+                    discovered_agents: update
+                        .map(|u| u.discovered_agents.clone())
+                        .unwrap_or_default(),
+                    selected_agent: update.and_then(|u| u.selected_agent.clone()),
+                    intercept_active: node.intercept_active,
+                    intercept_supported: node.intercept_supported,
+                    last_update: node.last_update_received,
+                    status: NodeStatus::from_age_seconds(age_seconds),
+                    active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
+                    privileged: node.privileged,
+                }
+            })
+            .collect();
 
         SystemState {
             timestamp: Utc::now(),
@@ -269,10 +274,13 @@ impl PendingCommands {
 
     pub async fn add(&self, command_id: String, client_id: String) {
         let mut commands = self.commands.write().await;
-        commands.insert(command_id, PendingCommand {
-            client_id,
-            sent_at: Utc::now(),
-        });
+        commands.insert(
+            command_id,
+            PendingCommand {
+                client_id,
+                sent_at: Utc::now(),
+            },
+        );
     }
 
     pub async fn remove(&self, command_id: &str) -> Option<PendingCommand> {

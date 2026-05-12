@@ -17,17 +17,11 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(key)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(key).fetch_optional(pool).await?;
                 Ok(row.map(|r| r.get(0)))
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(key)
-                    .fetch_optional(pool)
-                    .await?;
+                let row = sqlx::query(sql).bind(key).fetch_optional(pool).await?;
                 Ok(row.map(|r| r.get(0)))
             }
         }
@@ -71,20 +65,16 @@ impl Database {
         let sql = "DELETE FROM service_config WHERE key = $1";
 
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .execute(pool)
-                    .await?
-                    .rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(key)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(key)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(rows_affected > 0)
@@ -98,9 +88,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 for row in rows {
                     let key: String = row.get(0);
                     let value: String = row.get(1);
@@ -108,9 +96,7 @@ impl Database {
                 }
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
                 for row in rows {
                     let key: String = row.get(0);
                     let value: String = row.get(1);

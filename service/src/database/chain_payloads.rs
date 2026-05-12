@@ -36,9 +36,19 @@ impl Database {
         let payloads = rows
             .into_iter()
             .filter_map(|(id, shortname, content, created_at, updated_at)| {
-                let created = chrono::DateTime::parse_from_rfc3339(&created_at).ok()?.with_timezone(&Utc);
-                let updated = chrono::DateTime::parse_from_rfc3339(&updated_at).ok()?.with_timezone(&Utc);
-                Some(PayloadRecord { id, shortname, content, created_at: created, updated_at: updated })
+                let created = chrono::DateTime::parse_from_rfc3339(&created_at)
+                    .ok()?
+                    .with_timezone(&Utc);
+                let updated = chrono::DateTime::parse_from_rfc3339(&updated_at)
+                    .ok()?
+                    .with_timezone(&Utc);
+                Some(PayloadRecord {
+                    id,
+                    shortname,
+                    content,
+                    created_at: created,
+                    updated_at: updated,
+                })
             })
             .collect();
 
@@ -49,27 +59,31 @@ impl Database {
         let sql = "SELECT id, shortname, content, created_at, updated_at FROM chain_payloads WHERE id = $1";
 
         let row_opt: Option<(String, String, String, String, String)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?
-                    .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await?
-                    .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+                .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+                .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))),
         };
 
         match row_opt {
             Some((id, shortname, content, created_at, updated_at)) => {
-                let created = chrono::DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc);
-                let updated = chrono::DateTime::parse_from_rfc3339(&updated_at)?.with_timezone(&Utc);
-                Ok(Some(PayloadRecord { id, shortname, content, created_at: created, updated_at: updated }))
+                let created =
+                    chrono::DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&Utc);
+                let updated =
+                    chrono::DateTime::parse_from_rfc3339(&updated_at)?.with_timezone(&Utc);
+                Ok(Some(PayloadRecord {
+                    id,
+                    shortname,
+                    content,
+                    created_at: created,
+                    updated_at: updated,
+                }))
             }
             None => Ok(None),
         }
@@ -116,12 +130,16 @@ impl Database {
         let sql = "DELETE FROM chain_payloads WHERE id = $1";
 
         let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?.rows_affected()
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?.rows_affected()
-            }
+            DatabasePool::Sqlite(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            DatabasePool::Postgres(pool) => sqlx::query(sql)
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
         };
 
         Ok(rows_affected > 0)

@@ -75,9 +75,7 @@ impl FileConfig {
                 //
                 // Unescape newlines and backslashes.
                 //
-                let unescaped_value = value.trim()
-                    .replace("\\n", "\n")
-                    .replace("\\\\", "\\");
+                let unescaped_value = value.trim().replace("\\n", "\n").replace("\\\\", "\\");
                 config.insert(key.trim().to_string(), unescaped_value);
             }
         }
@@ -102,9 +100,7 @@ impl FileConfig {
                 //
                 // Escape backslashes first, then newlines.
                 //
-                let escaped_value = value
-                    .replace('\\', "\\\\")
-                    .replace('\n', "\\n");
+                let escaped_value = value.replace('\\', "\\\\").replace('\n', "\\n");
                 format!("{}={}", key, escaped_value)
             })
             .collect();
@@ -325,7 +321,11 @@ mod tests {
         //
         // Write config with comments.
         //
-        fs::write(&temp_path, "# This is a comment\nkey1=value1\n\n# Another comment\nkey2=value2\n").unwrap();
+        fs::write(
+            &temp_path,
+            "# This is a comment\nkey1=value1\n\n# Another comment\nkey2=value2\n",
+        )
+        .unwrap();
 
         //
         // Load and verify.
@@ -362,9 +362,15 @@ mod tests {
         {
             let mut config = FileConfig::new(temp_path.clone());
             config.load().unwrap();
-            assert_eq!(config.get("prompt"), Some(&"Line 1\nLine 2\nLine 3".to_string()));
+            assert_eq!(
+                config.get("prompt"),
+                Some(&"Line 1\nLine 2\nLine 3".to_string())
+            );
             assert_eq!(config.get("normal"), Some(&"single line".to_string()));
-            assert_eq!(config.get("with_backslash"), Some(&"path\\to\\file".to_string()));
+            assert_eq!(
+                config.get("with_backslash"),
+                Some(&"path\\to\\file".to_string())
+            );
         }
 
         //

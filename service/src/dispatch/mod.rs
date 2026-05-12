@@ -7,24 +7,24 @@ pub mod client;
 pub mod node;
 pub mod traffic_broadcast;
 
+use lapin::Channel;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use lapin::Channel;
 
+use crate::acp_node_proxy::AcpNodeProxy;
+use crate::acp_server::AcpServer;
 use crate::agent_chat::AgentChatManager;
-use traffic_broadcast::InterceptBroadcaster;
-use crate::remote_nodes::RemoteNodeManager;
+use crate::claude_bridge::{CcrV1Manager, CcrV2Manager};
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
-use crate::claude_bridge::{CcrV1Manager, CcrV2Manager};
 use crate::mcp::McpServerManager;
-use crate::acp_node_proxy::AcpNodeProxy;
-use crate::acp_server::AcpServer;
+use crate::remote_nodes::RemoteNodeManager;
 use crate::semantic_ops::{ChainExecutor, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 use crate::tools::ToolkitManager;
 use crate::trigger_engine::TriggerEngine;
+use traffic_broadcast::InterceptBroadcaster;
 
 //
 // ServiceContext holds all the shared state needed by message handlers.

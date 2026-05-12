@@ -101,7 +101,10 @@ impl ExecutionGraph {
                 group_id,
                 sg.color,
                 sg.yolo_mode,
-                element_ids.iter().map(|id| common::short_id(id)).collect::<Vec<_>>()
+                element_ids
+                    .iter()
+                    .map(|id| common::short_id(id))
+                    .collect::<Vec<_>>()
             );
         }
 
@@ -520,7 +523,6 @@ mod tests {
 
     #[test]
     fn test_loop_element_valid() {
-
         //
         // Valid cycle: Op -> Loop -> Op (via port 0), Loop -> Op2 (via
         // port 1) -> Termination.
@@ -871,9 +873,11 @@ mod tests {
 
         let result = ExecutionGraph::from_chain(&chain);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("must have exactly one termination element"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("must have exactly one termination element")
+        );
     }
 
     #[test]
@@ -914,9 +918,7 @@ mod tests {
 
         let result = ExecutionGraph::from_chain(&chain);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("max_iterations must be >= 1"));
+        assert!(result.unwrap_err().contains("max_iterations must be >= 1"));
     }
 
     #[test]

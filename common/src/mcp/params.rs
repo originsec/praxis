@@ -20,7 +20,9 @@ pub struct SessionCreateParams {
     #[schemars(description = "Node ID prefix")]
     pub node: String,
 
-    #[schemars(description = "Agent short name (e.g. 'claude-code', 'codex'). ACP sessions are per-agent; each session is bound to the agent it was created with.")]
+    #[schemars(
+        description = "Agent short name (e.g. 'claude-code', 'codex'). ACP sessions are per-agent; each session is bound to the agent it was created with."
+    )]
     pub agent: String,
 
     #[schemars(description = "Enable YOLO mode (agent auto-approves actions)")]
@@ -80,7 +82,9 @@ pub struct ReconListParams {
     #[schemars(description = "Agent short name")]
     pub agent: String,
 
-    #[schemars(description = "Section to list: all, sessions, tools, projects, configs (default: all)")]
+    #[schemars(
+        description = "Section to list: all, sessions, tools, projects, configs (default: all)"
+    )]
     pub section: Option<String>,
 }
 
@@ -110,7 +114,9 @@ pub struct ReconGrepParams {
     #[schemars(description = "Regex pattern to search for")]
     pub pattern: String,
 
-    #[schemars(description = "File path(s) to grep. Supports glob patterns (e.g. '/etc/*.conf'). Omit to grep all files from recon.")]
+    #[schemars(
+        description = "File path(s) to grep. Supports glob patterns (e.g. '/etc/*.conf'). Omit to grep all files from recon."
+    )]
     pub paths: Option<Vec<String>>,
 }
 
@@ -159,7 +165,9 @@ pub struct OpCreateParams {
     #[schemars(description = "Display name for the operation")]
     pub name: String,
 
-    #[schemars(description = "Short name identifier (lowercase, no spaces). Combined with category to form the full name: category::short_name")]
+    #[schemars(
+        description = "Short name identifier (lowercase, no spaces). Combined with category to form the full name: category::short_name"
+    )]
     pub short_name: String,
 
     #[schemars(description = "Category for the operation (e.g. 'recon', 'exfil', 'custom')")]
@@ -171,11 +179,15 @@ pub struct OpCreateParams {
     #[schemars(description = "The prompt to send to the remote agent")]
     pub operation_prompt: String,
 
-    #[schemars(description = "Execution mode: 'one-shot' (single prompt/response) or 'agent' (iterative LLM-driven orchestration with multiple rounds). Default: 'one-shot'")]
+    #[schemars(
+        description = "Execution mode: 'one-shot' (single prompt/response) or 'agent' (iterative LLM-driven orchestration with multiple rounds). Default: 'one-shot'"
+    )]
     #[serde(default = "default_mode")]
     pub mode: String,
 
-    #[schemars(description = "Contextual information to enrich the semantic agent's understanding (agent mode only)")]
+    #[schemars(
+        description = "Contextual information to enrich the semantic agent's understanding (agent mode only)"
+    )]
     #[serde(default)]
     pub agent_info: String,
 
@@ -206,6 +218,8 @@ fn default_agent_iterations() -> u32 {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OpDeleteParams {
-    #[schemars(description = "Full name (category::short_name), short_name, or display name of the operation to delete")]
+    #[schemars(
+        description = "Full name (category::short_name), short_name, or display name of the operation to delete"
+    )]
     pub name: String,
 }

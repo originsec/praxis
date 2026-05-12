@@ -1,14 +1,14 @@
-pub mod manager;
-pub mod executor;
 pub mod chain_execution;
+pub mod executor;
+pub mod manager;
 
-pub use manager::SemanticOpsManager;
+pub use chain_execution::ChainExecutor;
 #[allow(unused_imports)]
 pub use executor::{
     cancel_session_prompt, close_session, create_session, execute_agent_mode, execute_by_mode,
     execute_one_shot,
 };
-pub use chain_execution::ChainExecutor;
+pub use manager::SemanticOpsManager;
 
 //
 // Sentinel error returned by executors when an operation is cancelled.

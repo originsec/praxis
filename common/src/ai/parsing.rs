@@ -187,7 +187,8 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let (result, success) = match parsed.get("result").and_then(|v| v.as_bool()) {
+                        let (result, success) = match parsed.get("result").and_then(|v| v.as_bool())
+                        {
                             Some(true) => ("success".to_string(), Some(true)),
                             Some(false) => ("failure".to_string(), Some(false)),
                             None => ("".to_string(), None),
@@ -315,7 +316,10 @@ This will help me understand."#;
 "#;
 
         let result = parse_manual_tool_call(text);
-        assert!(result.is_some(), "Should parse tool call with nested braces in string");
+        assert!(
+            result.is_some(),
+            "Should parse tool call with nested braces in string"
+        );
 
         let (tool_name, args, _remaining) = result.unwrap();
         assert_eq!(tool_name, "session_prompt");
@@ -369,14 +373,18 @@ The operation is now finished."#;
 
         let (is_complete, summary, result_text, _remaining, success) = result.unwrap();
         assert!(is_complete);
-        assert_eq!(summary, "Could not reach target host, connection refused on all ports");
+        assert_eq!(
+            summary,
+            "Could not reach target host, connection refused on all ports"
+        );
         assert_eq!(result_text, "failure");
         assert_eq!(success, Some(false));
     }
 
     #[test]
     fn test_parse_completion_signal_false() {
-        let text = r#"Not done yet: {"complete": false, "result": true, "summary": "Still working"}"#;
+        let text =
+            r#"Not done yet: {"complete": false, "result": true, "summary": "Still working"}"#;
 
         let result = parse_completion_signal(text);
         assert!(result.is_some());

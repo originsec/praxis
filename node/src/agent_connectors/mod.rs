@@ -21,4 +21,4 @@ pub use factory::AgentFactory;
 pub use registry::AgentRegistry;
 pub use traits::Agent;
 #[allow(unused_imports)]
-pub use traits::{AgentMode, AgentSession};
+pub use traits::{AgentMode, AgentSession, SessionTransactContext};

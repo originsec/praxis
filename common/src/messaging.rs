@@ -1,12 +1,10 @@
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use uuid::Uuid;
-use lapin::{
-    BasicProperties, Channel, PublisherConfirm, options::BasicPublishOptions,
-};
+use lapin::{BasicProperties, Channel, PublisherConfirm, options::BasicPublishOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 /// Node signal queue - nodes send messages here
 pub const NODE_SIGNAL_QUEUE: &str = "NodeSignal";
@@ -105,7 +103,12 @@ pub async fn publish_terminal_command_with_id(
         node_id: node_id.to_string(),
         command: NodeCommand::Terminal(cmd),
     };
-    publish_json(channel, CLIENT_SIGNAL_QUEUE, &ClientSignalMessage::Command(request)).await?;
+    publish_json(
+        channel,
+        CLIENT_SIGNAL_QUEUE,
+        &ClientSignalMessage::Command(request),
+    )
+    .await?;
     Ok(())
 }
 
@@ -864,9 +867,7 @@ pub enum NodeCommandResult {
     Terminal(TerminalCommandResult),
     Config(ConfigCommandResult),
     AgentRegistry(AgentRegistryCommandResult),
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Command response sent from node to server (and relayed to client)
@@ -1072,10 +1073,7 @@ pub enum ChainElement {
         mode: MemoryMode,
     },
     /// Loop element - retries via port 0 until max_iterations, then exits via port 1
-    Loop {
-        id: String,
-        max_iterations: u32,
-    },
+    Loop { id: String, max_iterations: u32 },
     /// Tool element - invokes a registered toolkit tool
     Tool {
         id: String,
@@ -1212,7 +1210,9 @@ pub enum ElementExecutionStatus {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         success: Option<bool>,
     },
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
     Skipped,
 }
 
@@ -1243,23 +1243,16 @@ pub enum ElementConfig {
         prompt: String,
     },
     /// Memory element config (store or retrieve)
-    Memory {
-        key: String,
-        mode: MemoryMode,
-    },
+    Memory { key: String, mode: MemoryMode },
     /// Loop element config
-    Loop {
-        max_iterations: u32,
-    },
+    Loop { max_iterations: u32 },
     /// Tool element config
     Tool {
         tool_name: String,
         tool_params: serde_json::Value,
     },
     /// Payload element config
-    Payload {
-        payload_id: String,
-    },
+    Payload { payload_id: String },
     /// Termination element config
     Termination,
 }
@@ -1326,8 +1319,13 @@ pub enum ScheduleSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TriggerConfig {
-    Scheduled { schedule: ScheduleSpec, recurring: bool },
-    InterceptMatch { rule_id: i64 },
+    Scheduled {
+        schedule: ScheduleSpec,
+        recurring: bool,
+    },
+    InterceptMatch {
+        rule_id: i64,
+    },
     NewNode,
 }
 
@@ -2020,7 +2018,10 @@ pub enum ClientSignalMessage {
     // Orchestrator - ACP-based LLM tool-calling orchestration.
     //
     /// ACP JSON-RPC message from client to service
-    AcpMessage { client_id: String, json_rpc: String },
+    AcpMessage {
+        client_id: String,
+        json_rpc: String,
+    },
 
     //
     // AgentChat - IRC-style multi-agent chat.
@@ -2081,7 +2082,6 @@ pub enum ClientSignalMessage {
         client_id: String,
         session_id: Option<String>,
     },
-
 }
 
 /// Messages broadcast from server to all clients via CLIENT_BROADCAST_EXCHANGE
@@ -2410,7 +2410,9 @@ pub enum ClientDirectMessage {
     // Orchestrator responses.
     //
     /// ACP JSON-RPC message from service to client
-    AcpMessage { json_rpc: String },
+    AcpMessage {
+        json_rpc: String,
+    },
 
     //
     // AgentChat responses.
