@@ -55,16 +55,75 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
         return;
     }
 
-    let lines_per_session = 3;
-    let visible_items = (inner.height as usize / lines_per_session).max(1);
-    let scroll_offset = if overlay.selected_left >= visible_items {
-        overlay.selected_left.saturating_sub(visible_items - 1)
-    } else {
-        0
+    //
+    // Items have variable height (1–3 logical lines) and content like
+    // context_path can wrap at narrow widths, so a fixed lines_per_session is
+    // wrong. Use Paragraph::line_count for exact wrapped heights, then pick the
+    // largest scroll_offset such that the selected item still fits.
+    //
+
+    let inner_h = inner.height as usize;
+
+    let short_id = |session: &common::SessionItem| -> String {
+        let total = session.session_id.chars().count();
+        if total > 12 {
+            let prefix: String = session.session_id.chars().take(12).collect();
+            format!("{}…", prefix)
+        } else {
+            session.session_id.clone()
+        }
     };
 
+    let session_lines = |session: &common::SessionItem| -> Vec<Line<'static>> {
+        let mut out = Vec::with_capacity(3);
+        out.push(Line::from(vec![
+            Span::raw("  "),
+            Span::raw(short_id(session)),
+            Span::raw(format!("  {} msgs", session.message_count)),
+        ]));
+        if !session.context_path.is_empty() {
+            out.push(Line::from(vec![
+                Span::raw("    "),
+                Span::raw(session.context_path.clone()),
+            ]));
+        }
+        if !session.last_modified.is_empty() {
+            out.push(Line::from(vec![
+                Span::raw("    "),
+                Span::raw(session.last_modified.clone()),
+            ]));
+        }
+        out
+    };
+
+    let item_height = |session: &common::SessionItem| -> usize {
+        Paragraph::new(session_lines(session))
+            .wrap(Wrap { trim: false })
+            .line_count(inner.width)
+    };
+
+    let selected = overlay
+        .selected_left
+        .min(result.sessions.items.len().saturating_sub(1));
+
+    let mut scroll_offset = selected;
+    let mut consumed = item_height(&result.sessions.items[selected]);
+    while scroll_offset > 0 {
+        let prev = scroll_offset - 1;
+        let h = item_height(&result.sessions.items[prev]);
+        if consumed + h > inner_h {
+            break;
+        }
+        consumed += h;
+        scroll_offset = prev;
+    }
+
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, session) in result.sessions.items.iter().enumerate().skip(scroll_offset).take(visible_items) {
+    let mut rendered_rows: usize = 0;
+    for (idx, session) in result.sessions.items.iter().enumerate().skip(scroll_offset) {
+        if rendered_rows >= inner_h {
+            break;
+        }
         let is_selected = overlay.active_tab == ReconTab::Sessions && overlay.selected_left == idx;
 
         let mut id_style = Style::default().fg(TEXT_BRIGHT);
@@ -77,15 +136,10 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
         }
 
         let prefix = if is_selected { "\u{276f} " } else { "  " };
-        let short_id = if session.session_id.len() > 12 {
-            format!("{}…", &session.session_id[..12])
-        } else {
-            session.session_id.clone()
-        };
 
         lines.push(Line::from(vec![
             Span::styled(prefix.to_string(), prefix_style),
-            Span::styled(short_id, id_style),
+            Span::styled(short_id(session), id_style),
             Span::styled(format!("  {} msgs", session.message_count), meta_style),
         ]));
         if !session.context_path.is_empty() {
@@ -100,6 +154,7 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
                 Span::styled(session.last_modified.clone(), meta_style),
             ]));
         }
+        rendered_rows += item_height(session);
     }
 
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);

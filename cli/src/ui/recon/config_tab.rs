@@ -55,15 +55,62 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
         return;
     }
 
-    let visible_items = (inner.height as usize / 2).max(1);
-    let scroll_offset = if overlay.selected_left >= visible_items {
-        overlay.selected_left.saturating_sub(visible_items - 1)
-    } else {
-        0
+    //
+    // Each item renders as two logical lines (path + type), but either can wrap
+    // depending on inner.width, so a fixed "2 rows per item" assumption is wrong
+    // and lets the selection walk off-screen. Use Paragraph::line_count to get
+    // exact wrapped heights, then pick the largest scroll_offset such that the
+    // selected item still fits.
+    //
+
+    let inner_h = inner.height as usize;
+
+    let path_display = |item: &common::ConfigItem| -> String {
+        let total = item.path.chars().count();
+        if total > 40 {
+            let skip = total - 39;
+            let suffix: String = item.path.chars().skip(skip).collect();
+            format!("…{}", suffix)
+        } else {
+            item.path.clone()
+        }
     };
 
+    let item_height = |item: &common::ConfigItem| -> usize {
+        let lines = vec![
+            Line::from(vec![Span::raw("  "), Span::raw(path_display(item))]),
+            Line::from(vec![
+                Span::raw("    "),
+                Span::raw(format!("[{}]", item.config_type)),
+            ]),
+        ];
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .line_count(inner.width)
+    };
+
+    let selected = overlay
+        .selected_left
+        .min(result.config.items.len().saturating_sub(1));
+
+    let mut scroll_offset = selected;
+    let mut consumed = item_height(&result.config.items[selected]);
+    while scroll_offset > 0 {
+        let prev = scroll_offset - 1;
+        let h = item_height(&result.config.items[prev]);
+        if consumed + h > inner_h {
+            break;
+        }
+        consumed += h;
+        scroll_offset = prev;
+    }
+
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, item) in result.config.items.iter().enumerate().skip(scroll_offset).take(visible_items) {
+    let mut rendered_rows: usize = 0;
+    for (idx, item) in result.config.items.iter().enumerate().skip(scroll_offset) {
+        if rendered_rows >= inner_h {
+            break;
+        }
         let is_selected = overlay.active_tab == ReconTab::Config && overlay.selected_left == idx;
 
         let mut name_style = Style::default().fg(TEXT_BRIGHT);
@@ -78,20 +125,16 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
         }
 
         let prefix = if is_selected { "\u{276f} " } else { "  " };
-        let path_display = if item.path.len() > 40 {
-            format!("…{}", &item.path[item.path.len().saturating_sub(39)..])
-        } else {
-            item.path.clone()
-        };
 
         lines.push(Line::from(vec![
             Span::styled(prefix.to_string(), prefix_style),
-            Span::styled(path_display, name_style),
+            Span::styled(path_display(item), name_style),
         ]));
         lines.push(Line::from(vec![
             Span::styled("    ", path_style),
             Span::styled(format!("[{}]", item.config_type), type_style),
         ]));
+        rendered_rows += item_height(item);
     }
 
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
