@@ -1211,7 +1211,17 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
         cmd.env(k, v);
     }
 
-    let pid_cell = get_handle_pid_cell(handle);
+    let (handle_key, anonymous, pid_cell) = get_handle_pid_cell(handle);
+
+    //
+    // Anonymous (per-invocation) handles are only needed in the registry
+    // while the command runs, so reset can kill the process tree. Remove
+    // them on every exit path; named handles persist so Lua can abort them
+    // across calls.
+    //
+    let _handle_guard = HandleGuard {
+        key: anonymous.then_some(handle_key),
+    };
 
     use std::process::Stdio;
 
@@ -1533,12 +1543,32 @@ pub fn release_desktop_handle(id: &str) {
     }
 }
 
-fn get_handle_pid_cell(handle: Option<String>) -> Arc<AtomicU32> {
+fn get_handle_pid_cell(handle: Option<String>) -> (String, bool, Arc<AtomicU32>) {
+    let anonymous = handle.is_none();
     let handle = handle.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let mut map = COMMAND_HANDLES.lock_safe();
-    map.entry(handle)
+    let cell = map
+        .entry(handle.clone())
         .or_insert_with(|| Arc::new(AtomicU32::new(0)))
-        .clone()
+        .clone();
+    (handle, anonymous, cell)
+}
+
+//
+// Removes an anonymous command handle from the registry when the command
+// finishes, whatever the exit path (success, timeout, reset, spawn error).
+//
+
+struct HandleGuard {
+    key: Option<String>,
+}
+
+impl Drop for HandleGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            COMMAND_HANDLES.lock_safe().remove(&key);
+        }
+    }
 }
 
 fn abort_handle(handle: &str) -> bool {
