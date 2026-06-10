@@ -123,6 +123,23 @@ Individual tools discovered during reconnaissance (MCP tools, skills, internal t
 | tool_description | Tool description |
 | transport | MCP transport type (null for skills/internal) |
 
+### ToolkitActionsLog
+
+Toolkit tool execution history.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the action was executed |
+| id | Action ID |
+| execution_id | Execution identifier |
+| tool_name | Tool name |
+| action | Action performed |
+| status | Action status |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| session_id | Session identifier |
+| details_json | Action details as JSON |
+
 ### TrafficLogs
 
 Intercepted HTTP traffic stored in the database.

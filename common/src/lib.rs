@@ -3,6 +3,7 @@ pub mod ai;
 pub mod client_transport;
 pub mod config;
 pub mod id;
+pub mod log_query_schema;
 pub mod logging;
 pub mod mcp;
 pub mod messaging;

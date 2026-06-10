@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use common::ai::{create_ai_client, AiClient, ChatCompletionRequest, Message};
+use anyhow::{Result, anyhow};
+use common::ai::{AiClient, ChatCompletionRequest, Message, create_ai_client};
 use tracing::{error, info, warn};
 
 use crate::config::ParserConfig;
@@ -75,10 +75,7 @@ impl SemanticParser {
         for attempt in 1..=self.max_retries {
             info!("Semantic parser attempt {}/{}", attempt, self.max_retries);
 
-            let messages = vec![
-                Message::system(SYSTEM_PROMPT),
-                Message::user(user_prompt),
-            ];
+            let messages = vec![Message::system(SYSTEM_PROMPT), Message::user(user_prompt)];
 
             let request = ChatCompletionRequest::new(self.model.clone(), messages)
                 .with_max_tokens(self.max_tokens);

@@ -20,6 +20,23 @@ pub enum VirtualTable {
 }
 
 impl VirtualTable {
+    /// Canonical table name, matching `common::log_query_schema::TABLES`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            VirtualTable::TrafficLogs => "TrafficLogs",
+            VirtualTable::TrafficMatchLogs => "TrafficMatchLogs",
+            VirtualTable::NodeLogs => "NodeLogs",
+            VirtualTable::AgentLogs => "AgentLogs",
+            VirtualTable::ReconLogs => "ReconLogs",
+            VirtualTable::ReconToolLogs => "ReconToolLogs",
+            VirtualTable::ReconSessionLogs => "ReconSessionLogs",
+            VirtualTable::EventLogs => "EventLogs",
+            VirtualTable::ToolkitActionsLog => "ToolkitActionsLog",
+            VirtualTable::SemanticOperationLogs => "SemanticOperationLogs",
+            VirtualTable::SemanticOperationChainLogs => "SemanticOperationChainLogs",
+        }
+    }
+
     #[allow(dead_code)]
     pub fn is_db_backed(&self) -> bool {
         matches!(
@@ -37,146 +54,90 @@ impl VirtualTable {
     }
 }
 
+pub const ALL_TABLES: &[VirtualTable] = &[
+    VirtualTable::TrafficLogs,
+    VirtualTable::TrafficMatchLogs,
+    VirtualTable::NodeLogs,
+    VirtualTable::AgentLogs,
+    VirtualTable::ReconLogs,
+    VirtualTable::ReconToolLogs,
+    VirtualTable::ReconSessionLogs,
+    VirtualTable::EventLogs,
+    VirtualTable::ToolkitActionsLog,
+    VirtualTable::SemanticOperationLogs,
+    VirtualTable::SemanticOperationChainLogs,
+];
+
 pub fn resolve_table(name: &str) -> Option<VirtualTable> {
-    match name.to_lowercase().as_str() {
-        "trafficlogs" => Some(VirtualTable::TrafficLogs),
-        "trafficmatchlogs" => Some(VirtualTable::TrafficMatchLogs),
-        "nodelogs" => Some(VirtualTable::NodeLogs),
-        "agentlogs" => Some(VirtualTable::AgentLogs),
-        "reconlogs" => Some(VirtualTable::ReconLogs),
-        "recontoollogs" => Some(VirtualTable::ReconToolLogs),
-        "reconsessionlogs" => Some(VirtualTable::ReconSessionLogs),
-        "eventlogs" => Some(VirtualTable::EventLogs),
-        "toolkitactionslog" => Some(VirtualTable::ToolkitActionsLog),
-        "semanticoperationlogs" => Some(VirtualTable::SemanticOperationLogs),
-        "semanticoperationchainlogs" => Some(VirtualTable::SemanticOperationChainLogs),
-        _ => None,
-    }
+    ALL_TABLES
+        .iter()
+        .find(|t| t.name().eq_ignore_ascii_case(name))
+        .copied()
 }
 
+//
+// Column lists come from the canonical schema in common::log_query_schema;
+// the order there defines the order the materializers below emit values in.
+//
+
 pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
-    match table {
-        VirtualTable::TrafficLogs => vec![
-            "timestamp",
-            "traffic_id",
-            "node_id",
-            "agent_short_name",
-            "intercept_method",
-            "direction",
-            "method",
-            "url",
-            "host",
-            "request_headers",
-            "request_body",
-            "response_status",
-            "response_headers",
-            "response_body",
-        ],
-        VirtualTable::TrafficMatchLogs => vec![
-            "timestamp",
-            "traffic_id",
-            "node_id",
-            "agent_short_name",
-            "rule_id",
-            "rule_name",
-            "summary",
-            "method",
-            "url",
-            "host",
-            "direction",
-            "response_status",
-        ],
-        VirtualTable::NodeLogs => vec![
-            "timestamp",
-            "node_id",
-            "machine_name",
-            "os_details",
-            "intercept_active",
-        ],
-        VirtualTable::AgentLogs => vec![
-            "timestamp",
-            "node_id",
-            "agent_short_name",
-            "agent_name",
-            "version",
-        ],
-        VirtualTable::ReconLogs => vec![
-            "timestamp",
-            "node_id",
-            "agent_short_name",
-            "is_semantic",
-            "mcp_server_count",
-            "skill_count",
-            "internal_tool_count",
-            "config_count",
-            "session_count",
-            "project_path_count",
-        ],
-        VirtualTable::ReconToolLogs => vec![
-            "timestamp",
-            "node_id",
-            "agent_short_name",
-            "tool_type",
-            "server_name",
-            "tool_name",
-            "tool_description",
-            "transport",
-        ],
-        VirtualTable::ReconSessionLogs => vec![
-            "timestamp",
-            "node_id",
-            "agent_short_name",
-            "session_id",
-            "context_path",
-            "last_modified",
-            "message_count",
-        ],
-        VirtualTable::EventLogs => vec![
-            "timestamp",
-            "source",
-            "source_id",
-            "level",
-            "target",
-            "message",
-        ],
-        VirtualTable::ToolkitActionsLog => vec![
-            "timestamp",
-            "id",
-            "execution_id",
-            "tool_name",
-            "action",
-            "status",
-            "node_id",
-            "agent_short_name",
-            "session_id",
-            "details_json",
-        ],
-        VirtualTable::SemanticOperationLogs => vec![
-            "timestamp",
-            "operation_id",
-            "node_id",
-            "agent_short_name",
-            "status",
-            "operation_spec",
-            "start_time",
-            "end_time",
-            "summary",
-            "result",
-            "chain_execution_id",
-        ],
-        VirtualTable::SemanticOperationChainLogs => vec![
-            "timestamp",
-            "execution_id",
-            "chain_id",
-            "chain_name",
-            "node_id",
-            "agent_short_name",
-            "status",
-            "elements",
-            "outputs",
-            "started_at",
-            "ended_at",
-        ],
+    common::log_query_schema::find_table(table.name())
+        .map(|t| t.columns.iter().map(|c| c.name).collect())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    //
+    // Every canonical schema table must resolve to a VirtualTable and vice
+    // versa, so the shared schema and the query engine cannot drift apart.
+    //
+
+    #[test]
+    fn schema_and_virtual_tables_match() {
+        for schema in common::log_query_schema::TABLES {
+            let table = resolve_table(schema.name);
+            assert!(
+                table.is_some(),
+                "schema table {} has no VirtualTable",
+                schema.name
+            );
+        }
+        for table in ALL_TABLES {
+            let schema = common::log_query_schema::find_table(table.name());
+            assert!(
+                schema.is_some(),
+                "VirtualTable {} missing from common::log_query_schema",
+                table.name()
+            );
+            assert!(
+                !table_columns(*table).is_empty(),
+                "VirtualTable {} resolved no columns",
+                table.name()
+            );
+        }
+        assert_eq!(common::log_query_schema::TABLES.len(), ALL_TABLES.len());
+    }
+
+    //
+    // SQL-backed tables expose exactly the canonical column set, in order.
+    //
+
+    #[test]
+    fn sql_configs_match_schema_columns() {
+        for table in ALL_TABLES {
+            if let Some(config) = table.sql_config() {
+                let kql: Vec<&str> = config.columns.iter().map(|c| c.kql_name).collect();
+                assert_eq!(
+                    kql,
+                    table_columns(*table),
+                    "sql_config columns for {} drifted from the canonical schema",
+                    table.name()
+                );
+            }
+        }
     }
 }
 
