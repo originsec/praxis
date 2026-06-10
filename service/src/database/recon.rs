@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
 use common::{ReconConfig, ReconResult, ReconSessions, ReconTools};
-use sqlx::Row;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::{DbRow, db_args};
 
 //
 // Stored recon result with metadata.
@@ -51,36 +51,21 @@ impl Database {
                 sessions_json = $7,
                 performed_at = $8";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&id)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .bind(is_semantic as i32)
-                    .bind(&tools_json)
-                    .bind(&config_json)
-                    .bind(&sessions_json)
-                    .bind(&now)
-                    .bind(&now)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(&id)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .bind(if is_semantic { 1i16 } else { 0i16 })
-                    .bind(&tools_json)
-                    .bind(&config_json)
-                    .bind(&sessions_json)
-                    .bind(&now)
-                    .bind(&now)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                id,
+                node_id,
+                agent_short_name,
+                is_semantic,
+                tools_json,
+                config_json,
+                sessions_json,
+                &now,
+                &now,
+            ],
+        )
+        .await?;
 
         Ok(())
     }
@@ -96,24 +81,10 @@ impl Database {
              FROM recon_results
              WHERE node_id = $1 AND agent_short_name = $2";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .fetch_optional(pool)
-                    .await?;
-                Ok(row.map(parse_recon_row_sqlite).transpose()?)
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .fetch_optional(pool)
-                    .await?;
-                Ok(row.map(parse_recon_row_postgres).transpose()?)
-            }
-        }
+        let row = self
+            .db_fetch_optional(sql, db_args![node_id, agent_short_name])
+            .await?;
+        row.map(|row| parse_recon_row(&row)).transpose()
     }
 
     #[allow(dead_code)]
@@ -128,16 +99,8 @@ impl Database {
              WHERE node_id = $1
              ORDER BY performed_at DESC";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).bind(node_id).fetch_all(pool).await?;
-                rows.into_iter().map(parse_recon_row_sqlite).collect()
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).bind(node_id).fetch_all(pool).await?;
-                rows.into_iter().map(parse_recon_row_postgres).collect()
-            }
-        }
+        let rows = self.db_fetch_all(sql, db_args![node_id]).await?;
+        rows.iter().map(parse_recon_row).collect()
     }
 
     pub async fn list_all_recon_results(&self) -> Result<Vec<StoredReconResult>> {
@@ -147,48 +110,27 @@ impl Database {
              FROM recon_results
              ORDER BY performed_at DESC";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.into_iter().map(parse_recon_row_sqlite).collect()
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.into_iter().map(parse_recon_row_postgres).collect()
-            }
-        }
+        let rows = self.db_fetch_all(sql, vec![]).await?;
+        rows.iter().map(parse_recon_row).collect()
     }
 
     #[allow(dead_code)]
     pub async fn delete_recon_result(&self, node_id: &str, agent_short_name: &str) -> Result<()> {
-        let sql = "DELETE FROM recon_results WHERE node_id = $1 AND agent_short_name = $2";
-
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(node_id)
-                    .bind(agent_short_name)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            "DELETE FROM recon_results WHERE node_id = $1 AND agent_short_name = $2",
+            db_args![node_id, agent_short_name],
+        )
+        .await?;
 
         Ok(())
     }
 }
 
-fn parse_recon_row_sqlite(row: sqlx::sqlite::SqliteRow) -> Result<StoredReconResult> {
+fn parse_recon_row(row: &DbRow) -> Result<StoredReconResult> {
     let id: String = row.get(0);
     let node_id: String = row.get(1);
     let agent_short_name: String = row.get(2);
-    let is_semantic: i32 = row.get(3);
+    let is_semantic = row.get_bool(3);
     let tools_json: String = row.get(4);
     let config_json: String = row.get(5);
     let sessions_json: String = row.get(6);
@@ -199,29 +141,7 @@ fn parse_recon_row_sqlite(row: sqlx::sqlite::SqliteRow) -> Result<StoredReconRes
         id,
         node_id,
         agent_short_name,
-        is_semantic: is_semantic != 0,
-        recon_result: parse_recon_result(&tools_json, &config_json, &sessions_json),
-        performed_at,
-        created_at,
-    })
-}
-
-fn parse_recon_row_postgres(row: sqlx::postgres::PgRow) -> Result<StoredReconResult> {
-    let id: String = row.get(0);
-    let node_id: String = row.get(1);
-    let agent_short_name: String = row.get(2);
-    let is_semantic: i16 = row.get(3);
-    let tools_json: String = row.get(4);
-    let config_json: String = row.get(5);
-    let sessions_json: String = row.get(6);
-    let performed_at: String = row.get(7);
-    let created_at: String = row.get(8);
-
-    Ok(StoredReconResult {
-        id,
-        node_id,
-        agent_short_name,
-        is_semantic: is_semantic != 0,
+        is_semantic,
         recon_result: parse_recon_result(&tools_json, &config_json, &sessions_json),
         performed_at,
         created_at,

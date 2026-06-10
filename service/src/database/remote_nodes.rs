@@ -1,8 +1,8 @@
 use anyhow::Result;
-use sqlx::Row;
 use uuid::Uuid;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::db_args;
 
 #[derive(Debug, Clone)]
 pub struct RemoteNodeRecord {
@@ -34,36 +34,12 @@ impl Database {
         let node_type = format!("remote-{}", kind);
         let created_at = chrono::Utc::now().to_rfc3339();
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(
-                    "INSERT INTO remote_nodes (id, node_type, kind, url, token, created_at) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(&id)
-                .bind(&node_type)
-                .bind(kind)
-                .bind(url)
-                .bind(token)
-                .bind(&created_at)
-                .execute(pool)
-                .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(
-                    "INSERT INTO remote_nodes (id, node_type, kind, url, token, created_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6)",
-                )
-                .bind(&id)
-                .bind(&node_type)
-                .bind(kind)
-                .bind(url)
-                .bind(token)
-                .bind(&created_at)
-                .execute(pool)
-                .await?;
-            }
-        }
+        self.db_execute(
+            "INSERT INTO remote_nodes (id, node_type, kind, url, token, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            db_args![&id, &node_type, kind, url, token, &created_at],
+        )
+        .await?;
 
         Ok(RemoteNodeRecord {
             id,
@@ -78,51 +54,24 @@ impl Database {
     pub async fn list_remote_nodes(&self) -> Result<Vec<RemoteNodeRecord>> {
         let sql = "SELECT id, node_type, kind, url, token, created_at \
                    FROM remote_nodes ORDER BY created_at";
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                Ok(rows
-                    .into_iter()
-                    .map(|row| RemoteNodeRecord {
-                        id: row.get(0),
-                        node_type: row.get(1),
-                        kind: row.get(2),
-                        url: row.get(3),
-                        token: row.get(4),
-                        created_at: row.get(5),
-                    })
-                    .collect())
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                Ok(rows
-                    .into_iter()
-                    .map(|row| RemoteNodeRecord {
-                        id: row.get(0),
-                        node_type: row.get(1),
-                        kind: row.get(2),
-                        url: row.get(3),
-                        token: row.get(4),
-                        created_at: row.get(5),
-                    })
-                    .collect())
-            }
-        }
+        let rows = self.db_fetch_all(sql, vec![]).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RemoteNodeRecord {
+                id: row.get(0),
+                node_type: row.get(1),
+                kind: row.get(2),
+                url: row.get(3),
+                token: row.get(4),
+                created_at: row.get(5),
+            })
+            .collect())
     }
 
     pub async fn delete_remote_node(&self, id: &str) -> Result<bool> {
-        let affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query("DELETE FROM remote_nodes WHERE id = ?")
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query("DELETE FROM remote_nodes WHERE id = $1")
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let affected = self
+            .db_execute("DELETE FROM remote_nodes WHERE id = $1", db_args![id])
+            .await?;
         Ok(affected > 0)
     }
 }

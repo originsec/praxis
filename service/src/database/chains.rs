@@ -1,10 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::collections::HashMap;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::db_args;
 
 /// Maximum number of chain definitions to store
 const MAX_CHAINS: usize = 200;
@@ -893,34 +893,20 @@ impl Database {
                  disabled = excluded.disabled,
                  updated_at = excluded.updated_at";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&chain.id)
-                    .bind(&chain.name)
-                    .bind(&chain.description)
-                    .bind(&chain.category)
-                    .bind(&definition_json)
-                    .bind(if chain.disabled { 1i32 } else { 0i32 })
-                    .bind(chain.created_at.to_rfc3339())
-                    .bind(chain.updated_at.to_rfc3339())
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(&chain.id)
-                    .bind(&chain.name)
-                    .bind(&chain.description)
-                    .bind(&chain.category)
-                    .bind(&definition_json)
-                    .bind(if chain.disabled { 1i16 } else { 0i16 })
-                    .bind(chain.created_at.to_rfc3339())
-                    .bind(chain.updated_at.to_rfc3339())
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                &chain.id,
+                &chain.name,
+                &chain.description,
+                &chain.category,
+                &definition_json,
+                chain.disabled,
+                chain.created_at,
+                chain.updated_at,
+            ],
+        )
+        .await?;
 
         self.prune_old_chains().await?;
 
@@ -932,21 +918,10 @@ impl Database {
     pub async fn get_chain(&self, id: &str) -> Result<Option<ChainDefinition>> {
         let sql = "SELECT definition, disabled FROM operation_chains WHERE id = $1";
 
-        let row_opt: Option<(String, bool)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .map(|r| (r.get(0), r.get(1))),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .map(|r| {
-                    let disabled: i16 = r.get(1);
-                    (r.get(0), disabled != 0)
-                }),
-        };
+        let row_opt: Option<(String, bool)> = self
+            .db_fetch_optional(sql, db_args![id])
+            .await?
+            .map(|r| (r.get(0), r.get_bool(1)));
 
         match row_opt {
             Some((json, disabled)) => {
@@ -972,21 +947,12 @@ impl Database {
     pub async fn list_chains(&self) -> Result<Vec<ChainDefinitionInfo>> {
         let sql = "SELECT definition, disabled FROM operation_chains ORDER BY category, name";
 
-        let rows: Vec<(String, bool)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.iter().map(|r| (r.get(0), r.get(1))).collect()
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.iter()
-                    .map(|r| {
-                        let disabled: i16 = r.get(1);
-                        (r.get(0), disabled != 0)
-                    })
-                    .collect()
-            }
-        };
+        let rows: Vec<(String, bool)> = self
+            .db_fetch_all(sql, vec![])
+            .await?
+            .iter()
+            .map(|r| (r.get(0), r.get_bool(1)))
+            .collect();
 
         let chains: Vec<ChainDefinitionInfo> = rows
             .into_iter()
@@ -1019,21 +985,12 @@ impl Database {
         let sql =
             "SELECT definition, disabled FROM operation_chains WHERE category = $1 ORDER BY name";
 
-        let rows: Vec<(String, bool)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
-                rows.iter().map(|r| (r.get(0), r.get(1))).collect()
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
-                rows.iter()
-                    .map(|r| {
-                        let disabled: i16 = r.get(1);
-                        (r.get(0), disabled != 0)
-                    })
-                    .collect()
-            }
-        };
+        let rows: Vec<(String, bool)> = self
+            .db_fetch_all(sql, db_args![category])
+            .await?
+            .iter()
+            .map(|r| (r.get(0), r.get_bool(1)))
+            .collect();
 
         let chains: Vec<ChainDefinitionInfo> = rows
             .into_iter()
@@ -1065,18 +1022,7 @@ impl Database {
 
         let sql = "DELETE FROM operation_chains WHERE id = $1";
 
-        let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let count = self.db_execute(sql, db_args![id]).await?;
 
         Ok(count > 0)
     }
@@ -1086,22 +1032,7 @@ impl Database {
         let sql = "UPDATE operation_chains SET disabled = $1, updated_at = $2 WHERE id = $3";
         let now = chrono::Utc::now().to_rfc3339();
 
-        let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(if disabled { 1i32 } else { 0i32 })
-                .bind(&now)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(if disabled { 1i16 } else { 0i16 })
-                .bind(&now)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let count = self.db_execute(sql, db_args![disabled, now, id]).await?;
 
         Ok(count > 0)
     }
@@ -1110,16 +1041,7 @@ impl Database {
     pub async fn count_chains(&self) -> Result<usize> {
         let sql = "SELECT COUNT(*) FROM operation_chains";
 
-        let count: i64 = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql).fetch_one(pool).await?;
-                row.get(0)
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql).fetch_one(pool).await?;
-                row.get(0)
-            }
-        };
+        let count: i64 = self.db_fetch_one(sql, vec![]).await?.get(0);
 
         Ok(count as usize)
     }
@@ -1139,18 +1061,7 @@ impl Database {
                 ORDER BY updated_at ASC LIMIT $1
             )";
 
-        let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(to_delete as i64)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(to_delete as i64)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let deleted = self.db_execute(sql, db_args![to_delete as i64]).await?;
 
         Ok(deleted as usize)
     }

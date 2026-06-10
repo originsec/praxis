@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::db_args;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PayloadRecord {
@@ -18,20 +18,11 @@ impl Database {
     pub async fn list_payloads(&self) -> Result<Vec<PayloadRecord>> {
         let sql = "SELECT id, shortname, content, created_at, updated_at FROM chain_payloads ORDER BY shortname";
 
-        let rows: Vec<(String, String, String, String, String)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.iter()
-                    .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
-                    .collect()
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                rows.iter()
-                    .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
-                    .collect()
-            }
-        };
+        let rows = self.db_fetch_all(sql, vec![]).await?;
+        let rows: Vec<(String, String, String, String, String)> = rows
+            .iter()
+            .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
+            .collect();
 
         let payloads = rows
             .into_iter()
@@ -58,18 +49,10 @@ impl Database {
     pub async fn get_payload(&self, id: &str) -> Result<Option<PayloadRecord>> {
         let sql = "SELECT id, shortname, content, created_at, updated_at FROM chain_payloads WHERE id = $1";
 
-        let row_opt: Option<(String, String, String, String, String)> = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))),
-        };
+        let row_opt: Option<(String, String, String, String, String)> = self
+            .db_fetch_optional(sql, db_args![id])
+            .await?
+            .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)));
 
         match row_opt {
             Some((id, shortname, content, created_at, updated_at)) => {
@@ -97,50 +80,25 @@ impl Database {
                  content = $3,
                  updated_at = $5";
 
-        let created_at = record.created_at.to_rfc3339();
-        let updated_at = record.updated_at.to_rfc3339();
-
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&record.id)
-                    .bind(&record.shortname)
-                    .bind(&record.content)
-                    .bind(&created_at)
-                    .bind(&updated_at)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(&record.id)
-                    .bind(&record.shortname)
-                    .bind(&record.content)
-                    .bind(&created_at)
-                    .bind(&updated_at)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                &record.id,
+                &record.shortname,
+                &record.content,
+                &record.created_at,
+                &record.updated_at,
+            ],
+        )
+        .await?;
 
         Ok(())
     }
 
     pub async fn delete_payload(&self, id: &str) -> Result<bool> {
-        let sql = "DELETE FROM chain_payloads WHERE id = $1";
-
-        let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(id)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let rows_affected = self
+            .db_execute("DELETE FROM chain_payloads WHERE id = $1", db_args![id])
+            .await?;
 
         Ok(rows_affected > 0)
     }

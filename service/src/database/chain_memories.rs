@@ -1,25 +1,17 @@
 use anyhow::Result;
 use chrono::Utc;
-use sqlx::Row;
 use std::collections::HashMap;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::db_args;
 
 impl Database {
     /// Get a chain memory value by key
     pub async fn get_memory(&self, key: &str) -> Result<Option<String>> {
         let sql = "SELECT value FROM chain_memories WHERE key = $1";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql).bind(key).fetch_optional(pool).await?;
-                Ok(row.map(|r| r.get(0)))
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql).bind(key).fetch_optional(pool).await?;
-                Ok(row.map(|r| r.get(0)))
-            }
-        }
+        let row = self.db_fetch_optional(sql, db_args![key]).await?;
+        Ok(row.map(|r| r.get(0)))
     }
 
     /// Set a chain memory value (upsert)
@@ -32,24 +24,7 @@ impl Database {
                  value = $2,
                  updated_at = $3";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .bind(value)
-                    .bind(&now)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(key)
-                    .bind(value)
-                    .bind(&now)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(sql, db_args![key, value, &now]).await?;
 
         Ok(())
     }
@@ -57,20 +32,9 @@ impl Database {
     /// Delete a chain memory value
     #[allow(dead_code)]
     pub async fn delete_memory(&self, key: &str) -> Result<bool> {
-        let sql = "DELETE FROM chain_memories WHERE key = $1";
-
-        let rows_affected = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(key)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(key)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let rows_affected = self
+            .db_execute("DELETE FROM chain_memories WHERE key = $1", db_args![key])
+            .await?;
 
         Ok(rows_affected > 0)
     }
@@ -82,23 +46,11 @@ impl Database {
 
         let mut memories = HashMap::new();
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                for row in rows {
-                    let key: String = row.get(0);
-                    let value: String = row.get(1);
-                    memories.insert(key, value);
-                }
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                for row in rows {
-                    let key: String = row.get(0);
-                    let value: String = row.get(1);
-                    memories.insert(key, value);
-                }
-            }
+        let rows = self.db_fetch_all(sql, vec![]).await?;
+        for row in rows {
+            let key: String = row.get(0);
+            let value: String = row.get(1);
+            memories.insert(key, value);
         }
 
         Ok(memories)

@@ -2,9 +2,9 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use common::ApplicationLogEntry;
 use regex::Regex;
-use sqlx::Row;
 
-use super::{Database, DatabasePool};
+use super::Database;
+use super::exec::{Arg, DbRow, db_args};
 
 /// Maximum number of event log entries to keep in total across all sources
 const MAX_EVENT_LOG_ENTRIES: usize = 1_000_000;
@@ -18,59 +18,28 @@ impl Database {
         let sql = "INSERT INTO event_log (source, source_id, level, message, target, timestamp)
              VALUES ($1, $2, $3, $4, $5, $6)";
 
-        let id = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&entry.source)
-                    .bind(&entry.source_id)
-                    .bind(&entry.level)
-                    .bind(&entry.message)
-                    .bind(&entry.target)
-                    .bind(entry.timestamp.to_rfc3339())
-                    .execute(pool)
-                    .await?;
-
-                let row = sqlx::query("SELECT last_insert_rowid()")
-                    .fetch_one(pool)
-                    .await?;
-                row.get::<i64, _>(0)
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(
-                    "INSERT INTO event_log (source, source_id, level, message, target, timestamp)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     RETURNING id",
-                )
-                .bind(&entry.source)
-                .bind(&entry.source_id)
-                .bind(&entry.level)
-                .bind(&entry.message)
-                .bind(&entry.target)
-                .bind(entry.timestamp.to_rfc3339())
-                .fetch_one(pool)
-                .await?;
-                row.get::<i64, _>(0)
-            }
-        };
+        let id = self
+            .db_insert_returning_id(
+                sql,
+                db_args![
+                    &entry.source,
+                    &entry.source_id,
+                    &entry.level,
+                    &entry.message,
+                    entry.target.as_deref(),
+                    entry.timestamp,
+                ],
+            )
+            .await?;
 
         //
         // Prune old entries if we exceed the total limit across all sources.
         //
 
-        let count: i64 = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query("SELECT COUNT(*) FROM event_log")
-                    .fetch_one(pool)
-                    .await?;
-                row.get(0)
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query("SELECT COUNT(*) FROM event_log")
-                    .fetch_one(pool)
-                    .await?;
-                row.get(0)
-            }
-        };
+        let count: i64 = self
+            .db_fetch_one("SELECT COUNT(*) FROM event_log", vec![])
+            .await?
+            .get(0);
 
         if count as usize > MAX_EVENT_LOG_ENTRIES {
             let to_delete = (count as usize - MAX_EVENT_LOG_ENTRIES) as i64;
@@ -80,20 +49,7 @@ impl Database {
                     ORDER BY timestamp ASC LIMIT $1
                 )";
 
-            match &self.pool {
-                DatabasePool::Sqlite(pool) => {
-                    sqlx::query(delete_sql)
-                        .bind(to_delete)
-                        .execute(pool)
-                        .await?;
-                }
-                DatabasePool::Postgres(pool) => {
-                    sqlx::query(delete_sql)
-                        .bind(to_delete)
-                        .execute(pool)
-                        .await?;
-                }
-            }
+            self.db_execute(delete_sql, db_args![to_delete]).await?;
         }
 
         Ok(id)
@@ -166,149 +122,62 @@ impl Database {
         let regex = regex_filter.and_then(|pattern| Regex::new(pattern).ok());
 
         //
-        // Execute queries based on backend.
+        // Build bind argument lists for the count and main queries.
         //
 
-        let (entries, total_count) = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                //
-                // Execute count query.
-                //
-
-                let total_count: i64 = {
-                    let mut query = sqlx::query(&count_sql);
-                    if !query_all_sources {
-                        query = query.bind(source_id);
-                    }
-                    if let Some(levels) = level_filter {
-                        for level in levels {
-                            query = query.bind(level);
-                        }
-                    }
-                    let row = query.fetch_one(pool).await?;
-                    row.get(0)
-                };
-
-                //
-                // Execute main query.
-                //
-
-                let rows = {
-                    let mut query = sqlx::query(&sql);
-                    if !query_all_sources {
-                        query = query.bind(source_id);
-                    }
-                    if let Some(levels) = level_filter {
-                        for level in levels {
-                            query = query.bind(level);
-                        }
-                    }
-                    query = query.bind(limit as i64).bind(offset as i64);
-                    query.fetch_all(pool).await?
-                };
-
-                let mut entries = Vec::new();
-                for row in rows {
-                    let entry = parse_event_log_row_sqlite(&row)?;
-
-                    //
-                    // Apply regex filter if provided.
-                    //
-
-                    if let Some(ref re) = regex {
-                        if !re.is_match(&entry.message) {
-                            continue;
-                        }
-                    }
-                    entries.push(entry);
-                }
-
-                (entries, total_count as u32)
+        let mut count_args: Vec<Arg> = Vec::new();
+        let mut query_args: Vec<Arg> = Vec::new();
+        if !query_all_sources {
+            count_args.push(source_id.into());
+            query_args.push(source_id.into());
+        }
+        if let Some(levels) = level_filter {
+            for level in levels {
+                count_args.push(level.into());
+                query_args.push(level.into());
             }
-            DatabasePool::Postgres(pool) => {
-                //
-                // Execute count query.
-                //
+        }
+        query_args.push((limit as i64).into());
+        query_args.push((offset as i64).into());
 
-                let total_count: i64 = {
-                    let mut query = sqlx::query(&count_sql);
-                    if !query_all_sources {
-                        query = query.bind(source_id);
-                    }
-                    if let Some(levels) = level_filter {
-                        for level in levels {
-                            query = query.bind(level);
-                        }
-                    }
-                    let row = query.fetch_one(pool).await?;
-                    row.get(0)
-                };
+        //
+        // Execute count query.
+        //
 
-                //
-                // Execute main query.
-                //
+        let total_count: i64 = self.db_fetch_one(&count_sql, count_args).await?.get(0);
 
-                let rows = {
-                    let mut query = sqlx::query(&sql);
-                    if !query_all_sources {
-                        query = query.bind(source_id);
-                    }
-                    if let Some(levels) = level_filter {
-                        for level in levels {
-                            query = query.bind(level);
-                        }
-                    }
-                    query = query.bind(limit as i64).bind(offset as i64);
-                    query.fetch_all(pool).await?
-                };
+        //
+        // Execute main query.
+        //
 
-                let mut entries = Vec::new();
-                for row in rows {
-                    let entry = parse_event_log_row_postgres(&row)?;
+        let rows = self.db_fetch_all(&sql, query_args).await?;
 
-                    //
-                    // Apply regex filter if provided.
-                    //
+        let mut entries = Vec::new();
+        for row in rows {
+            let entry = parse_event_log_row(&row)?;
 
-                    if let Some(ref re) = regex {
-                        if !re.is_match(&entry.message) {
-                            continue;
-                        }
-                    }
-                    entries.push(entry);
+            //
+            // Apply regex filter if provided.
+            //
+
+            if let Some(ref re) = regex {
+                if !re.is_match(&entry.message) {
+                    continue;
                 }
-
-                (entries, total_count as u32)
             }
-        };
+            entries.push(entry);
+        }
 
-        Ok((entries, total_count))
+        Ok((entries, total_count as u32))
     }
 
     /// Clear event log entries
     pub async fn clear_event_log(&self, source_id: Option<&str>) -> Result<u32> {
         let deleted = if let Some(source_id) = source_id {
-            let sql = "DELETE FROM event_log WHERE source = $1";
-            match &self.pool {
-                DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                    .bind(source_id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected(),
-                DatabasePool::Postgres(pool) => sqlx::query(sql)
-                    .bind(source_id)
-                    .execute(pool)
-                    .await?
-                    .rows_affected(),
-            }
+            self.db_execute("DELETE FROM event_log WHERE source = $1", db_args![source_id])
+                .await?
         } else {
-            let sql = "DELETE FROM event_log";
-            match &self.pool {
-                DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
-                DatabasePool::Postgres(pool) => {
-                    sqlx::query(sql).execute(pool).await?.rows_affected()
-                }
-            }
+            self.db_execute("DELETE FROM event_log", vec![]).await?
         };
 
         Ok(deleted as u32)
@@ -319,29 +188,7 @@ impl Database {
 // Helper functions.
 //
 
-fn parse_event_log_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<ApplicationLogEntry> {
-    let source: String = row.get(0);
-    let source_id: String = row.get(1);
-    let level: String = row.get(2);
-    let message: String = row.get(3);
-    let target: Option<String> = row.get(4);
-    let timestamp_str: String = row.get(5);
-
-    let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    Ok(ApplicationLogEntry {
-        source,
-        source_id,
-        level,
-        message,
-        target,
-        timestamp,
-    })
-}
-
-fn parse_event_log_row_postgres(row: &sqlx::postgres::PgRow) -> Result<ApplicationLogEntry> {
+fn parse_event_log_row(row: &DbRow) -> Result<ApplicationLogEntry> {
     let source: String = row.get(0);
     let source_id: String = row.get(1);
     let level: String = row.get(2);

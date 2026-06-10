@@ -1,10 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use common::{ChainExecutionStatus, ChainExecutionUpdate, ElementExecution};
-use sqlx::Row;
 use std::collections::HashMap;
 
-use super::{Database, DatabasePool, MAX_CHAIN_EXECUTIONS};
+use super::exec::{DbRow, db_args};
+use super::{Database, MAX_CHAIN_EXECUTIONS};
 
 /// Database record for a chain execution
 #[derive(Debug, Clone)]
@@ -49,40 +49,23 @@ impl Database {
         let sql = "INSERT INTO chain_executions (execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(&record.execution_id)
-                    .bind(&record.chain_id)
-                    .bind(&record.chain_name)
-                    .bind(&record.node_id)
-                    .bind(&record.agent_short_name)
-                    .bind(status_to_string(&record.status))
-                    .bind(&elements_json)
-                    .bind(&outputs_json)
-                    .bind(record.started_at.to_rfc3339())
-                    .bind(record.ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(record.created_at.to_rfc3339())
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(&record.execution_id)
-                    .bind(&record.chain_id)
-                    .bind(&record.chain_name)
-                    .bind(&record.node_id)
-                    .bind(&record.agent_short_name)
-                    .bind(status_to_string(&record.status))
-                    .bind(&elements_json)
-                    .bind(&outputs_json)
-                    .bind(record.started_at.to_rfc3339())
-                    .bind(record.ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(record.created_at.to_rfc3339())
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                &record.execution_id,
+                &record.chain_id,
+                &record.chain_name,
+                &record.node_id,
+                &record.agent_short_name,
+                status_to_string(&record.status),
+                &elements_json,
+                &outputs_json,
+                record.started_at,
+                record.ended_at.map(|dt| dt.to_rfc3339()),
+                record.created_at,
+            ],
+        )
+        .await?;
 
         //
         // Auto-prune old executions.
@@ -106,28 +89,17 @@ impl Database {
 
         let sql = "UPDATE chain_executions SET status = $1, elements = $2, outputs = $3, ended_at = $4 WHERE execution_id = $5";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .bind(&elements_json)
-                    .bind(&outputs_json)
-                    .bind(ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .bind(&elements_json)
-                    .bind(&outputs_json)
-                    .bind(ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                status_to_string(&status),
+                &elements_json,
+                &outputs_json,
+                ended_at.map(|dt| dt.to_rfc3339()),
+                execution_id,
+            ],
+        )
+        .await?;
 
         Ok(())
     }
@@ -141,24 +113,15 @@ impl Database {
     ) -> Result<()> {
         let sql = "UPDATE chain_executions SET status = $1, ended_at = $2 WHERE execution_id = $3";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .bind(ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .bind(ended_at.map(|dt| dt.to_rfc3339()))
-                    .bind(execution_id)
-                    .execute(pool)
-                    .await?;
-            }
-        }
+        self.db_execute(
+            sql,
+            db_args![
+                status_to_string(&status),
+                ended_at.map(|dt| dt.to_rfc3339()),
+                execution_id,
+            ],
+        )
+        .await?;
 
         Ok(())
     }
@@ -172,28 +135,8 @@ impl Database {
         let sql = "SELECT execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at
              FROM chain_executions WHERE execution_id = $1";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(execution_id)
-                    .fetch_optional(pool)
-                    .await?;
-                match row {
-                    Some(row) => Ok(Some(parse_chain_execution_row_sqlite(&row)?)),
-                    None => Ok(None),
-                }
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
-                    .bind(execution_id)
-                    .fetch_optional(pool)
-                    .await?;
-                match row {
-                    Some(row) => Ok(Some(parse_chain_execution_row_postgres(&row)?)),
-                    None => Ok(None),
-                }
-            }
-        }
+        let row = self.db_fetch_optional(sql, db_args![execution_id]).await?;
+        row.map(|row| parse_chain_execution_row(&row)).transpose()
     }
 
     /// List recent chain executions (limited by count)
@@ -201,24 +144,8 @@ impl Database {
         let sql = "SELECT execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at
              FROM chain_executions ORDER BY created_at DESC LIMIT $1";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
-                let mut executions = Vec::new();
-                for row in rows {
-                    executions.push(parse_chain_execution_row_sqlite(&row)?);
-                }
-                Ok(executions)
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql).bind(limit as i64).fetch_all(pool).await?;
-                let mut executions = Vec::new();
-                for row in rows {
-                    executions.push(parse_chain_execution_row_postgres(&row)?);
-                }
-                Ok(executions)
-            }
-        }
+        let rows = self.db_fetch_all(sql, db_args![limit as i64]).await?;
+        rows.iter().map(parse_chain_execution_row).collect()
     }
 
     /// List chain executions by status
@@ -230,46 +157,17 @@ impl Database {
         let sql = "SELECT execution_id, chain_id, chain_name, node_id, agent_short_name, status, elements, outputs, started_at, ended_at, created_at
              FROM chain_executions WHERE status = $1 ORDER BY created_at DESC";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .fetch_all(pool)
-                    .await?;
-                let mut executions = Vec::new();
-                for row in rows {
-                    executions.push(parse_chain_execution_row_sqlite(&row)?);
-                }
-                Ok(executions)
-            }
-            DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(status_to_string(&status))
-                    .fetch_all(pool)
-                    .await?;
-                let mut executions = Vec::new();
-                for row in rows {
-                    executions.push(parse_chain_execution_row_postgres(&row)?);
-                }
-                Ok(executions)
-            }
-        }
+        let rows = self
+            .db_fetch_all(sql, db_args![status_to_string(&status)])
+            .await?;
+        rows.iter().map(parse_chain_execution_row).collect()
     }
 
     /// Get count of chain executions
     pub async fn count_chain_executions(&self) -> Result<usize> {
         let sql = "SELECT COUNT(*) FROM chain_executions";
 
-        let count: i64 = match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql).fetch_one(pool).await?;
-                row.get(0)
-            }
-            DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql).fetch_one(pool).await?;
-                row.get(0)
-            }
-        };
+        let count: i64 = self.db_fetch_one(sql, vec![]).await?.get(0);
 
         Ok(count as usize)
     }
@@ -294,18 +192,7 @@ impl Database {
                 ORDER BY created_at ASC LIMIT $1
             )";
 
-        let deleted = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(to_delete as i64)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(to_delete as i64)
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let deleted = self.db_execute(sql, db_args![to_delete as i64]).await?;
 
         Ok(deleted as usize)
     }
@@ -314,14 +201,7 @@ impl Database {
     pub async fn delete_chain_execution(&self, execution_id: &str) -> Result<()> {
         let sql = "DELETE FROM chain_executions WHERE execution_id = $1";
 
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => {
-                sqlx::query(sql).bind(execution_id).execute(pool).await?;
-            }
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(sql).bind(execution_id).execute(pool).await?;
-            }
-        }
+        self.db_execute(sql, db_args![execution_id]).await?;
 
         Ok(())
     }
@@ -331,10 +211,7 @@ impl Database {
         let sql =
             "DELETE FROM chain_executions WHERE status IN ('Completed', 'Failed', 'Cancelled')";
 
-        let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
-        };
+        let count = self.db_execute(sql, vec![]).await?;
 
         Ok(count as usize)
     }
@@ -346,18 +223,7 @@ impl Database {
                  ended_at = $1
              WHERE status IN ('Running', 'Queued')";
 
-        let count = match &self.pool {
-            DatabasePool::Sqlite(pool) => sqlx::query(sql)
-                .bind(Utc::now().to_rfc3339())
-                .execute(pool)
-                .await?
-                .rows_affected(),
-            DatabasePool::Postgres(pool) => sqlx::query(sql)
-                .bind(Utc::now().to_rfc3339())
-                .execute(pool)
-                .await?
-                .rows_affected(),
-        };
+        let count = self.db_execute(sql, db_args![Utc::now()]).await?;
 
         Ok(count as usize)
     }
@@ -367,7 +233,7 @@ impl Database {
 // Helper functions.
 //
 
-fn parse_chain_execution_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<ChainExecutionRecord> {
+fn parse_chain_execution_row(row: &DbRow) -> Result<ChainExecutionRecord> {
     let execution_id: String = row.get(0);
     let chain_id: String = row.get(1);
     let chain_name: String = row.get(2);
@@ -376,55 +242,16 @@ fn parse_chain_execution_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Cha
     let status_str: String = row.get(5);
     let elements_json: String = row.get(6);
     let outputs_json: String = row.get(7);
-    let started_at_str: String = row.get(8);
     let ended_at_str: Option<String> = row.get(9);
-    let created_at_str: String = row.get(10);
 
     let elements: HashMap<String, ElementExecution> = serde_json::from_str(&elements_json)?;
     let outputs: HashMap<String, String> = serde_json::from_str(&outputs_json)?;
     let status = string_to_status(&status_str);
-    let started_at = DateTime::parse_from_rfc3339(&started_at_str)?.with_timezone(&Utc);
+    let started_at = row.get_timestamp(8)?;
     let ended_at = ended_at_str
         .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&Utc));
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
-
-    Ok(ChainExecutionRecord {
-        execution_id,
-        chain_id,
-        chain_name,
-        node_id,
-        agent_short_name,
-        status,
-        elements,
-        outputs,
-        started_at,
-        ended_at,
-        created_at,
-    })
-}
-
-fn parse_chain_execution_row_postgres(row: &sqlx::postgres::PgRow) -> Result<ChainExecutionRecord> {
-    let execution_id: String = row.get(0);
-    let chain_id: String = row.get(1);
-    let chain_name: String = row.get(2);
-    let node_id: String = row.get(3);
-    let agent_short_name: String = row.get(4);
-    let status_str: String = row.get(5);
-    let elements_json: String = row.get(6);
-    let outputs_json: String = row.get(7);
-    let started_at_str: String = row.get(8);
-    let ended_at_str: Option<String> = row.get(9);
-    let created_at_str: String = row.get(10);
-
-    let elements: HashMap<String, ElementExecution> = serde_json::from_str(&elements_json)?;
-    let outputs: HashMap<String, String> = serde_json::from_str(&outputs_json)?;
-    let status = string_to_status(&status_str);
-    let started_at = DateTime::parse_from_rfc3339(&started_at_str)?.with_timezone(&Utc);
-    let ended_at = ended_at_str
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
+    let created_at = row.get_timestamp(10)?;
 
     Ok(ChainExecutionRecord {
         execution_id,
