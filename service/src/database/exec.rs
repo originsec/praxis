@@ -30,8 +30,7 @@ impl DbRow {
             + sqlx::Type<sqlx::Sqlite>
             + sqlx::Decode<'r, sqlx::Postgres>
             + sqlx::Type<sqlx::Postgres>,
-        I: sqlx::ColumnIndex<sqlx::sqlite::SqliteRow>
-            + sqlx::ColumnIndex<sqlx::postgres::PgRow>,
+        I: sqlx::ColumnIndex<sqlx::sqlite::SqliteRow> + sqlx::ColumnIndex<sqlx::postgres::PgRow>,
     {
         match self {
             DbRow::Sqlite(row) => row.get(index),
@@ -64,8 +63,7 @@ impl DbRow {
     /// Decode an RFC 3339 timestamp column stored as TEXT.
     pub fn get_timestamp<I>(&self, index: I) -> Result<DateTime<Utc>>
     where
-        I: sqlx::ColumnIndex<sqlx::sqlite::SqliteRow>
-            + sqlx::ColumnIndex<sqlx::postgres::PgRow>,
+        I: sqlx::ColumnIndex<sqlx::sqlite::SqliteRow> + sqlx::ColumnIndex<sqlx::postgres::PgRow>,
     {
         let raw: String = self.get(index);
         Ok(DateTime::parse_from_rfc3339(&raw)?.with_timezone(&Utc))

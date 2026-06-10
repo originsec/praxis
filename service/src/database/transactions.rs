@@ -84,7 +84,9 @@ impl Database {
         let sql = "SELECT transaction_id, node_id, prompt_text, request_sent_at, response_received_at, response_text, status
              FROM session_transactions WHERE transaction_id = $1";
 
-        let row = self.db_fetch_optional(sql, db_args![transaction_id]).await?;
+        let row = self
+            .db_fetch_optional(sql, db_args![transaction_id])
+            .await?;
         row.map(|row| parse_transaction_row(&row)).transpose()
     }
 

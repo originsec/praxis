@@ -174,8 +174,11 @@ impl Database {
     /// Clear event log entries
     pub async fn clear_event_log(&self, source_id: Option<&str>) -> Result<u32> {
         let deleted = if let Some(source_id) = source_id {
-            self.db_execute("DELETE FROM event_log WHERE source = $1", db_args![source_id])
-                .await?
+            self.db_execute(
+                "DELETE FROM event_log WHERE source = $1",
+                db_args![source_id],
+            )
+            .await?
         } else {
             self.db_execute("DELETE FROM event_log", vec![]).await?
         };
