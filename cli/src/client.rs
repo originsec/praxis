@@ -532,12 +532,8 @@ impl Client {
     pub fn subscribe_acp_events(&self) -> tokio::sync::mpsc::UnboundedReceiver<String> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let state = self.state.clone();
-        tokio::task::block_in_place(|| {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let mut state = state.lock().await;
-                state.acp_event_tx = Some(tx);
-            });
+        tokio::spawn(async move {
+            state.lock().await.acp_event_tx = Some(tx);
         });
         rx
     }

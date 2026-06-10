@@ -1,3 +1,4 @@
+use crate::utils::LockExt;
 use acp::schema::{
     CancelNotification, ContentBlock, Implementation, InitializeRequest, NewSessionRequest,
     PermissionOptionId, PermissionOptionKind, PromptRequest, ProtocolVersion,
@@ -256,7 +257,7 @@ async fn run_acp_driver(
                 move |notif: SessionNotification, _cx| {
                     let ctx_notif = Arc::clone(&ctx_notif);
                     async move {
-                        let mut guard = ctx_notif.lock().unwrap();
+                        let mut guard = ctx_notif.lock_safe();
                         let Some(tx) = guard.update_tx.as_ref().cloned() else {
                             return Ok(());
                         };
@@ -317,7 +318,7 @@ async fn run_acp_driver(
                     let ctx_perm = Arc::clone(&ctx_perm);
                     async move {
                         let (yolo, interactive, update_tx, permission_rx, cancel_flag) = {
-                            let guard = ctx_perm.lock().unwrap();
+                            let guard = ctx_perm.lock_safe();
                             (
                                 guard.yolo,
                                 guard.interactive,
@@ -390,7 +391,7 @@ async fn run_acp_driver(
                             let decision = if let Some(perm_slot) = permission_rx {
                                 let cancel_for_wait = cancel_flag.clone();
                                 tokio::task::spawn_blocking(move || {
-                                    let Some(rx) = perm_slot.lock().unwrap().take() else {
+                                    let Some(rx) = perm_slot.lock_safe().take() else {
                                         return PermissionDecision::Deny;
                                     };
                                     let deadline = std::time::Instant::now()
@@ -465,13 +466,13 @@ async fn run_acp_driver(
                 .block_task()
                 .await
             {
-                if let Some(tx) = init_tx_for_main.lock().unwrap().take() {
+                if let Some(tx) = init_tx_for_main.lock_safe().take() {
                     let _ = tx.send(Err(anyhow!("ACP initialize failed: {}", e)));
                 }
                 return Ok(());
             }
 
-            if let Some(tx) = init_tx_for_main.lock().unwrap().take() {
+            if let Some(tx) = init_tx_for_main.lock_safe().take() {
                 let _ = tx.send(Ok(pid));
             }
 
@@ -490,8 +491,7 @@ async fn run_acp_driver(
                             .await
                         {
                             Ok(resp) => {
-                                *session_id_for_driver.lock().unwrap() =
-                                    Some(resp.session_id.clone());
+                                *session_id_for_driver.lock_safe() = Some(resp.session_id.clone());
                                 let _ = reply.send(Ok(resp.session_id.0.to_string()));
                             }
                             Err(e) => {
@@ -508,13 +508,13 @@ async fn run_acp_driver(
                         cancel_flag,
                         reply,
                     } => {
-                        let Some(sid) = session_id_for_driver.lock().unwrap().clone() else {
+                        let Some(sid) = session_id_for_driver.lock_safe().clone() else {
                             let _ = reply.send(Err(anyhow!("No ACP session created")));
                             continue;
                         };
 
                         {
-                            let mut guard = ctx.lock().unwrap();
+                            let mut guard = ctx.lock_safe();
                             guard.update_tx = Some(update_tx);
                             guard.permission_rx = Some(Arc::new(Mutex::new(Some(permission_rx))));
                             guard.yolo = yolo;
@@ -565,7 +565,7 @@ async fn run_acp_driver(
                         cancel_done.store(true, Ordering::Relaxed);
 
                         let text = {
-                            let mut guard = ctx.lock().unwrap();
+                            let mut guard = ctx.lock_safe();
                             let text = std::mem::take(&mut guard.assembled_text);
                             guard.update_tx = None;
                             guard.permission_rx = None;
@@ -584,7 +584,7 @@ async fn run_acp_driver(
                     }
                     AcpCommand::Cancel { reply } => {
                         cancelled_for_driver.store(true, Ordering::SeqCst);
-                        if let Some(sid) = session_id_for_driver.lock().unwrap().clone() {
+                        if let Some(sid) = session_id_for_driver.lock_safe().clone() {
                             let _ = cx.send_notification(CancelNotification::new(sid));
                         }
                         let _ = reply.send(Ok(()));
@@ -607,7 +607,7 @@ async fn run_acp_driver(
 
     if let Err(e) = drive_result {
         tracing::debug!("ACP driver ended: {}", e);
-        if let Some(tx) = init_tx_main.lock().unwrap().take() {
+        if let Some(tx) = init_tx_main.lock_safe().take() {
             let _ = tx.send(Err(anyhow!("ACP driver ended: {}", e)));
         }
     }

@@ -1,3 +1,4 @@
+use super::LockExt;
 use anyhow::{Result, anyhow};
 use common::{
     AgentTool, McpServer, McpTransport, NODE_SIGNAL_QUEUE, NodeSignalMessage,
@@ -249,13 +250,13 @@ impl SemanticParserTracker {
     /// Register a new request and return a receiver for the response
     pub fn register(&self, request_id: String) -> oneshot::Receiver<SemanticParserResponse> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(request_id, tx);
+        self.pending.lock_safe().insert(request_id, tx);
         rx
     }
 
     /// Complete a request with its response
     pub fn complete(&self, response: SemanticParserResponse) {
-        if let Some(tx) = self.pending.lock().unwrap().remove(&response.request_id) {
+        if let Some(tx) = self.pending.lock_safe().remove(&response.request_id) {
             let _ = tx.send(response);
         }
     }

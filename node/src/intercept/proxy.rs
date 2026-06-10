@@ -46,9 +46,7 @@ pub struct ProxyConfig {
 pub struct InterceptProxy {
     /// Primary port the proxy is listening on (443 for Hosts, random for others)
     port: u16,
-    /// Shutdown signal sender
-    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    /// Shared cancellation token for auxiliary listeners.
+    /// Shared cancellation token for all listeners.
     shutdown_token: CancellationToken,
     /// Handle to the proxy task
     task_handle: Option<tokio::task::JoinHandle<()>>,
@@ -63,7 +61,6 @@ impl InterceptProxy {
         config: ProxyConfig,
         traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
     ) -> Result<Self> {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let shutdown_token = CancellationToken::new();
         let config = Arc::new(config);
         let mut extra_task_handles = Vec::new();
@@ -156,11 +153,16 @@ impl InterceptProxy {
             (listener, port)
         };
 
-        let task_handle = tokio::spawn(run_proxy(listener, ca, config, traffic_tx, shutdown_rx));
+        let task_handle = tokio::spawn(run_proxy(
+            listener,
+            ca,
+            config,
+            traffic_tx,
+            shutdown_token.clone(),
+        ));
 
         Ok(Self {
             port,
-            shutdown_tx: Some(shutdown_tx),
             shutdown_token,
             task_handle: Some(task_handle),
             extra_task_handles,
@@ -173,9 +175,6 @@ impl InterceptProxy {
 
     pub async fn stop(&mut self) {
         self.shutdown_token.cancel();
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
-        }
         if let Some(handle) = self.task_handle.take() {
             let _ = handle.await;
         }
@@ -188,9 +187,6 @@ impl InterceptProxy {
 impl Drop for InterceptProxy {
     fn drop(&mut self) {
         self.shutdown_token.cancel();
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
-        }
         for handle in &self.extra_task_handles {
             handle.abort();
         }
@@ -203,37 +199,14 @@ async fn run_proxy(
     ca: Arc<RwLock<CertificateAuthority>>,
     config: Arc<ProxyConfig>,
     traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    shutdown: CancellationToken,
 ) {
     {
         let domains = config.intercept_domains.read().await;
         common::log_info!("Proxy server running, intercepting domains: {:?}", *domains);
     }
 
-    loop {
-        tokio::select! {
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, addr)) => {
-                        let ca = Arc::clone(&ca);
-                        let config = Arc::clone(&config);
-                        let traffic_tx = traffic_tx.clone();
-
-                        tokio::spawn(async move {
-                            let _ = handle_connection(stream, addr, ca, config, traffic_tx).await;
-                        });
-                    }
-                    Err(e) => {
-                        common::log_error!("Failed to accept connection: {}", e);
-                    }
-                }
-            }
-            _ = &mut shutdown_rx => {
-                common::log_info!("Proxy server shutting down");
-                break;
-            }
-        }
-    }
+    accept_loop(listener, ca, config, traffic_tx, shutdown, "Proxy server").await;
 }
 
 /// Run the HTTP proxy server (port 80) for Hosts mode.
@@ -249,9 +222,36 @@ async fn run_proxy_http(
 ) {
     common::log_info!("HTTP proxy server running on port 80 (Hosts mode)");
 
+    accept_loop(
+        listener,
+        ca,
+        config,
+        traffic_tx,
+        shutdown,
+        "HTTP proxy server",
+    )
+    .await;
+}
+
+//
+// Shared accept loop for the proxy listeners: accept connections and spawn
+// a handler per connection until the shutdown token is cancelled.
+//
+
+async fn accept_loop(
+    listener: TcpListener,
+    ca: Arc<RwLock<CertificateAuthority>>,
+    config: Arc<ProxyConfig>,
+    traffic_tx: mpsc::Sender<InterceptedTrafficEntry>,
+    shutdown: CancellationToken,
+    label: &str,
+) {
     loop {
         tokio::select! {
-            _ = shutdown.cancelled() => break,
+            _ = shutdown.cancelled() => {
+                common::log_info!("{} shutting down", label);
+                break;
+            }
             result = listener.accept() => {
                 match result {
                     Ok((stream, addr)) => {
@@ -264,7 +264,7 @@ async fn run_proxy_http(
                         });
                     }
                     Err(e) => {
-                        common::log_error!("Failed to accept HTTP connection: {}", e);
+                        common::log_error!("{}: failed to accept connection: {}", label, e);
                     }
                 }
             }

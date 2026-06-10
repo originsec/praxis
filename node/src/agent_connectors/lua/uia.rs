@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[cfg(windows)]
+use crate::utils::LockExt;
+#[cfg(windows)]
 use uiautomation::UIElement;
 #[cfg(windows)]
 use uiautomation::controls::ControlType;
@@ -38,7 +40,7 @@ static UIA_STATE: Lazy<Mutex<Option<UiaState>>> = Lazy::new(|| Mutex::new(None))
 
 #[cfg(windows)]
 fn ensure_init() -> Result<()> {
-    let mut state = UIA_STATE.lock().unwrap();
+    let mut state = UIA_STATE.lock_safe();
     if state.is_none() {
         let automation = UIAutomation::new().map_err(|e| anyhow!("UIA init failed: {}", e))?;
         *state = Some(UiaState {
@@ -52,7 +54,7 @@ fn ensure_init() -> Result<()> {
 #[cfg(windows)]
 fn store_element(element: UIElement) -> String {
     let id = uuid::Uuid::new_v4().to_string();
-    let mut state = UIA_STATE.lock().unwrap();
+    let mut state = UIA_STATE.lock_safe();
     if let Some(ref mut s) = *state {
         s.elements.insert(id.clone(), element);
     }
@@ -64,7 +66,7 @@ fn with_element<F, R>(id: &str, f: F) -> Result<R>
 where
     F: FnOnce(&UIElement, &UIAutomation) -> Result<R>,
 {
-    let state = UIA_STATE.lock().unwrap();
+    let state = UIA_STATE.lock_safe();
     let s = state
         .as_ref()
         .ok_or_else(|| anyhow!("UIA not initialized"))?;
@@ -190,7 +192,7 @@ fn uia_find_window(config: &Table) -> Result<Option<String>> {
     let name: Option<String> = config.get("name").unwrap_or(None);
     let pid: Option<u32> = config.get("pid").unwrap_or(None);
 
-    let state = UIA_STATE.lock().unwrap();
+    let state = UIA_STATE.lock_safe();
     let s = state
         .as_ref()
         .ok_or_else(|| anyhow!("UIA not initialized"))?;
@@ -259,7 +261,7 @@ fn uia_find(parent_id: &str, config: &Table) -> Result<Option<String>> {
 
 #[cfg(windows)]
 fn uia_find_bfs(parent_id: &str, config: &Table, max_depth: u32) -> Result<Option<String>> {
-    let state = UIA_STATE.lock().unwrap();
+    let state = UIA_STATE.lock_safe();
     let s = state
         .as_ref()
         .ok_or_else(|| anyhow!("UIA not initialized"))?;
@@ -577,7 +579,7 @@ fn uia_click_at(x: i32, y: i32) -> Result<()> {
 
 #[cfg(windows)]
 fn uia_release(element_id: &str) {
-    let mut state = UIA_STATE.lock().unwrap();
+    let mut state = UIA_STATE.lock_safe();
     if let Some(ref mut s) = *state {
         s.elements.remove(element_id);
     }
@@ -590,7 +592,7 @@ fn uia_release(element_id: &str) {
 #[cfg(windows)]
 fn uia_root() -> Result<String> {
     ensure_init()?;
-    let state = UIA_STATE.lock().unwrap();
+    let state = UIA_STATE.lock_safe();
     let s = state
         .as_ref()
         .ok_or_else(|| anyhow!("UIA not initialized"))?;

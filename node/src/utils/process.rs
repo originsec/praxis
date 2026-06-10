@@ -421,6 +421,7 @@ impl Drop for HiddenDesktop {
 
 #[cfg(windows)]
 mod minimize_impl {
+    use crate::utils::LockExt;
     use once_cell::sync::Lazy;
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -438,9 +439,9 @@ mod minimize_impl {
         unsafe {
             GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
 
-            let pids = TARGET_PIDS.lock().unwrap();
+            let pids = TARGET_PIDS.lock_safe();
             if pids.contains(&window_pid) && IsWindowVisible(hwnd).as_bool() {
-                let mut hwnds = FOUND_HWNDS.lock().unwrap();
+                let mut hwnds = FOUND_HWNDS.lock_safe();
                 hwnds.push(hwnd.0 as isize);
             }
         }
@@ -450,9 +451,9 @@ mod minimize_impl {
     pub fn minimize(target_pids: HashSet<u32>) -> bool {
         let pid_count = target_pids.len();
         {
-            let mut hwnds = FOUND_HWNDS.lock().unwrap();
+            let mut hwnds = FOUND_HWNDS.lock_safe();
             hwnds.clear();
-            let mut pids = TARGET_PIDS.lock().unwrap();
+            let mut pids = TARGET_PIDS.lock_safe();
             *pids = target_pids;
         }
 
@@ -460,7 +461,7 @@ mod minimize_impl {
             let _ = EnumWindows(Some(enum_callback), LPARAM(0));
         }
 
-        let hwnds = FOUND_HWNDS.lock().unwrap();
+        let hwnds = FOUND_HWNDS.lock_safe();
         common::log_debug!(
             "minimize: checked {} PIDs, found {} visible windows",
             pid_count,

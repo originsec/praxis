@@ -89,6 +89,7 @@ pub use windows::WintunDevice;
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
+    use crate::utils::LockExt;
     use std::io::{Read, Write};
     use std::os::fd::{AsRawFd, RawFd};
     use std::sync::Mutex;
@@ -152,7 +153,7 @@ mod linux {
                     //
                     // Data available - read it.
                     //
-                    let mut device = self.device.lock().unwrap();
+                    let mut device = self.device.lock_safe();
                     match device.read(&mut buf) {
                         Ok(n) => {
                             buf.truncate(n);
@@ -178,7 +179,7 @@ mod linux {
         }
 
         fn send(&self, packet: &[u8]) -> Result<()> {
-            let mut device = self.device.lock().unwrap();
+            let mut device = self.device.lock_safe();
             device
                 .write_all(packet)
                 .map_err(|e| anyhow::anyhow!("TUN write error: {}", e))?;

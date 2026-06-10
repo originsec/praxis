@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+use crate::utils::LockExt;
 use common::{ReconResult, SessionContext};
 
 static COMMAND_HANDLES: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicU32>>>> =
@@ -35,7 +36,7 @@ fn is_reset() -> bool {
 }
 
 fn abort_all_commands() {
-    let map = COMMAND_HANDLES.lock().unwrap();
+    let map = COMMAND_HANDLES.lock_safe();
     for cell in map.values() {
         let pid = cell.load(Ordering::SeqCst);
         if pid != 0 {
@@ -55,26 +56,26 @@ static CANCEL_FLAGS: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 pub fn set_cancelled(key: &str) {
-    let map = CANCEL_FLAGS.lock().unwrap();
+    let map = CANCEL_FLAGS.lock_safe();
     if let Some(flag) = map.get(key) {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
 fn is_cancelled(key: &str) -> bool {
-    let map = CANCEL_FLAGS.lock().unwrap();
+    let map = CANCEL_FLAGS.lock_safe();
     map.get(key)
         .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(false)
 }
 
 fn register_cancel_flag(key: &str) {
-    let mut map = CANCEL_FLAGS.lock().unwrap();
+    let mut map = CANCEL_FLAGS.lock_safe();
     map.insert(key.to_string(), Arc::new(AtomicBool::new(false)));
 }
 
 fn remove_cancel_flag(key: &str) {
-    let mut map = CANCEL_FLAGS.lock().unwrap();
+    let mut map = CANCEL_FLAGS.lock_safe();
     map.remove(key);
 }
 
@@ -1436,7 +1437,7 @@ fn spawn_detached_process(path: &str, use_hidden_desktop: bool) -> Result<(u32, 
     {
         let desktop_id = if let Some(desktop) = result.hidden_desktop {
             let id = uuid::Uuid::new_v4().to_string();
-            DESKTOP_HANDLES.lock().unwrap().insert(id.clone(), desktop);
+            DESKTOP_HANDLES.lock_safe().insert(id.clone(), desktop);
             Some(id)
         } else {
             None
@@ -1475,7 +1476,7 @@ fn switch_to_desktop(id: Option<&str>) -> Result<()> {
 
         match id {
             Some(desktop_id) => {
-                let map = DESKTOP_HANDLES.lock().unwrap();
+                let map = DESKTOP_HANDLES.lock_safe();
                 let desktop = map
                     .get(desktop_id)
                     .ok_or_else(|| anyhow!("desktop handle not found: {}", desktop_id))?;
@@ -1484,7 +1485,7 @@ fn switch_to_desktop(id: Option<&str>) -> Result<()> {
                 // Save the original desktop before switching.
                 //
 
-                let mut orig = ORIGINAL_DESKTOP.lock().unwrap();
+                let mut orig = ORIGINAL_DESKTOP.lock_safe();
                 if orig.is_none() {
                     let current = unsafe { GetThreadDesktop(current_thread) };
                     if let Ok(h) = current {
@@ -1500,7 +1501,7 @@ fn switch_to_desktop(id: Option<&str>) -> Result<()> {
                 common::log_info!("Switched to hidden desktop '{}'", desktop.name);
             }
             None => {
-                let mut orig = ORIGINAL_DESKTOP.lock().unwrap();
+                let mut orig = ORIGINAL_DESKTOP.lock_safe();
                 if let Some(handle) = orig.take() {
                     let hdesk = unsafe { std::mem::transmute::<isize, HDESK>(handle) };
                     unsafe {
@@ -1524,7 +1525,7 @@ fn switch_to_desktop(id: Option<&str>) -> Result<()> {
 pub fn release_desktop_handle(id: &str) {
     #[cfg(windows)]
     {
-        DESKTOP_HANDLES.lock().unwrap().remove(id);
+        DESKTOP_HANDLES.lock_safe().remove(id);
     }
     #[cfg(not(windows))]
     {
@@ -1534,14 +1535,14 @@ pub fn release_desktop_handle(id: &str) {
 
 fn get_handle_pid_cell(handle: Option<String>) -> Arc<AtomicU32> {
     let handle = handle.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let mut map = COMMAND_HANDLES.lock().unwrap();
+    let mut map = COMMAND_HANDLES.lock_safe();
     map.entry(handle)
         .or_insert_with(|| Arc::new(AtomicU32::new(0)))
         .clone()
 }
 
 fn abort_handle(handle: &str) -> bool {
-    let map = COMMAND_HANDLES.lock().unwrap();
+    let map = COMMAND_HANDLES.lock_safe();
     let Some(cell) = map.get(handle) else {
         return false;
     };

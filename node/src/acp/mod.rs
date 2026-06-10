@@ -20,7 +20,7 @@ pub fn register_client(handle: &str, client: AcpHandle) {
         .lock()
         .unwrap()
         .insert(handle.to_string(), cancel);
-    ACP_PIDS.lock().unwrap().insert(handle.to_string(), pid);
+    ACP_PIDS.lock_safe().insert(handle.to_string(), pid);
     ACP_CLIENTS
         .lock()
         .unwrap()
@@ -34,9 +34,9 @@ static ACP_CANCEL_FLAGS: Lazy<
 static ACP_PIDS: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn remove_client(handle: &str) -> Option<AcpHandle> {
-    ACP_CANCEL_FLAGS.lock().unwrap().remove(handle);
-    ACP_PIDS.lock().unwrap().remove(handle);
-    ACP_CLIENTS.lock().unwrap().remove(handle)
+    ACP_CANCEL_FLAGS.lock_safe().remove(handle);
+    ACP_PIDS.lock_safe().remove(handle);
+    ACP_CLIENTS.lock_safe().remove(handle)
 }
 
 //
@@ -47,7 +47,7 @@ pub fn remove_client(handle: &str) -> Option<AcpHandle> {
 
 pub fn cancel_client(handle: &str) {
     signal_cancel(handle);
-    if let Some(&pid) = ACP_PIDS.lock().unwrap().get(handle) {
+    if let Some(&pid) = ACP_PIDS.lock_safe().get(handle) {
         crate::utils::terminate_process_tree(pid);
     }
 }
@@ -58,7 +58,7 @@ pub fn cancel_client(handle: &str) {
 //
 
 pub fn signal_cancel(handle: &str) {
-    if let Some(flag) = ACP_CANCEL_FLAGS.lock().unwrap().get(handle) {
+    if let Some(flag) = ACP_CANCEL_FLAGS.lock_safe().get(handle) {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -67,7 +67,7 @@ pub fn with_client<F, R>(handle: &str, f: F) -> Option<R>
 where
     F: FnOnce(&AcpHandle) -> R,
 {
-    let clients = ACP_CLIENTS.lock().unwrap();
+    let clients = ACP_CLIENTS.lock_safe();
     clients.get(handle).map(f)
 }
 
@@ -76,6 +76,7 @@ where
 // async node runtime and blocking ACP read loops.
 //
 
+use crate::utils::LockExt;
 use common::{PermissionDecision, SessionUpdateKind};
 
 static ACP_UPDATE_SENDERS: Lazy<
@@ -95,7 +96,7 @@ pub fn register_update_sender(handle: &str, tx: tokio::sync::mpsc::Sender<Sessio
 }
 
 pub fn take_update_sender(handle: &str) -> Option<tokio::sync::mpsc::Sender<SessionUpdateKind>> {
-    ACP_UPDATE_SENDERS.lock().unwrap().remove(handle)
+    ACP_UPDATE_SENDERS.lock_safe().remove(handle)
 }
 
 #[allow(dead_code)]
@@ -112,7 +113,7 @@ pub fn register_permission_receiver(
 pub fn take_permission_receiver(
     handle: &str,
 ) -> Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>> {
-    ACP_PERMISSION_RECEIVERS.lock().unwrap().remove(handle)
+    ACP_PERMISSION_RECEIVERS.lock_safe().remove(handle)
 }
 
 //
@@ -120,8 +121,8 @@ pub fn take_permission_receiver(
 //
 
 pub fn cleanup_channels(handle: &str) {
-    ACP_UPDATE_SENDERS.lock().unwrap().remove(handle);
-    ACP_PERMISSION_RECEIVERS.lock().unwrap().remove(handle);
+    ACP_UPDATE_SENDERS.lock_safe().remove(handle);
+    ACP_PERMISSION_RECEIVERS.lock_safe().remove(handle);
 }
 
 //
@@ -130,10 +131,10 @@ pub fn cleanup_channels(handle: &str) {
 
 #[allow(dead_code)]
 pub fn close_all() {
-    let mut clients = ACP_CLIENTS.lock().unwrap();
+    let mut clients = ACP_CLIENTS.lock_safe();
     for (_, client) in clients.drain() {
         client.close();
     }
-    ACP_UPDATE_SENDERS.lock().unwrap().clear();
-    ACP_PERMISSION_RECEIVERS.lock().unwrap().clear();
+    ACP_UPDATE_SENDERS.lock_safe().clear();
+    ACP_PERMISSION_RECEIVERS.lock_safe().clear();
 }

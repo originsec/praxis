@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
+use crate::utils::LockExt;
 
 pub struct LuaAgentSession {
     #[allow(dead_code)]
@@ -23,7 +24,7 @@ impl LuaAgentSession {
         process_path: Option<String>,
     ) -> Result<Self> {
         let state = {
-            let lua = vm.lock().unwrap();
+            let lua = vm.lock_safe();
             super::runtime::vm_create_session(&lua, context, process_path)?
         };
         Ok(Self {
@@ -71,12 +72,12 @@ impl AgentSession for LuaAgentSession {
     }
 
     fn transact(&self, prompt: &str) -> Result<String> {
-        let current_state = self.state.lock().unwrap().clone();
-        let lua = self.vm.lock().unwrap();
+        let current_state = self.state.lock_safe().clone();
+        let lua = self.vm.lock_safe();
         let (response, new_state) =
             super::runtime::vm_session_transact(&lua, &self.context, &current_state, prompt)?;
         drop(lua);
-        *self.state.lock().unwrap() = new_state;
+        *self.state.lock_safe() = new_state;
         Ok(response)
     }
 
@@ -84,7 +85,7 @@ impl AgentSession for LuaAgentSession {
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        let state = self.state.lock().unwrap().clone();
+        let state = self.state.lock_safe().clone();
 
         //
         // Clean up ACP client if this is an ACP session.
@@ -109,7 +110,7 @@ impl AgentSession for LuaAgentSession {
             super::runtime::set_cancelled(handle);
         }
 
-        let lua = self.vm.lock().unwrap();
+        let lua = self.vm.lock_safe();
         if let Err(e) = super::runtime::vm_session_close(&lua, &self.context, &state) {
             common::log_warn!("Lua session close failed: {}", e);
         }
@@ -130,7 +131,7 @@ impl AgentSession for LuaAgentSession {
     }
 
     fn abort_transaction(&self) -> bool {
-        let state = self.state.lock().unwrap().clone();
+        let state = self.state.lock_safe().clone();
 
         //
         // ACP agents: signal cancellation via the shared flag (doesn't need

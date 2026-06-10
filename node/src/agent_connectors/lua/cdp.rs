@@ -1,3 +1,4 @@
+use crate::utils::LockExt;
 use anyhow::{Result, anyhow};
 use chromiumoxide::browser::Browser;
 use chromiumoxide::cdp::browser_protocol::input::InsertTextParams;
@@ -81,7 +82,7 @@ impl RawCdpWs {
         });
 
         {
-            let mut write = self.write.lock().unwrap();
+            let mut write = self.write.lock_safe();
             block_on(write.send(Message::Text(msg.to_string().into())))
                 .map_err(|e| anyhow!("WS send failed: {}", e))?;
         }
@@ -116,7 +117,7 @@ impl RawCdpWs {
 
     async fn close(&self) -> Result<()> {
         use futures::SinkExt;
-        let mut write = self.write.lock().unwrap();
+        let mut write = self.write.lock_safe();
         let _ = block_on(write.close());
         Ok(())
     }
@@ -271,7 +272,7 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<(String, Option<String>)> {
     let page = block_on(connect_to_devtools_chrome(&ws_url))?;
 
     let handle = uuid::Uuid::new_v4().to_string();
-    let mut map = CDP_CONNECTIONS.lock().unwrap();
+    let mut map = CDP_CONNECTIONS.lock_safe();
     map.insert(
         handle.clone(),
         CdpConnection {
@@ -308,7 +309,7 @@ fn cdp_connect(port: u16) -> Result<String> {
     })?;
 
     let handle = uuid::Uuid::new_v4().to_string();
-    let mut map = CDP_CONNECTIONS.lock().unwrap();
+    let mut map = CDP_CONNECTIONS.lock_safe();
     map.insert(
         handle.clone(),
         CdpConnection {
@@ -408,7 +409,7 @@ fn with_connection<F, R>(handle: &str, f: F) -> Result<R>
 where
     F: FnOnce(&CdpConnection) -> Result<R>,
 {
-    let map = CDP_CONNECTIONS.lock().unwrap();
+    let map = CDP_CONNECTIONS.lock_safe();
     let conn = map
         .get(handle)
         .ok_or_else(|| anyhow!("CDP handle not found: {}", handle))?;
@@ -519,7 +520,7 @@ fn cdp_wait_for_element(handle: &str, selector: &str, retries: u32, delay_ms: u6
 }
 
 fn close_all_connections() {
-    let mut map = CDP_CONNECTIONS.lock().unwrap();
+    let mut map = CDP_CONNECTIONS.lock_safe();
     let handles: Vec<String> = map.keys().cloned().collect();
     for handle in &handles {
         if let Some(conn) = map.remove(handle) {
@@ -545,7 +546,7 @@ fn cdp_close(handle: &str) -> Result<()> {
 //
 
 pub fn cleanup_connection(handle: &str) {
-    let mut map = CDP_CONNECTIONS.lock().unwrap();
+    let mut map = CDP_CONNECTIONS.lock_safe();
     if let Some(conn) = map.remove(handle) {
         if let CdpBackend::NodeInspector(raw) = &conn.backend {
             let _ = block_on(raw.close());
@@ -558,7 +559,7 @@ pub fn cleanup_connection(handle: &str) {
 }
 
 fn cdp_process_id(handle: &str) -> Result<Option<u32>> {
-    let map = CDP_CONNECTIONS.lock().unwrap();
+    let map = CDP_CONNECTIONS.lock_safe();
     Ok(map.get(handle).and_then(|c| c.process_id))
 }
 
