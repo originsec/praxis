@@ -3,14 +3,11 @@ use common::SessionContext;
 use mlua::Lua;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
-use crate::agent_connectors::traits::{AgentMode, AgentSession};
+use crate::agent_connectors::traits::AgentSession;
 use crate::utils::LockExt;
 
 pub struct LuaAgentSession {
-    #[allow(dead_code)]
-    internal_id: Uuid,
     vm: Arc<Mutex<Lua>>,
     context: SessionContext,
     state: Mutex<serde_json::Value>,
@@ -28,7 +25,6 @@ impl LuaAgentSession {
             super::runtime::vm_create_session(&lua, context, process_path)?
         };
         Ok(Self {
-            internal_id: Uuid::new_v4(),
             vm,
             context: context.clone(),
             state: Mutex::new(state),
@@ -37,31 +33,7 @@ impl LuaAgentSession {
     }
 }
 
-impl LuaAgentSession {
-    #[allow(dead_code)]
-    fn is_acp(&self) -> bool {
-        self.state
-            .lock()
-            .unwrap()
-            .get("acp_handle")
-            .and_then(|v| v.as_str())
-            .is_some()
-    }
-}
-
 impl AgentSession for LuaAgentSession {
-    fn session_id(&self) -> &Uuid {
-        &self.internal_id
-    }
-
-    fn mode(&self) -> AgentMode {
-        if self.is_acp() {
-            AgentMode::Acp
-        } else {
-            AgentMode::Cli
-        }
-    }
-
     fn acp_handle(&self) -> Option<String> {
         self.state
             .lock()
@@ -167,10 +139,6 @@ impl AgentSession for LuaAgentSession {
         }
 
         false
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

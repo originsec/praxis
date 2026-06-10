@@ -3,26 +3,24 @@ use anyhow::Context;
 use anyhow::Result;
 use std::net::IpAddr;
 
+#[allow(dead_code)]
 /// Mark for proxy's outgoing connections to bypass VPN/TUN routing.
 /// Same as TPROXY_BYPASS_MARK - both serve the same purpose.
-#[allow(dead_code)]
 pub const VPN_BYPASS_MARK: u32 = 0x2;
 
-/// Routing table number for VPN bypass routes.
 #[allow(dead_code)]
+/// Routing table number for VPN bypass routes.
 const VPN_BYPASS_TABLE: u32 = 200;
 
 /// TUN interface IPv4 address
-#[allow(dead_code)]
 pub const TUN_IP: &str = "10.255.0.1";
-/// TUN interface IPv4 netmask
 #[allow(dead_code)]
+/// TUN interface IPv4 netmask
 pub const TUN_NETMASK: &str = "255.255.255.0";
 /// TUN interface IPv6 address (ULA - Unique Local Address)
-#[allow(dead_code)]
 pub const TUN_IP6: &str = "fd00:255:0::1";
-/// TUN interface IPv6 prefix length
 #[allow(dead_code)]
+/// TUN interface IPv6 prefix length
 pub const TUN_IP6_PREFIX: &str = "64";
 /// TUN interface name (must match wintun adapter name)
 pub const TUN_INTERFACE_NAME: &str = "Praxis VPN";
@@ -202,8 +200,8 @@ impl RouteManager {
         Ok(())
     }
 
-    /// Get the interface name
     #[allow(dead_code)]
+    /// Get the interface name
     pub fn interface_name(&self) -> &str {
         &self.interface_name
     }
@@ -493,7 +491,6 @@ impl Drop for RouteManager {
 //
 #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 pub struct RouteManager {
-    #[allow(dead_code)]
     added_routes: Vec<IpAddr>,
 }
 
@@ -505,7 +502,6 @@ impl RouteManager {
         }
     }
 
-    #[allow(dead_code)]
     pub fn configure_interface(&mut self) -> Result<()> {
         common::log_warn!("Route management is only supported on Windows and Linux");
         Err(anyhow::anyhow!(
@@ -513,7 +509,6 @@ impl RouteManager {
         ))
     }
 
-    #[allow(dead_code)]
     pub fn add_route(&mut self, _destination_ip: IpAddr) -> Result<()> {
         common::log_warn!("Route management is only supported on Windows and Linux");
         Ok(())
@@ -523,7 +518,6 @@ impl RouteManager {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn interface_name(&self) -> &str {
         "N/A"
     }

@@ -14,7 +14,6 @@ pub struct RegisteredNode {
     pub machine_name: String,
     pub os_details: String,
     pub queue_name: String,
-    #[allow(dead_code)]
     pub registered_at: DateTime<Utc>,
     pub last_update: Option<NodeInformationUpdate>,
     pub last_update_received: DateTime<Utc>,
@@ -256,8 +255,6 @@ impl NodeRegistry {
 #[derive(Clone)]
 pub struct PendingCommand {
     pub client_id: String,
-    #[allow(dead_code)]
-    pub sent_at: DateTime<Utc>,
 }
 
 /// Tracks pending commands waiting for responses from nodes
@@ -274,13 +271,7 @@ impl PendingCommands {
 
     pub async fn add(&self, command_id: String, client_id: String) {
         let mut commands = self.commands.write().await;
-        commands.insert(
-            command_id,
-            PendingCommand {
-                client_id,
-                sent_at: Utc::now(),
-            },
-        );
+        commands.insert(command_id, PendingCommand { client_id });
     }
 
     pub async fn remove(&self, command_id: &str) -> Option<PendingCommand> {
@@ -298,8 +289,6 @@ pub struct ClientRegistry {
 #[derive(Debug, Clone)]
 pub struct RegisteredClient {
     pub id: String,
-    #[allow(dead_code)]
-    pub registered_at: DateTime<Utc>,
 }
 
 impl ClientRegistry {
@@ -312,28 +301,14 @@ impl ClientRegistry {
     pub async fn register(&self, client_id: String) {
         let client = RegisteredClient {
             id: client_id.clone(),
-            registered_at: Utc::now(),
         };
         let mut clients = self.clients.write().await;
         clients.insert(client_id.clone(), client);
         common::log_info!("Registered client: {}", client_id);
     }
 
-    pub async fn is_registered(&self, client_id: &str) -> bool {
-        let clients = self.clients.read().await;
-        clients.contains_key(client_id)
-    }
-
     pub async fn list(&self) -> Vec<RegisteredClient> {
         let clients = self.clients.read().await;
         clients.values().cloned().collect()
-    }
-
-    #[allow(dead_code)]
-    pub async fn remove(&self, client_id: &str) {
-        let mut clients = self.clients.write().await;
-        if clients.remove(client_id).is_some() {
-            common::log_info!("Removed client: {}", client_id);
-        }
     }
 }

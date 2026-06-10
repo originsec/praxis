@@ -11,16 +11,12 @@ use super::exec::{DbRow, db_args};
 
 #[derive(Debug, Clone)]
 pub struct StoredReconResult {
-    #[allow(dead_code)]
     pub id: String,
-    #[allow(dead_code)]
     pub node_id: String,
-    #[allow(dead_code)]
     pub agent_short_name: String,
     pub is_semantic: bool,
     pub recon_result: ReconResult,
     pub performed_at: String,
-    #[allow(dead_code)]
     pub created_at: String,
 }
 
@@ -87,7 +83,6 @@ impl Database {
         row.map(|row| parse_recon_row(&row)).transpose()
     }
 
-    #[allow(dead_code)]
     pub async fn get_recon_results_for_node(
         &self,
         node_id: &str,
@@ -114,7 +109,6 @@ impl Database {
         rows.iter().map(parse_recon_row).collect()
     }
 
-    #[allow(dead_code)]
     pub async fn delete_recon_result(&self, node_id: &str, agent_short_name: &str) -> Result<()> {
         self.db_execute(
             "DELETE FROM recon_results WHERE node_id = $1 AND agent_short_name = $2",

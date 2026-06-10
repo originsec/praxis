@@ -158,7 +158,6 @@ impl Database {
     }
 
     /// List operations for a specific node
-    #[allow(dead_code)]
     pub async fn list_operations_by_node(&self, node_id: &str) -> Result<Vec<OperationRecord>> {
         let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations WHERE node_id = $1 ORDER BY created_at DESC";
@@ -195,7 +194,6 @@ impl Database {
     }
 
     /// Alias for list_operations_by_node (for backwards compatibility)
-    #[allow(dead_code)]
     pub async fn list_by_node(&self, node_id: &str) -> Result<Vec<OperationRecord>> {
         self.list_operations_by_node(node_id).await
     }

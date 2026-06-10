@@ -15,10 +15,6 @@ pub enum PopupKind {
     CommandPalette,
     ModelSelect,
     SaveSession,
-    #[allow(dead_code)]
-    NewOp,
-    #[allow(dead_code)]
-    Confirm,
 }
 
 pub struct ConfirmAction {
@@ -417,8 +413,6 @@ impl App {
                             self.select_model(&value).await;
                         }
                         PopupKind::SaveSession => {}
-                        PopupKind::NewOp => {}
-                        PopupKind::Confirm => {}
                     }
                 }
             }

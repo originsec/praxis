@@ -23,8 +23,6 @@ pub fn render(f: &mut Frame, popup: &Popup) {
         PopupKind::ModelSelect => render_list_select(f, popup, "Select Model"),
         PopupKind::CommandPalette => render_command_palette(f, popup),
         PopupKind::SaveSession => render_save_session(f, popup),
-        PopupKind::NewOp => {}   // rendered separately via new_op_form
-        PopupKind::Confirm => {} // rendered separately via confirm
     }
 }
 
@@ -1023,7 +1021,6 @@ fn toggle_line(label: &str, value: bool, focused: bool) -> Line<'static> {
     ])
 }
 
-#[allow(dead_code)]
 fn _silence_unused() {
     let _ = (OK, STATUS_FAIL, BG_MENU, TEXT);
 }

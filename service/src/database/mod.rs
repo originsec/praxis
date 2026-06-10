@@ -49,7 +49,6 @@ pub use transactions::{TransactionRecord, TransactionStatus};
 // Constants.
 //
 const MAX_OPERATIONS: usize = 1000;
-#[allow(dead_code)]
 const MAX_TRANSACTIONS: usize = 5000;
 const MAX_OPERATION_DEFINITIONS: usize = 500;
 const MAX_CHAIN_EXECUTIONS: usize = 500;
@@ -604,40 +603,13 @@ impl Database {
     }
 
     /// Check if using PostgreSQL backend
-    #[allow(dead_code)]
     pub fn is_postgres(&self) -> bool {
         matches!(self.pool, DatabasePool::Postgres(_))
     }
 
     /// Check if using SQLite backend
-    #[allow(dead_code)]
     pub fn is_sqlite(&self) -> bool {
         matches!(self.pool, DatabasePool::Sqlite(_))
-    }
-
-    //
-    // Helper methods to get pool references for submodules.
-    //
-
-    #[allow(dead_code)]
-    pub(crate) fn sqlite_pool(&self) -> Option<&Pool<Sqlite>> {
-        match &self.pool {
-            DatabasePool::Sqlite(pool) => Some(pool),
-            _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn postgres_pool(&self) -> Option<&Pool<Postgres>> {
-        match &self.pool {
-            DatabasePool::Postgres(pool) => Some(pool),
-            _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn pool(&self) -> &DatabasePool {
-        &self.pool
     }
 }
 

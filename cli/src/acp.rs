@@ -60,10 +60,7 @@ pub enum AcpNotification {
         completion_tokens: u32,
         total_tokens: u32,
     },
-    PromptComplete {
-        #[allow(dead_code)]
-        request_id: String,
-    },
+    PromptComplete,
     //
     // Agent-initiated `session/request_permission` request. The TUI
     // surfaces this as `pending_permission` on the matching session,
@@ -78,8 +75,6 @@ pub enum AcpNotification {
         options: Vec<PermissionOption>,
     },
     Error {
-        #[allow(dead_code)]
-        request_id: Option<String>,
         message: String,
     },
 }
@@ -206,7 +201,6 @@ impl AcpBridgeHandle {
             {
                 tracing::debug!("ACP bridge ended: {}", e);
                 let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
-                    request_id: None,
                     message: format!("ACP bridge ended: {}", e),
                 }));
             }
@@ -533,7 +527,6 @@ async fn run_bridge(
                 }
                 Err(e) => {
                     let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
-                        request_id: None,
                         message: format!("ACP initialize failed: {}", e),
                     }));
                     return Ok(());
@@ -644,9 +637,7 @@ async fn run_bridge(
                             match &result {
                                 Ok(_) => {
                                     let _ = event_tx.send(AppEvent::AcpNotification(
-                                        AcpNotification::PromptComplete {
-                                            request_id: String::new(),
-                                        },
+                                        AcpNotification::PromptComplete,
                                     ));
                                 }
                                 Err(e) => {
@@ -660,7 +651,6 @@ async fn run_bridge(
                                     //
                                     let _ = event_tx.send(AppEvent::AcpNotification(
                                         AcpNotification::Error {
-                                            request_id: None,
                                             message: e.to_string(),
                                         },
                                     ));

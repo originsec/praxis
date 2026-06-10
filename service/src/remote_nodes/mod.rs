@@ -51,14 +51,6 @@ pub struct RemoteNodeContext {
 #[async_trait]
 pub trait RemoteNode: Send + Sync {
     //
-    // Stable id of the kind of remote node this bridge implements (must
-    // match an entry in `REMOTE_NODE_KINDS`). Currently only used for
-    // diagnostics — kept on the trait so future kinds can introspect.
-    //
-    #[allow(dead_code)]
-    fn kind(&self) -> &'static str;
-
-    //
     // Forward an ACP JSON-RPC frame from a praxis client into the
     // bridge. Non-blocking; the bridge owns translation.
     //

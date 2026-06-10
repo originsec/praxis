@@ -175,11 +175,7 @@ fn build_row(state: &InterceptState, row: &DisplayRow) -> Row<'static> {
                 Cell::from(Span::styled(url, Style::default().fg(TEXT))),
             ])
         }
-        DisplayRow::Group {
-            node_id: _,
-            url,
-            indices,
-        } => {
+        DisplayRow::Group { url, indices } => {
             let first = indices
                 .iter()
                 .filter_map(|i| state.buffer.get(*i))
@@ -252,11 +248,7 @@ fn render_detail(f: &mut Frame, area: Rect, state: &InterceptState) {
             .get(*idx)
             .map(|e| http_detail_lines(state, e))
             .unwrap_or_default(),
-        DisplayRow::Group {
-            node_id: _,
-            url,
-            indices,
-        } => group_detail_lines(state, url, indices),
+        DisplayRow::Group { url, indices } => group_detail_lines(state, url, indices),
     };
 
     let inner_h = block.inner(area).height as usize;

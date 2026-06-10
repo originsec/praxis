@@ -1,7 +1,7 @@
 use crate::app::OperationsState;
 use crate::ui::chrome;
 use crate::ui::common::focused_panel;
-use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT, TEXT_BRIGHT};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT};
 use common::{ChainTriggerInfo, ScheduleSpec, TriggerConfig};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -192,14 +192,6 @@ fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
         inner,
     );
-}
-
-#[allow(dead_code)]
-fn kv(label: &str, value: String) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{}: ", label), Style::default().fg(MUTED)),
-        Span::styled(value, Style::default().fg(TEXT)),
-    ])
 }
 
 //

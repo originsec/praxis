@@ -15,8 +15,6 @@ use crate::agent_connectors::{Agent, AgentSession};
 
 pub struct NodeSession {
     pub session_id: Uuid,
-    #[allow(dead_code)]
-    pub client_id: String,
     pub agent: Arc<dyn Agent>,
     pub session: Arc<dyn AgentSession>,
     pub context: SessionContext,
@@ -62,11 +60,6 @@ impl SessionStore {
 
     pub fn list(&self) -> Vec<Arc<NodeSession>> {
         self.inner.read().unwrap().values().cloned().collect()
-    }
-
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.inner.read().unwrap().len()
     }
 }
 

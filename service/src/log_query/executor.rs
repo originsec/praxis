@@ -845,9 +845,6 @@ fn literal_to_value(lit: &Literal) -> Value {
         Literal::Real(Some(n)) => serde_json::Number::from_f64(*n as f64)
             .map(Value::Number)
             .unwrap_or(Value::Null),
-        Literal::Decimal(Some(n)) => serde_json::Number::from_f64(*n)
-            .map(Value::Number)
-            .unwrap_or(Value::Null),
         Literal::Bool(Some(b)) => Value::Bool(*b),
         Literal::Bool(None) => Value::Null,
         _ => Value::Null,

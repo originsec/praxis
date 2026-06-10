@@ -83,62 +83,12 @@ impl DatabaseConfig {
     }
 
     /// Check if this is a PostgreSQL configuration
-    #[allow(dead_code)]
     pub fn is_postgres(&self) -> bool {
         matches!(self, DatabaseConfig::Postgres { .. })
     }
 
     /// Check if this is a SQLite configuration
-    #[allow(dead_code)]
     pub fn is_sqlite(&self) -> bool {
         matches!(self, DatabaseConfig::Sqlite { .. })
-    }
-}
-
-/// Connection pool configuration
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct PoolConfig {
-    /// Maximum number of connections in the pool
-    pub max_connections: u32,
-    /// Connection timeout in seconds
-    pub connect_timeout_secs: u64,
-    /// Idle connection timeout in seconds
-    pub idle_timeout_secs: u64,
-}
-
-impl Default for PoolConfig {
-    fn default() -> Self {
-        Self {
-            max_connections: 10,
-            connect_timeout_secs: 30,
-            idle_timeout_secs: 600,
-        }
-    }
-}
-
-impl PoolConfig {
-    /// Create pool config optimized for SQLite (single connection)
-    #[allow(dead_code)]
-    pub fn sqlite() -> Self {
-        Self {
-            //
-            // SQLite doesn't benefit from multiple connections in WAL mode
-            // when using the same file.
-            //
-            max_connections: 1,
-            connect_timeout_secs: 5,
-            idle_timeout_secs: 300,
-        }
-    }
-
-    /// Create pool config for PostgreSQL
-    #[allow(dead_code)]
-    pub fn postgres() -> Self {
-        Self {
-            max_connections: 10,
-            connect_timeout_secs: 30,
-            idle_timeout_secs: 600,
-        }
     }
 }

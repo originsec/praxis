@@ -10,7 +10,6 @@ use crate::database::{Database, DatabasePool};
 
 /// Session record from database
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct AgentChatSessionRecord {
     pub id: String,
     pub goal: Option<String>,
@@ -21,7 +20,6 @@ pub struct AgentChatSessionRecord {
 
 /// Agent record from database
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct AgentChatAgentRecord {
     pub id: String,
     pub agent_chat_session_id: String,
@@ -37,7 +35,6 @@ pub struct AgentChatAgentRecord {
 
 /// Channel record from database
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct AgentChatChannelRecord {
     pub id: String,
     pub agent_chat_session_id: String,
@@ -49,7 +46,6 @@ pub struct AgentChatChannelRecord {
 
 /// Message record from database
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct AgentChatMessageRecord {
     pub id: i64,
     pub agent_chat_session_id: String,
@@ -98,7 +94,6 @@ impl Database {
     }
 
     /// Get the active AgentChat session
-    #[allow(dead_code)]
     pub async fn get_active_agent_chat_session(&self) -> Result<Option<AgentChatSessionRecord>> {
         let sql = "SELECT id, goal, status, created_at, updated_at
                    FROM agent_chat_sessions WHERE status = 'active' LIMIT 1";
@@ -256,7 +251,6 @@ impl Database {
     }
 
     /// Get all agents for a AgentChat session
-    #[allow(dead_code)]
     pub async fn get_agent_chat_agents(
         &self,
         session_id: &str,
@@ -462,7 +456,6 @@ impl Database {
     }
 
     /// Get all channels for a session
-    #[allow(dead_code)]
     pub async fn get_agent_chat_channels(
         &self,
         session_id: &str,
@@ -506,7 +499,6 @@ impl Database {
     }
 
     /// Get a channel by name in a session
-    #[allow(dead_code)]
     pub async fn get_agent_chat_channel_by_name(
         &self,
         session_id: &str,

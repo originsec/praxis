@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-use glob::glob;
 use std::process::Command;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
@@ -20,32 +18,6 @@ pub fn silent_command(program: &str) -> Command {
 #[cfg(not(windows))]
 pub fn silent_command(program: &str) -> Command {
     Command::new(program)
-}
-
-//
-// Find an executable in PATH using which (Unix) or where (Windows).
-// Returns the path to the executable if found, None otherwise.
-//
-pub fn find_executable_in_path(executable_name: &str) -> Option<String> {
-    #[cfg(windows)]
-    let which_result = silent_command("where").arg(executable_name).output();
-
-    #[cfg(not(windows))]
-    let which_result = silent_command("which").arg(executable_name).output();
-
-    if let Ok(output) = which_result {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(path) = stdout.lines().next() {
-                let path = path.trim().to_string();
-                if !path.is_empty() {
-                    return Some(path);
-                }
-            }
-        }
-    }
-
-    None
 }
 
 //
@@ -131,6 +103,7 @@ pub fn ensure_firewall_rule() -> bool {
     matches!(result, Ok(output) if output.status.success())
 }
 
+#[allow(dead_code)]
 #[cfg(not(windows))]
 pub fn ensure_firewall_rule() -> bool {
     true
@@ -157,62 +130,13 @@ pub fn remove_firewall_rule() -> bool {
     matches!(result, Ok(output) if output.status.success())
 }
 
+#[allow(dead_code)]
 #[cfg(not(windows))]
 pub fn remove_firewall_rule() -> bool {
     true
 }
 
-pub fn is_process_running(process_name: &str) -> bool {
-    use std::ffi::OsStr;
-    let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, false);
-    let found = sys
-        .processes_by_name(OsStr::new(process_name))
-        .next()
-        .is_some();
-    found
-}
-
-pub fn get_running_process_path(process_name: &str) -> Option<String> {
-    use std::ffi::OsStr;
-    let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, false);
-
-    let result = sys
-        .processes_by_name(OsStr::new(process_name))
-        .next()
-        .and_then(|p| p.exe().map(|path| path.to_string_lossy().to_string()));
-    result
-}
-
-pub fn get_process_pid_by_name(process_name: &str) -> Option<u32> {
-    use std::ffi::OsStr;
-    let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, false);
-
-    sys.processes_by_name(OsStr::new(process_name))
-        .next()
-        .map(|p| p.pid().as_u32())
-}
-
-/// Get all child process IDs for a given parent process ID
-pub fn get_child_pids(parent_pid: u32) -> Vec<u32> {
-    let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, false);
-
-    let parent = Pid::from_u32(parent_pid);
-    sys.processes()
-        .iter()
-        .filter_map(|(pid, process)| {
-            if process.parent() == Some(parent) {
-                Some(pid.as_u32())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
+#[allow(dead_code)]
 /// Get all descendant process IDs (children, grandchildren, etc.) for a given parent process ID
 pub fn get_descendant_pids(parent_pid: u32) -> Vec<u32> {
     let mut sys = System::new_all();
@@ -235,18 +159,6 @@ pub fn get_descendant_pids(parent_pid: u32) -> Vec<u32> {
     }
 
     descendants
-}
-
-/// Terminate a process by PID
-pub fn terminate_process(pid: u32) -> bool {
-    let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, false);
-
-    if let Some(process) = sys.process(Pid::from_u32(pid)) {
-        process.kill()
-    } else {
-        false
-    }
 }
 
 //
@@ -325,21 +237,6 @@ pub fn kill_processes_by_name(process_name: &str) -> usize {
         }
     }
     killed
-}
-
-pub fn find_file_in_path(file_name: &str, search_path: &str) -> bool {
-    let paths = std::env::split_paths(search_path);
-    for path in paths {
-        let pattern = path.join(file_name);
-        if let Ok(entries) = glob(pattern.to_str().unwrap_or("")) {
-            for entry in entries.flatten() {
-                if entry.exists() {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 //

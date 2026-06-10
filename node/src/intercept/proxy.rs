@@ -1019,19 +1019,13 @@ const HTTP2_PREFACE_PREFIX: &[u8] = b"PRI ";
 
 const H2_FRAME_DATA: u8 = 0x0;
 const H2_FRAME_HEADERS: u8 = 0x1;
-#[allow(dead_code)]
 const H2_FRAME_PRIORITY: u8 = 0x2;
-#[allow(dead_code)]
 const H2_FRAME_RST_STREAM: u8 = 0x3;
 const H2_FRAME_SETTINGS: u8 = 0x4;
-#[allow(dead_code)]
 const H2_FRAME_PUSH_PROMISE: u8 = 0x5;
-#[allow(dead_code)]
 const H2_FRAME_PING: u8 = 0x6;
 const H2_FRAME_GOAWAY: u8 = 0x7;
-#[allow(dead_code)]
 const H2_FRAME_WINDOW_UPDATE: u8 = 0x8;
-#[allow(dead_code)]
 const H2_FRAME_CONTINUATION: u8 = 0x9;
 
 //
@@ -2618,7 +2612,6 @@ fn create_tls_acceptor(ca: &CertificateAuthority, host: &str) -> Result<TlsAccep
 }
 
 /// Create a TLS acceptor from certificate data
-#[allow(dead_code)]
 fn create_tls_acceptor_from_pem(cert_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
     let certs = rustls_pemfile::certs(&mut Cursor::new(cert_pem))
         .collect::<Result<Vec<_>, _>>()
@@ -2634,135 +2627,6 @@ fn create_tls_acceptor_from_pem(cert_pem: &str, key_pem: &str) -> Result<TlsAcce
         .context("Failed to create TLS config")?;
 
     Ok(TlsAcceptor::from(Arc::new(config)))
-}
-
-/// Read HTTP response from server
-/// Returns (response_line, status_code, headers, body)
-#[allow(dead_code)]
-async fn read_response<R>(
-    reader: &mut tokio::io::BufReader<R>,
-) -> Result<(String, Option<u16>, IndexMap<String, String>, Vec<u8>)>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-
-    //
-    // Read response line.
-    //
-    let mut response_line = String::new();
-    let bytes_read = reader
-        .read_line(&mut response_line)
-        .await
-        .context("Failed to read response line")?;
-
-    if bytes_read == 0 {
-        return Err(anyhow::anyhow!("Connection closed before response"));
-    }
-
-    //
-    // Parse status code.
-    //
-    let status_code = response_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse::<u16>().ok());
-
-    //
-    // Read headers - preserve original order and case.
-    //
-    let mut response_headers = IndexMap::new();
-    let mut response_content_length: usize = 0;
-    let mut is_chunked = false;
-
-    loop {
-        let mut header_line = String::new();
-        reader
-            .read_line(&mut header_line)
-            .await
-            .context("Failed to read response header")?;
-        let line = header_line.trim();
-        if line.is_empty() {
-            break;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            let original_key = key.trim().to_string();
-            let value = value.trim().to_string();
-            if original_key.eq_ignore_ascii_case("content-length") {
-                response_content_length = value.parse().unwrap_or(0);
-            }
-            if original_key.eq_ignore_ascii_case("transfer-encoding")
-                && value.to_lowercase().contains("chunked")
-            {
-                is_chunked = true;
-            }
-            response_headers.insert(original_key, value);
-        }
-    }
-
-    //
-    // Read body.
-    //
-    let response_body = if is_chunked {
-        read_chunked_body(reader).await.unwrap_or_default()
-    } else if response_content_length > 0 {
-        let mut body = vec![0u8; response_content_length];
-        reader
-            .read_exact(&mut body)
-            .await
-            .context("Failed to read response body")?;
-        body
-    } else {
-        Vec::new()
-    };
-
-    Ok((response_line, status_code, response_headers, response_body))
-}
-
-/// Read chunked transfer-encoded body (non-streaming, for non-chunked fallback)
-#[allow(dead_code)]
-async fn read_chunked_body<R>(reader: &mut tokio::io::BufReader<R>) -> Result<Vec<u8>>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-
-    let mut body = Vec::new();
-
-    loop {
-        let mut size_line = String::new();
-        reader
-            .read_line(&mut size_line)
-            .await
-            .context("Failed to read chunk size")?;
-
-        let chunk_size =
-            usize::from_str_radix(size_line.trim(), 16).context("Invalid chunk size")?;
-
-        if chunk_size == 0 {
-            //
-            // Read trailing CRLF.
-            //
-            let mut trailer = String::new();
-            let _ = reader.read_line(&mut trailer).await;
-            break;
-        }
-
-        let mut chunk = vec![0u8; chunk_size];
-        reader
-            .read_exact(&mut chunk)
-            .await
-            .context("Failed to read chunk data")?;
-        body.extend_from_slice(&chunk);
-
-        //
-        // Read trailing CRLF after chunk.
-        //
-        let mut crlf = [0u8; 2];
-        let _ = reader.read_exact(&mut crlf).await;
-    }
-
-    Ok(body)
 }
 
 /// Response body type indicator

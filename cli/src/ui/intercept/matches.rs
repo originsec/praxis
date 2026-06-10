@@ -242,7 +242,6 @@ pub fn hints(_app: &App) -> Line<'static> {
     ])
 }
 
-#[allow(dead_code)]
 fn _unused() {
     let _ = OK;
 }

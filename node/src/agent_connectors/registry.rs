@@ -106,22 +106,6 @@ impl AgentRegistry {
             .find(|a| a.short_name() == short_name)
             .cloned()
     }
-
-    #[allow(dead_code)]
-    pub fn unregister(&mut self, short_name: &str) -> bool {
-        let len_before = self.agents.len();
-        self.agents.retain(|a| a.short_name() != short_name);
-        self.lua_agents.remove(short_name);
-        self.agents.len() < len_before
-    }
-
-    #[allow(dead_code)]
-    pub fn unregister_lua(&mut self, short_name: &str) -> bool {
-        if !self.lua_agents.contains_key(short_name) {
-            return false;
-        }
-        self.unregister(short_name)
-    }
 }
 
 impl Default for AgentRegistry {

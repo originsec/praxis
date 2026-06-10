@@ -212,7 +212,6 @@ pub struct SessionChat {
     pub tool_calls: Vec<ToolCallEntry>,
 }
 
-#[allow(dead_code)]
 pub struct PendingPermission {
     pub permission_id: String,
     pub tool_name: String,
@@ -225,10 +224,8 @@ pub struct PendingPermission {
 }
 
 pub struct ToolCallEntry {
-    #[allow(dead_code)]
     pub tool_name: String,
     pub tool_id: String,
-    #[allow(dead_code)]
     pub input: String,
     pub output: Option<String>,
     pub is_error: bool,

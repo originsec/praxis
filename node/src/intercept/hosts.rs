@@ -46,31 +46,6 @@ pub fn add_hosts_entry(domain: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove the hosts file entry for the domain
-#[allow(dead_code)]
-pub fn remove_hosts_entry(domain: &str) -> Result<()> {
-    let hosts_path = PathBuf::from(HOSTS_FILE_PATH);
-
-    let file = fs::File::open(&hosts_path).context("Failed to open hosts file for reading")?;
-    let reader = BufReader::new(file);
-
-    let mut new_lines: Vec<String> = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        //
-        // Skip lines with our marker for this domain.
-        //
-        if !(line.contains(domain) && line.contains(INTERCEPT_MARKER)) {
-            new_lines.push(line);
-        }
-    }
-
-    fs::write(&hosts_path, new_lines.join("\n")).context("Failed to write updated hosts file")?;
-
-    common::log_info!("Removed hosts entry for {}", domain);
-    Ok(())
-}
-
 //
 // Flush the Windows DNS cache so hosts file changes take effect immediately.
 //

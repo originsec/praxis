@@ -87,7 +87,6 @@ static ACP_PERMISSION_RECEIVERS: Lazy<
     Mutex<HashMap<String, std::sync::mpsc::Receiver<(String, PermissionDecision)>>>,
 > = Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[allow(dead_code)]
 pub fn register_update_sender(handle: &str, tx: tokio::sync::mpsc::Sender<SessionUpdateKind>) {
     ACP_UPDATE_SENDERS
         .lock()
@@ -99,7 +98,6 @@ pub fn take_update_sender(handle: &str) -> Option<tokio::sync::mpsc::Sender<Sess
     ACP_UPDATE_SENDERS.lock_safe().remove(handle)
 }
 
-#[allow(dead_code)]
 pub fn register_permission_receiver(
     handle: &str,
     rx: std::sync::mpsc::Receiver<(String, PermissionDecision)>,
@@ -123,18 +121,4 @@ pub fn take_permission_receiver(
 pub fn cleanup_channels(handle: &str) {
     ACP_UPDATE_SENDERS.lock_safe().remove(handle);
     ACP_PERMISSION_RECEIVERS.lock_safe().remove(handle);
-}
-
-//
-// Close and remove all ACP clients (used during node reset).
-//
-
-#[allow(dead_code)]
-pub fn close_all() {
-    let mut clients = ACP_CLIENTS.lock_safe();
-    for (_, client) in clients.drain() {
-        client.close();
-    }
-    ACP_UPDATE_SENDERS.lock_safe().clear();
-    ACP_PERMISSION_RECEIVERS.lock_safe().clear();
 }

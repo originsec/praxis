@@ -36,10 +36,9 @@ pub struct CertificateAuthority {
     /// Root CA issuer (owns params + signing key, used to sign leaf certs)
     root_issuer: Issuer<'static, KeyPair>,
     /// Root CA certificate PEM (for easy access)
-    #[allow(dead_code)]
     root_cert_pem: String,
-    /// Root CA thumbprint (for cleanup on Windows)
     #[allow(dead_code)]
+    /// Root CA thumbprint (for cleanup on Windows)
     root_thumbprint: Option<String>,
     /// Cached leaf certificates for domains
     leaf_certs: HashMap<String, Arc<CertificateData>>,
@@ -125,7 +124,6 @@ impl CertificateAuthority {
         })
     }
 
-    #[allow(dead_code)]
     pub fn root_cert_pem(&self) -> &str {
         &self.root_cert_pem
     }
@@ -221,7 +219,6 @@ impl CertificateAuthority {
         Ok(cert_data)
     }
 
-    #[allow(dead_code)]
     pub fn get_leaf_cert(&self, domain: &str) -> Option<Arc<CertificateData>> {
         self.leaf_certs.get(domain).map(Arc::clone)
     }
@@ -529,12 +526,6 @@ impl CertificateAuthority {
     pub fn uninstall_root_cert(&self) -> Result<()> {
         common::log_warn!("Certificate uninstallation not implemented for this platform");
         Ok(())
-    }
-
-    /// Clear all cached leaf certificates
-    #[allow(dead_code)]
-    pub fn clear_leaf_certs(&mut self) {
-        self.leaf_certs.clear();
     }
 
     /// Get the certificate thumbprint (Windows only)

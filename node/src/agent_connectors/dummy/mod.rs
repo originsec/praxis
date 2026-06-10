@@ -17,15 +17,15 @@ const AGENT_SHORTNAME: &str = "dummy";
 
 /// A dummy agent that doesn't require any external processes.
 /// Useful for testing and validating agent abstractions.
-#[allow(dead_code)]
 pub struct DummyAgent;
 
-#[allow(dead_code)]
 impl DummyAgent {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
 
+    #[allow(dead_code)]
     /// Generate demo MCP servers with tools
     fn get_demo_mcp_servers(&self) -> Vec<McpServer> {
         vec![
@@ -87,6 +87,7 @@ impl DummyAgent {
         ]
     }
 
+    #[allow(dead_code)]
     /// Generate demo skills
     fn get_demo_skills(&self) -> Vec<AgentTool> {
         vec![
@@ -113,6 +114,7 @@ impl DummyAgent {
         ]
     }
 
+    #[allow(dead_code)]
     /// Generate demo internal tools (only for semantic recon)
     fn get_demo_internal_tools(&self) -> Vec<AgentTool> {
         vec![
@@ -159,6 +161,7 @@ impl DummyAgent {
         ]
     }
 
+    #[allow(dead_code)]
     /// Generate demo config items
     fn get_demo_config(&self) -> Vec<ConfigItem> {
         vec![

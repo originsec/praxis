@@ -64,21 +64,7 @@ pub const ERROR: Color = STATUS_FAIL;
 // tokens.
 //
 
-#[allow(dead_code)]
-pub const PANEL_HIGHLIGHT_BG: Color = BG_ELEMENT;
-#[allow(dead_code)]
-pub const POPUP_HIGHLIGHT_BG: Color = BG_SELECTED;
-#[allow(dead_code)]
-pub const SETTINGS_HIGHLIGHT_BG: Color = BG_SELECTED;
-#[allow(dead_code)]
-pub const POPUP_BG: Color = BG_PANEL;
 pub const INPUT_BORDER: Color = BORDER;
-#[allow(dead_code)]
-pub const ACCENT_SOFT: Color = Color::Rgb(85, 150, 85);
-#[allow(dead_code)]
-pub const INFO: Color = STATUS_QUEUED;
-#[allow(dead_code)]
-pub const BORDER_ACTIVE: Color = Color::Rgb(95, 105, 115);
 
 //
 // Intercept view: HTTP status-code buckets and protocol markers.
@@ -99,9 +85,6 @@ pub const PROTO_H2: Color = Color::Rgb(190, 130, 215);
 
 pub const KEYWORD: Color = SECONDARY;
 
-pub const CODE_FG: Color = Color::Rgb(125, 195, 125);
-#[allow(dead_code)]
-pub const CODE_BG: Color = BG_ELEMENT;
 pub const JSON_KEY: Color = Color::Rgb(150, 205, 150);
 pub const JSON_STRING: Color = Color::Rgb(210, 185, 130);
 pub const JSON_NUMBER: Color = Color::Rgb(120, 170, 215);

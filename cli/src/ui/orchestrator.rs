@@ -851,7 +851,6 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
 fn render_status_hints(_f: &mut Frame, _area: Rect, _state: &OrchestratorState) {}
 
-#[allow(dead_code)]
 fn _silence_unused() {
     let _ = BG_PANEL;
 }

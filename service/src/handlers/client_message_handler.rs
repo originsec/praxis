@@ -62,9 +62,4 @@ impl ClientMessageHandler {
 
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub async fn is_client_registered(&self, client_id: &str) -> bool {
-        self.registry.is_registered(client_id).await
-    }
 }

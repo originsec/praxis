@@ -127,7 +127,6 @@ impl Database {
     }
 
     /// Get a single chain execution by ID
-    #[allow(dead_code)]
     pub async fn get_chain_execution(
         &self,
         execution_id: &str,
@@ -149,7 +148,6 @@ impl Database {
     }
 
     /// List chain executions by status
-    #[allow(dead_code)]
     pub async fn list_chain_executions_by_status(
         &self,
         status: ChainExecutionStatus,

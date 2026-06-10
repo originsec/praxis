@@ -10,6 +10,7 @@ use uiautomation::variants::Variant;
 #[cfg(windows)]
 use uiautomation::{UIElement, core::UIAutomation};
 
+#[allow(dead_code)]
 #[cfg(windows)]
 pub struct UIAutomationControl {
     automation: UIAutomation,
@@ -22,28 +23,31 @@ unsafe impl Send for UIAutomationControl {}
 unsafe impl Sync for UIAutomationControl {}
 
 #[cfg(windows)]
-#[allow(dead_code)]
 impl UIAutomationControl {
     #[allow(dead_code)]
     pub fn new(window_name_prefix: &str) -> uiautomation::Result<Self> {
         Self::new_with_pid(window_name_prefix, None)
     }
 
+    #[allow(dead_code)]
     /// Get a reference to the UIAutomation instance
     pub fn automation(&self) -> &UIAutomation {
         &self.automation
     }
 
+    #[allow(dead_code)]
     /// Get a reference to the window element
     pub fn window(&self) -> &UIElement {
         &self.window
     }
 
+    #[allow(dead_code)]
     /// Focus the window
     pub fn focus_window(&self) -> uiautomation::Result<()> {
         self.window.set_focus()
     }
 
+    #[allow(dead_code)]
     /// Check if an element with the given class name prefix exists
     pub fn has_element_with_class_prefix(&self, class_name_prefix: &str) -> bool {
         let true_condition = match self.automation.create_true_condition() {
@@ -64,6 +68,7 @@ impl UIAutomationControl {
         })
     }
 
+    #[allow(dead_code)]
     pub fn new_with_pid(window_name_prefix: &str, pid: Option<u32>) -> uiautomation::Result<Self> {
         let automation = UIAutomation::new()?;
 
@@ -183,6 +188,7 @@ impl UIAutomationControl {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn send_keys(&self, class_name_prefix: &str, keys: &str) -> uiautomation::Result<()> {
         let true_condition = self.automation.create_true_condition()?;
         let all_elements = self
@@ -210,6 +216,7 @@ impl UIAutomationControl {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn send_text(&self, class_name_prefix: &str, keys: &str) -> uiautomation::Result<()> {
         let true_condition = self.automation.create_true_condition()?;
         let all_elements = self

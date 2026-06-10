@@ -187,7 +187,6 @@ impl Database {
     }
 
     /// Get a single traffic entry by ID
-    #[allow(dead_code)]
     pub async fn get_traffic(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {
         let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body
              FROM intercepted_traffic WHERE id = $1";

@@ -6,19 +6,6 @@ use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-//
-// Mode of interaction for an agent session.
-//
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum AgentMode {
-    UIAutomation,
-    DevTools,
-    Cli,
-    Acp,
-}
-
 pub struct SessionTransactContext {
     pub update_tx: Option<mpsc::Sender<SessionUpdateKind>>,
     pub permission_rx: Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>,
@@ -31,19 +18,6 @@ pub struct SessionTransactContext {
 //
 
 pub trait AgentSession: Send + Sync {
-    #[allow(dead_code)]
-    fn session_id(&self) -> &Uuid;
-    #[allow(dead_code)]
-    fn process_path(&self) -> Option<String> {
-        None
-    }
-    #[allow(dead_code)]
-    fn working_dir(&self) -> Option<String> {
-        None
-    }
-
-    #[allow(dead_code)]
-    fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
 
     fn transact_with_context(&self, prompt: &str, ctx: SessionTransactContext) -> Result<String> {
@@ -91,9 +65,6 @@ pub trait AgentSession: Send + Sync {
     // it constructed itself with, or none).
     //
     fn set_cancel_flag(&self, _flag: Arc<AtomicBool>) {}
-
-    #[allow(dead_code)]
-    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 //

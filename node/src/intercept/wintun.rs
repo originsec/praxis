@@ -157,9 +157,9 @@ impl WintunManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     /// Shutdown the session to unblock any blocking reads
     /// This should be called before waiting for the packet engine to stop
-    #[allow(dead_code)]
     pub fn shutdown_session(&self) {
         if let Some(session) = &self.session {
             common::log_debug!("Shutting down wintun session to unblock readers");
@@ -174,14 +174,14 @@ impl WintunManager {
         self.session.clone()
     }
 
-    /// Get a reference to the adapter
     #[allow(dead_code)]
+    /// Get a reference to the adapter
     pub fn adapter(&self) -> Option<&Arc<wintun::Adapter>> {
         self.adapter.as_ref()
     }
 
-    /// Check if the VPN adapter is active
     #[allow(dead_code)]
+    /// Check if the VPN adapter is active
     pub fn is_active(&self) -> bool {
         self.is_active
     }
@@ -201,19 +201,20 @@ impl Drop for WintunManager {
 //
 // Non-Windows stub implementation.
 //
+#[allow(dead_code)]
 #[cfg(not(target_os = "windows"))]
 pub struct WintunManager {
-    #[allow(dead_code)]
     is_active: bool,
 }
 
 #[cfg(not(target_os = "windows"))]
-#[allow(dead_code)]
 impl WintunManager {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self { is_active: false }
     }
 
+    #[allow(dead_code)]
     pub fn start(&mut self) -> Result<()> {
         common::log_warn!("Wintun VPN mode is only supported on Windows");
         Err(anyhow::anyhow!(
@@ -221,14 +222,17 @@ impl WintunManager {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn stop(&mut self) -> Result<()> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         self.is_active
     }
 
+    #[allow(dead_code)]
     pub fn shutdown_session(&self) {
         //
         // No-op on non-Windows.
@@ -238,6 +242,7 @@ impl WintunManager {
     //
     // Stub methods for non-Windows - these won't be called.
     //
+    #[allow(dead_code)]
     pub fn session(&self) -> Option<std::sync::Arc<()>> {
         None
     }

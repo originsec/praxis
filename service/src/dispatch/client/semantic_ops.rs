@@ -27,7 +27,6 @@ pub(super) async fn handle_semantic_op_run(
     match ctx
         .semantic_ops_manager
         .queue_operation(
-            client_id.clone(),
             node_id.clone(),
             agent_short_name,
             operation_name,

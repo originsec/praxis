@@ -172,7 +172,7 @@ impl ExecutionGraph {
     }
 
     /// Get elements with no outgoing connections (terminal elements)
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn terminal_elements(&self) -> Vec<ElementId> {
         self.nodes
             .iter()
@@ -181,17 +181,8 @@ impl ExecutionGraph {
             .collect()
     }
 
-    /// Get the number of incoming edges (for merge detection)
-    #[allow(dead_code)]
-    pub fn get_input_count(&self, element_id: &ElementId) -> usize {
-        self.nodes
-            .get(element_id)
-            .map(|n| n.dependencies.len())
-            .unwrap_or(0)
-    }
-
     /// Get the number of outgoing edges (for branch detection)
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_output_count(&self, element_id: &ElementId) -> usize {
         self.nodes
             .get(element_id)

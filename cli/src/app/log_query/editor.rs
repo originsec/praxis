@@ -44,11 +44,6 @@ impl EditorBuffer {
         self.lines.join("\n")
     }
 
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.lines.len() == 1 && self.lines[0].is_empty()
-    }
-
     pub fn current_line_len(&self) -> usize {
         self.lines[self.cursor_row].chars().count()
     }

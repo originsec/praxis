@@ -622,11 +622,6 @@ impl NodeInterceptManager {
     pub fn intercepted_domains(&self) -> Vec<String> {
         self.domains.iter().cloned().collect()
     }
-
-    #[allow(dead_code)]
-    pub fn proxy_port(&self) -> Option<u16> {
-        self.proxy_port
-    }
 }
 
 impl NodeInterceptManager {

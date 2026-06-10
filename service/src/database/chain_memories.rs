@@ -30,7 +30,6 @@ impl Database {
     }
 
     /// Delete a chain memory value
-    #[allow(dead_code)]
     pub async fn delete_memory(&self, key: &str) -> Result<bool> {
         let rows_affected = self
             .db_execute("DELETE FROM chain_memories WHERE key = $1", db_args![key])
@@ -40,7 +39,6 @@ impl Database {
     }
 
     /// List all chain memory values
-    #[allow(dead_code)]
     pub async fn list_memories(&self) -> Result<HashMap<String, String>> {
         let sql = "SELECT key, value FROM chain_memories";
 

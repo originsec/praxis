@@ -6,7 +6,6 @@ use super::{Database, MAX_TRANSACTIONS};
 
 /// Status of a session transaction
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum TransactionStatus {
     Pending,
     Completed,
@@ -16,7 +15,6 @@ pub enum TransactionStatus {
 
 /// Database record for a session transaction
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct TransactionRecord {
     pub transaction_id: String,
     pub node_id: String,
@@ -29,7 +27,6 @@ pub struct TransactionRecord {
 
 impl Database {
     /// Insert a new session transaction record (when request is sent)
-    #[allow(dead_code)]
     pub async fn insert_transaction(&self, record: &TransactionRecord) -> Result<()> {
         let sql = "INSERT INTO session_transactions (transaction_id, node_id, prompt_text, request_sent_at, response_received_at, response_text, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7)";
@@ -54,7 +51,6 @@ impl Database {
     }
 
     /// Update a transaction when response is received
-    #[allow(dead_code)]
     pub async fn update_transaction_response(
         &self,
         transaction_id: &str,
@@ -79,7 +75,6 @@ impl Database {
     }
 
     /// Get a transaction by ID
-    #[allow(dead_code)]
     pub async fn get_transaction(&self, transaction_id: &str) -> Result<Option<TransactionRecord>> {
         let sql = "SELECT transaction_id, node_id, prompt_text, request_sent_at, response_received_at, response_text, status
              FROM session_transactions WHERE transaction_id = $1";
@@ -91,7 +86,6 @@ impl Database {
     }
 
     /// List recent transactions for a node
-    #[allow(dead_code)]
     pub async fn list_transactions_by_node(
         &self,
         node_id: &str,
@@ -131,7 +125,6 @@ impl Database {
     }
 
     /// Mark all pending transactions as failed (used on service startup)
-    #[allow(dead_code)]
     pub async fn mark_pending_transactions_as_failed(&self) -> Result<usize> {
         let sql = "UPDATE session_transactions
              SET status = 'Error',

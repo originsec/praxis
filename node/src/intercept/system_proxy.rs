@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 
 /// Saved proxy settings for restoration
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct SavedProxySettings {
     pub proxy_enable: u32,
     pub proxy_server: Option<String>,
@@ -149,9 +148,9 @@ pub fn disable_system_proxy(_saved: Option<&SavedProxySettings>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Get the current system proxy settings
 #[cfg(target_os = "windows")]
-#[allow(dead_code)]
 pub fn get_proxy_settings() -> Result<SavedProxySettings> {
     use winreg::RegKey;
     use winreg::enums::*;
@@ -172,9 +171,9 @@ pub fn get_proxy_settings() -> Result<SavedProxySettings> {
     })
 }
 
+#[allow(dead_code)]
 /// Get the current system proxy settings on Linux
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 pub fn get_proxy_settings() -> Result<SavedProxySettings> {
     //
     // Check if HTTP_PROXY is set in the environment.
@@ -192,7 +191,6 @@ pub fn get_proxy_settings() -> Result<SavedProxySettings> {
 
 /// Get the current system proxy settings (non-Windows/non-Linux stub)
 #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-#[allow(dead_code)]
 pub fn get_proxy_settings() -> Result<SavedProxySettings> {
     Ok(SavedProxySettings {
         proxy_enable: 0,
@@ -230,8 +228,8 @@ fn notify_proxy_change() {
         .output();
 }
 
-#[cfg(not(target_os = "windows"))]
 #[allow(dead_code)]
+#[cfg(not(target_os = "windows"))]
 fn notify_proxy_change() {
     //
     // No-op on non-Windows.

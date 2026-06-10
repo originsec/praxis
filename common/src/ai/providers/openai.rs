@@ -300,8 +300,6 @@ struct OpenAIStreamRequest {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamChunk {
-    #[allow(dead_code)]
-    id: Option<String>,
     choices: Vec<OpenAIStreamChoice>,
     usage: Option<OpenAIUsage>,
 }

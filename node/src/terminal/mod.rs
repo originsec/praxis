@@ -134,7 +134,6 @@ impl TerminalManager {
         });
 
         let session = TerminalSession {
-            terminal_id: terminal_id.clone(),
             client_id,
             master: pair.master,
             child: Some(child),
@@ -186,28 +185,9 @@ impl TerminalManager {
             .map(|(id, _)| id)
     }
 
-    #[allow(dead_code)]
-    pub fn has_session(&self, terminal_id: &str) -> bool {
-        self.sessions.contains_key(terminal_id)
-    }
-
     pub fn close_all(&mut self) {
         let ids: Vec<String> = self.sessions.keys().cloned().collect();
         for id in ids {
-            let _ = self.close_session(&id);
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn close_all_for_client(&mut self, client_id: &str) {
-        let to_close: Vec<String> = self
-            .sessions
-            .iter()
-            .filter(|(_, s)| s.client_id == client_id)
-            .map(|(id, _)| id.clone())
-            .collect();
-
-        for id in to_close {
             let _ = self.close_session(&id);
         }
     }

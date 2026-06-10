@@ -15,7 +15,6 @@ pub const LLM_MODEL_DEFINITIONS: &str = "llm_model_definitions";
 pub const LLM_FEATURE_SEMANTIC_PARSER: &str = "llm_feature_semantic_parser";
 pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
-#[allow(dead_code)]
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 
 /// Praxis agent configuration keys.
@@ -142,7 +141,6 @@ impl ServiceConfig {
     }
 
     /// Remove a configuration key
-    #[allow(dead_code)]
     pub async fn remove(&mut self, key: &str) -> anyhow::Result<Option<String>> {
         self.db.delete_config(key).await?;
         Ok(self.cache.remove(key))
@@ -183,7 +181,6 @@ impl ServiceConfig {
     }
 
     /// Get the model definition assigned to orchestrator feature
-    #[allow(dead_code)]
     pub fn get_orchestrator_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_ORCHESTRATOR)
             .and_then(|model_ref| self.find_model_definition(model_ref))
@@ -238,7 +235,6 @@ impl ServiceConfig {
     }
 
     /// Convert to a HashMap (for backwards compatibility with existing code)
-    #[allow(dead_code)]
     pub fn to_hashmap(&self) -> HashMap<String, String> {
         self.cache.clone()
     }

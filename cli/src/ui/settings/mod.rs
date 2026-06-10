@@ -169,7 +169,6 @@ pub(super) fn section_header(title: &str) -> Line<'_> {
     )])
 }
 
-#[allow(dead_code)]
 fn _unused() {
     let _ = (BG_SELECTED, ACCENT);
 }

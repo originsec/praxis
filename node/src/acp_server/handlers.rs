@@ -159,7 +159,6 @@ pub async fn handle_session_new(
 
     let node_session = Arc::new(NodeSession {
         session_id,
-        client_id: client_id.to_string(),
         agent,
         session: agent_session,
         context,

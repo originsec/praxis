@@ -11,7 +11,6 @@ use super::exec::db_args;
 
 impl Database {
     /// Get a service configuration value by key
-    #[allow(dead_code)]
     pub async fn get_config(&self, key: &str) -> Result<Option<String>> {
         let sql = "SELECT value FROM service_config WHERE key = $1";
 
@@ -35,7 +34,6 @@ impl Database {
     }
 
     /// Delete a service configuration value
-    #[allow(dead_code)]
     pub async fn delete_config(&self, key: &str) -> Result<bool> {
         let rows_affected = self
             .db_execute("DELETE FROM service_config WHERE key = $1", db_args![key])

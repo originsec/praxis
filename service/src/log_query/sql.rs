@@ -37,8 +37,6 @@ pub struct SqlColumn {
     pub kql_name: &'static str,
     pub sql_expr: &'static str,
     pub col_type: SqlColumnType,
-    #[allow(dead_code)]
-    pub nullable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -58,37 +56,31 @@ impl VirtualTable {
                         kql_name: "timestamp",
                         sql_expr: "timestamp",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "source",
                         sql_expr: "source",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "source_id",
                         sql_expr: "source_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "level",
                         sql_expr: "level",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "target",
                         sql_expr: "target",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "message",
                         sql_expr: "message",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                 ],
                 order_by: "timestamp DESC",
@@ -101,85 +93,71 @@ impl VirtualTable {
                         kql_name: "timestamp",
                         sql_expr: "timestamp",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "traffic_id",
                         sql_expr: "id",
                         col_type: SqlColumnType::Integer,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "node_id",
                         sql_expr: "node_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "agent_short_name",
                         sql_expr: "agent_short_name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "intercept_method",
                         sql_expr: "intercept_method",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "direction",
                         sql_expr: "direction",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "method",
                         sql_expr: "method",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "url",
                         sql_expr: "url",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "host",
                         sql_expr: "host",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "request_headers",
                         sql_expr: "request_headers",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "request_body",
                         sql_expr: "request_body",
                         col_type: SqlColumnType::Blob,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "response_status",
                         sql_expr: "response_status",
                         col_type: SqlColumnType::Integer,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "response_headers",
                         sql_expr: "response_headers",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "response_body",
                         sql_expr: "response_body",
                         col_type: SqlColumnType::Blob,
-                        nullable: true,
                     },
                 ],
                 order_by: "timestamp DESC",
@@ -194,73 +172,61 @@ impl VirtualTable {
                         kql_name: "timestamp",
                         sql_expr: "tm.matched_at",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "traffic_id",
                         sql_expr: "tm.traffic_id",
                         col_type: SqlColumnType::Integer,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "node_id",
                         sql_expr: "it.node_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "agent_short_name",
                         sql_expr: "it.agent_short_name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "rule_id",
                         sql_expr: "tm.rule_id",
                         col_type: SqlColumnType::Integer,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "rule_name",
                         sql_expr: "ir.name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "summary",
                         sql_expr: "tm.summary",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "method",
                         sql_expr: "it.method",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "url",
                         sql_expr: "it.url",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "host",
                         sql_expr: "it.host",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "direction",
                         sql_expr: "it.direction",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "response_status",
                         sql_expr: "it.response_status",
                         col_type: SqlColumnType::Integer,
-                        nullable: true,
                     },
                 ],
                 order_by: "tm.matched_at DESC",
@@ -273,67 +239,56 @@ impl VirtualTable {
                         kql_name: "timestamp",
                         sql_expr: "created_at",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "operation_id",
                         sql_expr: "operation_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "node_id",
                         sql_expr: "node_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "agent_short_name",
                         sql_expr: "agent_short_name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "status",
                         sql_expr: "status",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "operation_spec",
                         sql_expr: "operation_spec",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "start_time",
                         sql_expr: "start_time",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "end_time",
                         sql_expr: "end_time",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "summary",
                         sql_expr: "summary",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "result",
                         sql_expr: "result",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                     SqlColumn {
                         kql_name: "chain_execution_id",
                         sql_expr: "chain_execution_id",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                 ],
                 order_by: "created_at DESC",
@@ -346,67 +301,56 @@ impl VirtualTable {
                         kql_name: "timestamp",
                         sql_expr: "created_at",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "execution_id",
                         sql_expr: "execution_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "chain_id",
                         sql_expr: "chain_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "chain_name",
                         sql_expr: "chain_name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "node_id",
                         sql_expr: "node_id",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "agent_short_name",
                         sql_expr: "agent_short_name",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "status",
                         sql_expr: "status",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "elements",
                         sql_expr: "elements",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "outputs",
                         sql_expr: "outputs",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "started_at",
                         sql_expr: "started_at",
                         col_type: SqlColumnType::Text,
-                        nullable: false,
                     },
                     SqlColumn {
                         kql_name: "ended_at",
                         sql_expr: "ended_at",
                         col_type: SqlColumnType::Text,
-                        nullable: true,
                     },
                 ],
                 order_by: "created_at DESC",
@@ -522,16 +466,10 @@ fn literal_to_sql(lit: &Literal, idx: &mut usize) -> Result<(String, Vec<SqlPara
             *idx += 1;
             Ok((format!("${}", *idx), vec![SqlParam::Float(*n as f64)]))
         }
-        Literal::Decimal(Some(n)) => {
-            *idx += 1;
-            Ok((format!("${}", *idx), vec![SqlParam::Float(*n)]))
-        }
         Literal::Bool(Some(b)) => Ok((if *b { "1" } else { "0" }.to_string(), vec![])),
-        Literal::Bool(None)
-        | Literal::Int(None)
-        | Literal::Long(None)
-        | Literal::Real(None)
-        | Literal::Decimal(None) => Ok(("NULL".to_string(), vec![])),
+        Literal::Bool(None) | Literal::Int(None) | Literal::Long(None) | Literal::Real(None) => {
+            Ok(("NULL".to_string(), vec![]))
+        }
         _ => Err(anyhow!("Unsupported literal type for SQL")),
     }
 }

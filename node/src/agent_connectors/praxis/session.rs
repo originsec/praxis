@@ -17,7 +17,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-use crate::agent_connectors::traits::{AgentMode, AgentSession, SessionTransactContext};
+use crate::agent_connectors::traits::{AgentSession, SessionTransactContext};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are Praxis, an autonomous agent running on the target system. You have access to a run_command tool that lets you execute shell commands. Use it carefully and only when necessary.";
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 10;
@@ -39,8 +39,6 @@ const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 60;
 
 pub struct PraxisAgentSession {
     config: PraxisAgentConfig,
-    #[allow(dead_code)]
-    session_id: Uuid,
     handle: String,
     cancel_flag: Mutex<Arc<AtomicBool>>,
     messages: Mutex<Vec<Message>>,
@@ -50,7 +48,6 @@ impl PraxisAgentSession {
     pub fn new(config: PraxisAgentConfig, session_id: Uuid) -> Self {
         Self {
             config,
-            session_id,
             handle: format!("praxis-{}", session_id),
             cancel_flag: Mutex::new(Arc::new(AtomicBool::new(false))),
             messages: Mutex::new(Vec::new()),
@@ -249,14 +246,6 @@ impl PraxisAgentSession {
 }
 
 impl AgentSession for PraxisAgentSession {
-    fn session_id(&self) -> &Uuid {
-        &self.session_id
-    }
-
-    fn mode(&self) -> AgentMode {
-        AgentMode::Acp
-    }
-
     fn acp_handle(&self) -> Option<String> {
         Some(self.handle.clone())
     }
@@ -289,10 +278,6 @@ impl AgentSession for PraxisAgentSession {
         if let Ok(mut guard) = self.cancel_flag.lock() {
             *guard = flag;
         }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

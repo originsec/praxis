@@ -3,7 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding};
 
-use super::theme::{ACCENT, BG, BG_PANEL, BORDER, DIM, TEXT_BRIGHT};
+use super::theme::{ACCENT, BG, BG_PANEL, TEXT_BRIGHT};
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -103,14 +103,4 @@ pub fn spinner_char() -> char {
         / 100) as usize
         % SPINNER_FRAMES.len();
     SPINNER_FRAMES[frame_idx]
-}
-
-#[allow(dead_code)]
-pub fn border_color_for(focused: bool) -> ratatui::style::Color {
-    if focused { ACCENT } else { BORDER }
-}
-
-#[allow(dead_code)]
-pub fn dim_color() -> ratatui::style::Color {
-    DIM
 }

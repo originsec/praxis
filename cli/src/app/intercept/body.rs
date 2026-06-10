@@ -1,20 +1,17 @@
 //
 // Body rendering: produces Vec<Line<'static>> suitable for a ratatui
-// Paragraph. Three modes: pretty-printed JSON with light colouring,
-// raw decoded text, and offset+hex+ascii.
+// Paragraph. Pretty-prints JSON with light colouring, falling back to
+// plain text.
 //
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::ui::theme::{CODE_FG, DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT};
+use crate::ui::theme::{DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum BodyMode {
     Pretty,
-    Raw,
-    Hex,
 }
 
 pub fn render_body(bytes: &[u8], mode: BodyMode) -> Vec<Line<'static>> {
@@ -27,8 +24,6 @@ pub fn render_body(bytes: &[u8], mode: BodyMode) -> Vec<Line<'static>> {
 
     match mode {
         BodyMode::Pretty => render_pretty(bytes),
-        BodyMode::Raw => render_raw(bytes),
-        BodyMode::Hex => render_hex(bytes),
     }
 }
 
@@ -52,63 +47,11 @@ fn render_pretty(bytes: &[u8]) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn render_raw(bytes: &[u8]) -> Vec<Line<'static>> {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s
-            .lines()
-            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(TEXT))))
-            .collect(),
-        Err(_) => render_binary_summary(bytes.len()),
-    }
-}
-
 fn render_binary_summary(len: usize) -> Vec<Line<'static>> {
     vec![Line::from(Span::styled(
-        format!("[binary data: {} bytes — press H for hex]", len),
+        format!("[binary data: {} bytes]", len),
         Style::default().fg(MUTED),
     ))]
-}
-
-fn render_hex(bytes: &[u8]) -> Vec<Line<'static>> {
-    let mut out: Vec<Line<'static>> = Vec::with_capacity(bytes.len().div_ceil(16) + 1);
-    for (row_idx, chunk) in bytes.chunks(16).enumerate() {
-        let offset = row_idx * 16;
-        let mut spans: Vec<Span<'static>> = Vec::with_capacity(4);
-
-        spans.push(Span::styled(
-            format!("{:08x}  ", offset),
-            Style::default().fg(MUTED),
-        ));
-
-        let mut hex = String::with_capacity(49);
-        for (i, b) in chunk.iter().enumerate() {
-            if i == 8 {
-                hex.push(' ');
-            }
-            hex.push_str(&format!("{:02x} ", b));
-        }
-        while hex.len() < 49 {
-            hex.push(' ');
-        }
-        spans.push(Span::styled(hex, Style::default().fg(CODE_FG)));
-
-        spans.push(Span::styled(" |".to_string(), Style::default().fg(DIM)));
-
-        let mut ascii = String::with_capacity(16);
-        for b in chunk {
-            let c = if b.is_ascii_graphic() || *b == b' ' {
-                *b as char
-            } else {
-                '.'
-            };
-            ascii.push(c);
-        }
-        spans.push(Span::styled(ascii, Style::default().fg(TEXT)));
-        spans.push(Span::styled("|".to_string(), Style::default().fg(DIM)));
-
-        out.push(Line::from(spans));
-    }
-    out
 }
 
 //

@@ -40,8 +40,6 @@ const ORCHESTRATOR_PROMPT: &str = include_str!("prompts/orchestrator.prompt");
 struct OrchestratorSession {
     session_id: String,
     prompt_tx: mpsc::Sender<(String, String)>,
-    #[allow(dead_code)]
-    task_handle: tokio::task::JoinHandle<()>,
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
     current_prompt_id: RwLock<String>,
@@ -198,321 +196,282 @@ impl OrchestratorManager {
         let sid = session_id_owned.clone();
         let publish_channel_clone = publish_channel.clone();
 
-        let session = OrchestratorSession {
-            session_id: session_id_owned.clone(),
-            prompt_tx,
-            task_handle: tokio::spawn(async move {
-                macro_rules! send_msg {
-                    ($msg:expr) => {{
-                        let _ =
-                            send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
-                    }};
+        //
+        // The session task is detached: dropping a JoinHandle does not abort
+        // the task; it exits via the stop flag / prompt channel closing.
+        //
+        tokio::spawn(async move {
+            macro_rules! send_msg {
+                ($msg:expr) => {{
+                    let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
+                }};
+            }
+
+            let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
+            common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
+
+            let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
+
+            let mcp_service = match ().serve(transport).await {
+                Ok(s) => s,
+                Err(e) => {
+                    common::log_error!("Failed to initialize MCP client: {}", e);
+                    send_msg!(acp_error_response(
+                        Value::Null,
+                        -32000,
+                        &format!("Failed to initialize MCP client: {}", e),
+                    ));
+                    return;
+                }
+            };
+
+            let peer = mcp_service.peer().clone();
+
+            let mcp_tools = match peer.list_all_tools().await {
+                Ok(t) => t,
+                Err(e) => {
+                    common::log_error!("Failed to list MCP tools: {}", e);
+                    send_msg!(acp_error_response(
+                        Value::Null,
+                        -32000,
+                        &format!("Failed to list MCP tools: {}", e),
+                    ));
+                    return;
+                }
+            };
+
+            common::log_info!(
+                "Orchestrator fetched {} tools from MCP server",
+                mcp_tools.len()
+            );
+
+            let mut tools = convert_mcp_tools(mcp_tools);
+            tools.extend(get_local_tool_definitions());
+
+            let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
+
+            common::log_info!(
+                "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
+                common::short_id(&client_id_owned),
+                common::short_id(&sid),
+                provider,
+                model,
+                max_tokens,
+                tools.len(),
+                history.len()
+            );
+
+            let mut conversation_history: Vec<Message> = Vec::new();
+            conversation_history.push(Message::system(&system_prompt));
+
+            //
+            // Seed with client-supplied history (resume).
+            //
+
+            for (role, text) in history {
+                match role.as_str() {
+                    "user" => conversation_history.push(Message::user(&text)),
+                    "assistant" => conversation_history.push(Message::assistant(&text)),
+                    _ => {}
+                }
+            }
+
+            while let Some((prompt_id, prompt)) = prompt_rx.recv().await {
+                if stop_flag_clone.load(Ordering::SeqCst) {
+                    break;
                 }
 
-                let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
-                common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
-
-                let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
-
-                let mcp_service = match ().serve(transport).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        common::log_error!("Failed to initialize MCP client: {}", e);
-                        send_msg!(acp_error_response(
-                            Value::Null,
-                            -32000,
-                            &format!("Failed to initialize MCP client: {}", e),
-                        ));
-                        return;
-                    }
-                };
-
-                let peer = mcp_service.peer().clone();
-
-                let mcp_tools = match peer.list_all_tools().await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        common::log_error!("Failed to list MCP tools: {}", e);
-                        send_msg!(acp_error_response(
-                            Value::Null,
-                            -32000,
-                            &format!("Failed to list MCP tools: {}", e),
-                        ));
-                        return;
-                    }
-                };
+                cancel_flag_clone.store(false, Ordering::SeqCst);
 
                 common::log_info!(
-                    "Orchestrator fetched {} tools from MCP server",
-                    mcp_tools.len()
-                );
-
-                let mut tools = convert_mcp_tools(mcp_tools);
-                tools.extend(get_local_tool_definitions());
-
-                let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
-
-                common::log_info!(
-                    "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
+                    "Orchestrator received prompt for {}: {}...",
                     common::short_id(&client_id_owned),
-                    common::short_id(&sid),
-                    provider,
-                    model,
-                    max_tokens,
-                    tools.len(),
-                    history.len()
+                    common::truncate_str(&prompt, 50)
                 );
 
-                let mut conversation_history: Vec<Message> = Vec::new();
-                conversation_history.push(Message::system(&system_prompt));
+                conversation_history.push(Message::user(&prompt));
+                send_msg!(session_update_user_text(&sid, &prompt));
 
-                //
-                // Seed with client-supplied history (resume).
-                //
-
-                for (role, text) in history {
-                    match role.as_str() {
-                        "user" => conversation_history.push(Message::user(&text)),
-                        "assistant" => conversation_history.push(Message::assistant(&text)),
-                        _ => {}
-                    }
+                let max_history = history_count + 1;
+                if conversation_history.len() > max_history {
+                    let system_msg = conversation_history.remove(0);
+                    conversation_history =
+                        conversation_history.split_off(conversation_history.len() - history_count);
+                    conversation_history.insert(0, system_msg);
                 }
 
-                while let Some((prompt_id, prompt)) = prompt_rx.recv().await {
-                    if stop_flag_clone.load(Ordering::SeqCst) {
+                let mut early_response_sent = false;
+
+                loop {
+                    if stop_flag_clone.load(Ordering::SeqCst)
+                        || cancel_flag_clone.load(Ordering::SeqCst)
+                    {
                         break;
                     }
 
-                    cancel_flag_clone.store(false, Ordering::SeqCst);
+                    let request =
+                        ChatCompletionRequest::new(model.clone(), conversation_history.clone())
+                            .with_max_tokens(max_tokens);
 
-                    common::log_info!(
-                        "Orchestrator received prompt for {}: {}...",
-                        common::short_id(&client_id_owned),
-                        common::truncate_str(&prompt, 50)
-                    );
+                    let mut stream = client.chat_completion_stream(request);
+                    let mut full_response = String::new();
+                    let mut stream_usage: Option<Usage> = None;
+                    let mut stream_error = false;
+                    let mut send_buffer = String::new();
+                    let mut held_back = false;
+                    let mut bytes_sent: usize = 0;
 
-                    conversation_history.push(Message::user(&prompt));
-                    send_msg!(session_update_user_text(&sid, &prompt));
-
-                    let max_history = history_count + 1;
-                    if conversation_history.len() > max_history {
-                        let system_msg = conversation_history.remove(0);
-                        conversation_history = conversation_history
-                            .split_off(conversation_history.len() - history_count);
-                        conversation_history.insert(0, system_msg);
-                    }
-
-                    let mut early_response_sent = false;
-
-                    loop {
+                    while let Some(result) = stream.next().await {
                         if stop_flag_clone.load(Ordering::SeqCst)
                             || cancel_flag_clone.load(Ordering::SeqCst)
                         {
                             break;
                         }
 
-                        let request =
-                            ChatCompletionRequest::new(model.clone(), conversation_history.clone())
-                                .with_max_tokens(max_tokens);
+                        match result {
+                            Ok(delta) => {
+                                if !delta.content.is_empty() {
+                                    full_response.push_str(&delta.content);
 
-                        let mut stream = client.chat_completion_stream(request);
-                        let mut full_response = String::new();
-                        let mut stream_usage: Option<Usage> = None;
-                        let mut stream_error = false;
-                        let mut send_buffer = String::new();
-                        let mut held_back = false;
-                        let mut bytes_sent: usize = 0;
+                                    if !held_back {
+                                        send_buffer.push_str(&delta.content);
 
-                        while let Some(result) = stream.next().await {
-                            if stop_flag_clone.load(Ordering::SeqCst)
-                                || cancel_flag_clone.load(Ordering::SeqCst)
-                            {
-                                break;
-                            }
+                                        let tool_marker = send_buffer
+                                            .find("{\"tool\"")
+                                            .or_else(|| send_buffer.find("```"));
 
-                            match result {
-                                Ok(delta) => {
-                                    if !delta.content.is_empty() {
-                                        full_response.push_str(&delta.content);
-
-                                        if !held_back {
-                                            send_buffer.push_str(&delta.content);
-
-                                            let tool_marker = send_buffer
-                                                .find("{\"tool\"")
-                                                .or_else(|| send_buffer.find("```"));
-
-                                            if let Some(marker_pos) = tool_marker {
-                                                if marker_pos > 0 {
-                                                    let pre_tool =
-                                                        send_buffer[..marker_pos].to_string();
-                                                    let cleaned =
-                                                        pre_tool.trim_end_matches(|c: char| {
-                                                            c == '`' || c == '\n' || c == '\r'
-                                                        });
-                                                    let cleaned = cleaned
-                                                        .trim_end_matches("json")
-                                                        .trim_end_matches(|c: char| c == '`');
-                                                    if !cleaned.trim().is_empty() {
-                                                        bytes_sent += cleaned.len();
-                                                        send_msg!(session_update_text(
-                                                            &sid, cleaned
-                                                        ));
-                                                    }
+                                        if let Some(marker_pos) = tool_marker {
+                                            if marker_pos > 0 {
+                                                let pre_tool =
+                                                    send_buffer[..marker_pos].to_string();
+                                                let cleaned =
+                                                    pre_tool.trim_end_matches(|c: char| {
+                                                        c == '`' || c == '\n' || c == '\r'
+                                                    });
+                                                let cleaned = cleaned
+                                                    .trim_end_matches("json")
+                                                    .trim_end_matches(|c: char| c == '`');
+                                                if !cleaned.trim().is_empty() {
+                                                    bytes_sent += cleaned.len();
+                                                    send_msg!(session_update_text(&sid, cleaned));
                                                 }
-                                                held_back = true;
+                                            }
+                                            held_back = true;
+                                            send_buffer.clear();
+                                        } else if send_buffer.len() >= 50
+                                            || delta.content.contains('\n')
+                                        {
+                                            let trailing_backticks = send_buffer
+                                                .as_bytes()
+                                                .iter()
+                                                .rev()
+                                                .take_while(|&&b| b == b'`')
+                                                .count();
+
+                                            if trailing_backticks > 0 && trailing_backticks < 4 {
+                                                let split = send_buffer.len() - trailing_backticks;
+                                                if split > 0 {
+                                                    let to_send = &send_buffer[..split];
+                                                    bytes_sent += to_send.len();
+                                                    send_msg!(session_update_text(&sid, to_send));
+                                                }
+                                                send_buffer = send_buffer
+                                                    [send_buffer.len() - trailing_backticks..]
+                                                    .to_string();
+                                            } else {
+                                                bytes_sent += send_buffer.len();
+                                                send_msg!(session_update_text(&sid, &send_buffer));
                                                 send_buffer.clear();
-                                            } else if send_buffer.len() >= 50
-                                                || delta.content.contains('\n')
-                                            {
-                                                let trailing_backticks = send_buffer
-                                                    .as_bytes()
-                                                    .iter()
-                                                    .rev()
-                                                    .take_while(|&&b| b == b'`')
-                                                    .count();
-
-                                                if trailing_backticks > 0 && trailing_backticks < 4
-                                                {
-                                                    let split =
-                                                        send_buffer.len() - trailing_backticks;
-                                                    if split > 0 {
-                                                        let to_send = &send_buffer[..split];
-                                                        bytes_sent += to_send.len();
-                                                        send_msg!(session_update_text(
-                                                            &sid, to_send
-                                                        ));
-                                                    }
-                                                    send_buffer = send_buffer
-                                                        [send_buffer.len() - trailing_backticks..]
-                                                        .to_string();
-                                                } else {
-                                                    bytes_sent += send_buffer.len();
-                                                    send_msg!(session_update_text(
-                                                        &sid,
-                                                        &send_buffer
-                                                    ));
-                                                    send_buffer.clear();
-                                                }
                                             }
                                         }
                                     }
-                                    if let Some(u) = delta.usage {
-                                        stream_usage = Some(u);
-                                    }
                                 }
-                                Err(e) => {
-                                    let err_msg = format!("AI request failed: {}", e);
-                                    common::log_error!("{}", err_msg);
-                                    send_msg!(acp_error_response(
-                                        prompt_id_to_json_rpc_id(&prompt_id),
-                                        -32000,
-                                        &err_msg,
-                                    ));
-                                    stream_error = true;
-                                    early_response_sent = true;
-                                    break;
+                                if let Some(u) = delta.usage {
+                                    stream_usage = Some(u);
                                 }
                             }
+                            Err(e) => {
+                                let err_msg = format!("AI request failed: {}", e);
+                                common::log_error!("{}", err_msg);
+                                send_msg!(acp_error_response(
+                                    prompt_id_to_json_rpc_id(&prompt_id),
+                                    -32000,
+                                    &err_msg,
+                                ));
+                                stream_error = true;
+                                early_response_sent = true;
+                                break;
+                            }
                         }
+                    }
 
-                        if stream_error {
-                            conversation_history.pop();
+                    if stream_error {
+                        conversation_history.pop();
+                        break;
+                    }
+
+                    if !send_buffer.is_empty() && !held_back {
+                        bytes_sent += send_buffer.len();
+                        send_msg!(session_update_text(&sid, &send_buffer));
+                        send_buffer.clear();
+                    }
+
+                    let mut response_text = full_response.clone();
+                    let mut tool_results: Vec<(String, String)> = Vec::new();
+
+                    while let Some((tool_name, tool_args, remaining_text)) =
+                        parse_manual_tool_call(&response_text)
+                    {
+                        if stop_flag_clone.load(Ordering::SeqCst)
+                            || cancel_flag_clone.load(Ordering::SeqCst)
+                        {
                             break;
                         }
 
-                        if !send_buffer.is_empty() && !held_back {
-                            bytes_sent += send_buffer.len();
-                            send_msg!(session_update_text(&sid, &send_buffer));
-                            send_buffer.clear();
-                        }
+                        common::log_info!("Orchestrator executing tool: {}", tool_name);
 
-                        let mut response_text = full_response.clone();
-                        let mut tool_results: Vec<(String, String)> = Vec::new();
+                        let tool_input_value = serde_json::to_value(&tool_args).ok();
 
-                        while let Some((tool_name, tool_args, remaining_text)) =
-                            parse_manual_tool_call(&response_text)
+                        send_msg!(session_update_tool_call(&sid, &tool_name, tool_input_value));
+
+                        let (result, is_error) = if let Some(local_result) =
+                            execute_local_tool(&tool_name, &tool_args).await
                         {
-                            if stop_flag_clone.load(Ordering::SeqCst)
-                                || cancel_flag_clone.load(Ordering::SeqCst)
-                            {
-                                break;
-                            }
+                            let err = result_is_error(&local_result);
+                            (local_result, err)
+                        } else {
+                            execute_mcp_tool(&peer, &tool_name, &tool_args).await
+                        };
 
-                            common::log_info!("Orchestrator executing tool: {}", tool_name);
+                        common::log_info!(
+                            "Tool {} result: {}",
+                            tool_name,
+                            common::truncate_str(&result, 100)
+                        );
 
-                            let tool_input_value = serde_json::to_value(&tool_args).ok();
-
-                            send_msg!(session_update_tool_call(&sid, &tool_name, tool_input_value));
-
-                            let (result, is_error) = if let Some(local_result) =
-                                execute_local_tool(&tool_name, &tool_args).await
-                            {
-                                let err = result_is_error(&local_result);
-                                (local_result, err)
-                            } else {
-                                execute_mcp_tool(&peer, &tool_name, &tool_args).await
-                            };
-
-                            common::log_info!(
-                                "Tool {} result: {}",
-                                tool_name,
-                                common::truncate_str(&result, 100)
-                            );
-
-                            if tool_name == "report_plan" {
-                                if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
-                                    if let Some(plan_obj) = result_json.get("plan") {
-                                        if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(
-                                            plan_obj.clone(),
-                                        ) {
-                                            let plan_json =
-                                                serde_json::to_value(&plan).unwrap_or(Value::Null);
-                                            send_msg!(session_update_plan(&sid, &plan_json));
-                                        }
+                        if tool_name == "report_plan" {
+                            if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
+                                if let Some(plan_obj) = result_json.get("plan") {
+                                    if let Ok(plan) =
+                                        serde_json::from_value::<OrchestratorPlan>(plan_obj.clone())
+                                    {
+                                        let plan_json =
+                                            serde_json::to_value(&plan).unwrap_or(Value::Null);
+                                        send_msg!(session_update_plan(&sid, &plan_json));
                                     }
                                 }
                             }
-
-                            send_msg!(session_update_tool_result(
-                                &sid, &tool_name, &result, is_error
-                            ));
-
-                            tool_results.push((tool_name, result));
-                            response_text = remaining_text;
                         }
 
-                        if !tool_results.is_empty() {
-                            if let Some(usage) = &stream_usage {
-                                send_msg!(session_update_usage(
-                                    &sid,
-                                    usage.prompt_tokens,
-                                    usage.completion_tokens,
-                                    usage.total_tokens
-                                ));
-                            }
+                        send_msg!(session_update_tool_result(
+                            &sid, &tool_name, &result, is_error
+                        ));
 
-                            conversation_history.push(Message::assistant(&full_response));
+                        tool_results.push((tool_name, result));
+                        response_text = remaining_text;
+                    }
 
-                            let combined_results: String = tool_results
-                                .iter()
-                                .map(|(name, result)| {
-                                    format!("Tool '{}' result:\n{}", name, result)
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n\n");
-                            conversation_history.push(Message::user(combined_results));
-
-                            continue;
-                        }
-
-                        if full_response.len() > bytes_sent {
-                            let unsent = &full_response[bytes_sent..];
-                            if !unsent.is_empty() {
-                                send_msg!(session_update_text(&sid, unsent));
-                            }
-                        }
-
+                    if !tool_results.is_empty() {
                         if let Some(usage) = &stream_usage {
                             send_msg!(session_update_usage(
                                 &sid,
@@ -523,27 +482,57 @@ impl OrchestratorManager {
                         }
 
                         conversation_history.push(Message::assistant(&full_response));
-                        break;
+
+                        let combined_results: String = tool_results
+                            .iter()
+                            .map(|(name, result)| format!("Tool '{}' result:\n{}", name, result))
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        conversation_history.push(Message::user(combined_results));
+
+                        continue;
                     }
 
-                    let already_responded = early_response_sent
-                        || cancel_flag_clone.load(Ordering::SeqCst)
-                        || stop_flag_clone.load(Ordering::SeqCst);
-                    if !already_responded {
-                        send_msg!(acp_response(
-                            prompt_id_to_json_rpc_id(&prompt_id),
-                            serde_json::to_value(
-                                agent_client_protocol::schema::PromptResponse::new(
-                                    agent_client_protocol::schema::StopReason::EndTurn,
-                                )
-                            )
-                            .unwrap(),
+                    if full_response.len() > bytes_sent {
+                        let unsent = &full_response[bytes_sent..];
+                        if !unsent.is_empty() {
+                            send_msg!(session_update_text(&sid, unsent));
+                        }
+                    }
+
+                    if let Some(usage) = &stream_usage {
+                        send_msg!(session_update_usage(
+                            &sid,
+                            usage.prompt_tokens,
+                            usage.completion_tokens,
+                            usage.total_tokens
                         ));
                     }
+
+                    conversation_history.push(Message::assistant(&full_response));
+                    break;
                 }
 
-                drop(mcp_service);
-            }),
+                let already_responded = early_response_sent
+                    || cancel_flag_clone.load(Ordering::SeqCst)
+                    || stop_flag_clone.load(Ordering::SeqCst);
+                if !already_responded {
+                    send_msg!(acp_response(
+                        prompt_id_to_json_rpc_id(&prompt_id),
+                        serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
+                            agent_client_protocol::schema::StopReason::EndTurn,
+                        ))
+                        .unwrap(),
+                    ));
+                }
+            }
+
+            drop(mcp_service);
+        });
+
+        let session = OrchestratorSession {
+            session_id: session_id_owned.clone(),
+            prompt_tx,
             stop_flag,
             cancel_flag,
             current_prompt_id: RwLock::new(String::new()),

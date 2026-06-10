@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use hickory_resolver::TokioResolver;
@@ -14,8 +12,6 @@ pub struct DomainResolver {
     resolver: TokioResolver,
     /// Mapping of domain to resolved IPs
     domain_to_ips: DashMap<String, HashSet<IpAddr>>,
-    /// Reverse mapping of IP to domain (for packet engine lookups)
-    ip_to_domain: DashMap<IpAddr, String>,
 }
 
 impl DomainResolver {
@@ -32,7 +28,6 @@ impl DomainResolver {
         Ok(Self {
             resolver,
             domain_to_ips: DashMap::new(),
-            ip_to_domain: DashMap::new(),
         })
     }
 
@@ -60,10 +55,6 @@ impl DomainResolver {
         let mut ips = HashSet::new();
         for ip in response.iter() {
             ips.insert(ip);
-            //
-            // Store reverse mapping.
-            //
-            self.ip_to_domain.insert(ip, domain.to_string());
             common::log_debug!("  Resolved {} -> {}", domain, ip);
         }
 
@@ -85,37 +76,6 @@ impl DomainResolver {
         }
         all_ips
     }
-
-    /// Used by the packet engine to determine if a packet should be intercepted.
-    pub fn lookup_domain_for_ip(&self, ip: IpAddr) -> Option<String> {
-        self.ip_to_domain.get(&ip).map(|r| r.value().clone())
-    }
-
-    pub fn is_intercept_ip(&self, ip: &IpAddr) -> bool {
-        self.ip_to_domain.contains_key(ip)
-    }
-
-    pub fn get_resolved_domains(&self) -> Vec<String> {
-        self.domain_to_ips.iter().map(|e| e.key().clone()).collect()
-    }
-
-    pub fn clear(&self) {
-        self.domain_to_ips.clear();
-        self.ip_to_domain.clear();
-    }
-
-    /// Re-resolve all domains (for periodic refresh)
-    pub async fn refresh_all(&self) -> Result<()> {
-        let domains: Vec<String> = self.domain_to_ips.iter().map(|e| e.key().clone()).collect();
-
-        for domain in domains {
-            if let Err(e) = self.resolve_domain(&domain).await {
-                common::log_warn!("Failed to refresh DNS for {}: {}", domain, e);
-            }
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -127,15 +87,5 @@ mod tests {
         let resolver = DomainResolver::new().await.unwrap();
         let ips = resolver.resolve_domain("google.com").await.unwrap();
         assert!(!ips.is_empty(), "Should resolve at least one IP");
-    }
-
-    #[tokio::test]
-    async fn test_reverse_lookup() {
-        let resolver = DomainResolver::new().await.unwrap();
-        let ips = resolver.resolve_domain("google.com").await.unwrap();
-
-        let first_ip = ips.iter().next().unwrap();
-        let domain = resolver.lookup_domain_for_ip(*first_ip);
-        assert_eq!(domain, Some("google.com".to_string()));
     }
 }

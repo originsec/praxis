@@ -279,7 +279,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn switch_to_session(&mut self, index: usize) {
         self.orchestrator.active_session_index = Some(index);
     }
@@ -836,10 +835,7 @@ impl App {
                 }
             }
 
-            AcpNotification::Error {
-                request_id: _,
-                message,
-            } => {
+            AcpNotification::Error { message } => {
                 //
                 // Show error in the streaming session if one exists,
                 // otherwise the active session.

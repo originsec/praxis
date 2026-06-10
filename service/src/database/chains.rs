@@ -169,7 +169,6 @@ impl ChainElement {
     }
 
     /// Get the element's session group (if any)
-    #[allow(dead_code)]
     pub fn session_group(&self) -> Option<&SessionGroup> {
         match self {
             ChainElement::Operation { session_group, .. } => session_group.as_ref(),
@@ -977,7 +976,6 @@ impl Database {
 
     /// List chain definitions by category
     /// Automatically handles migration of old format chains
-    #[allow(dead_code)]
     pub async fn list_chains_by_category(
         &self,
         category: &str,

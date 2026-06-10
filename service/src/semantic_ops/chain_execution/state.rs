@@ -66,7 +66,6 @@ impl ChainExecutionState {
     }
 
     /// Set element configuration (from chain definition)
-    #[allow(dead_code)]
     pub fn set_element_config(&mut self, element_id: &str, config: ElementConfig) {
         if let Some(elem) = self.elements.get_mut(element_id) {
             elem.config = Some(config);
@@ -74,7 +73,6 @@ impl ChainExecutionState {
     }
 
     /// Set element runtime context (input data, session info)
-    #[allow(dead_code)]
     pub fn set_element_context(&mut self, element_id: &str, context: ElementContext) {
         if let Some(elem) = self.elements.get_mut(element_id) {
             elem.context = Some(context);
@@ -82,7 +80,6 @@ impl ChainExecutionState {
     }
 
     /// Mark an element as waiting for inputs
-    #[allow(dead_code)]
     pub fn set_element_waiting(&mut self, element_id: &str) {
         if let Some(elem) = self.elements.get_mut(element_id) {
             elem.status = ElementExecutionStatus::WaitingForInputs;
@@ -105,7 +102,6 @@ impl ChainExecutionState {
     }
 
     /// Mark an element as running (legacy, without config/context)
-    #[allow(dead_code)]
     pub fn set_element_running(&mut self, element_id: &str) {
         if let Some(elem) = self.elements.get_mut(element_id) {
             elem.status = ElementExecutionStatus::Running;
@@ -206,7 +202,6 @@ impl ChainExecutionRegistry {
     }
 
     /// Get an execution by ID
-    #[allow(dead_code)]
     pub fn get(&self, execution_id: &str) -> Option<Arc<RwLock<ChainExecutionState>>> {
         self.executions.read().unwrap().get(execution_id).cloned()
     }

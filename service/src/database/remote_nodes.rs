@@ -19,7 +19,6 @@ pub struct RemoteNodeRecord {
     pub kind: String,
     pub url: String,
     pub token: Option<String>,
-    #[allow(dead_code)]
     pub created_at: String,
 }
 

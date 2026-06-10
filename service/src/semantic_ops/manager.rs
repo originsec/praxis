@@ -17,15 +17,7 @@ use crate::database::{Database, OperationRecord};
 // no longer a single-op-per-node constraint.
 //
 
-#[allow(dead_code)]
 struct RunningOperation {
-    operation_id: String,
-    client_id: String,
-    node_id: String,
-    agent_short_name: String,
-    spec: SemanticOperationSpec,
-    working_dir: Option<String>,
-    start_time: chrono::DateTime<chrono::Utc>,
     cancel_tx: Option<oneshot::Sender<()>>,
 }
 
@@ -98,7 +90,6 @@ impl SemanticOpsManager {
 
     pub async fn queue_operation(
         &self,
-        client_id: String,
         node_id: String,
         agent_short_name: String,
         operation_name: String,
@@ -132,7 +123,6 @@ impl SemanticOpsManager {
 
         self.spawn_execution(
             operation_id.clone(),
-            client_id,
             node_id,
             agent_short_name,
             spec,
@@ -269,21 +259,8 @@ impl SemanticOpsManager {
         Ok(cleared_count)
     }
 
-    #[allow(dead_code)]
-    pub fn has_running_operations(&self) -> bool {
-        let running_guard = self.running.read().unwrap();
-        !running_guard.is_empty()
-    }
-
     pub async fn get_all_updates(&self) -> Result<Vec<SemanticOpUpdate>> {
         let records = self.database.list_operations(100).await?;
-        let updates: Vec<SemanticOpUpdate> = records.iter().map(|r| r.to_update()).collect();
-        Ok(updates)
-    }
-
-    #[allow(dead_code)]
-    pub async fn get_node_updates(&self, node_id: &str) -> Result<Vec<SemanticOpUpdate>> {
-        let records = self.database.list_by_node(node_id).await?;
         let updates: Vec<SemanticOpUpdate> = records.iter().map(|r| r.to_update()).collect();
         Ok(updates)
     }
@@ -307,7 +284,6 @@ impl SemanticOpsManager {
     async fn spawn_execution(
         &self,
         operation_id: String,
-        client_id: String,
         node_id: String,
         agent_short_name: String,
         spec: SemanticOperationSpec,
@@ -320,13 +296,6 @@ impl SemanticOpsManager {
             running_guard.insert(
                 operation_id.clone(),
                 RunningOperation {
-                    operation_id: operation_id.clone(),
-                    client_id,
-                    node_id: node_id.clone(),
-                    agent_short_name: agent_short_name.clone(),
-                    spec: spec.clone(),
-                    working_dir: working_dir.clone(),
-                    start_time: Utc::now(),
                     cancel_tx: Some(cancel_tx),
                 },
             );

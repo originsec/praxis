@@ -9,8 +9,6 @@ use tokio::sync::mpsc;
 const MAX_SCROLLBACK: usize = 128 * 1024;
 
 pub struct TerminalSession {
-    #[allow(dead_code)]
-    pub terminal_id: String,
     pub client_id: String,
     pub(super) master: Box<dyn MasterPty + Send>,
     pub(super) child: Option<Box<dyn Child + Send + Sync>>,

@@ -86,10 +86,6 @@ impl CodexAppServer {
 
 #[async_trait]
 impl RemoteNode for CodexAppServer {
-    fn kind(&self) -> &'static str {
-        "codex"
-    }
-
     fn dispatch_acp(&self, client_id: &str, json_rpc: &str) {
         let _ = self.tx.send(BridgeCmd::AcpFrame {
             client_id: client_id.to_string(),
@@ -308,21 +304,10 @@ struct BridgeState {
 
 struct PendingApproval {
     codex_request_id: u64,
-    //
-    // Methods like `item/fileChange/requestApproval` only accept
-    // {accept, acceptForSession, decline, cancel}. Older methods like
-    // `applyPatchApproval`/`execCommandApproval` use ReviewDecision
-    // which has the same vocabulary. We don't currently differentiate
-    // — both flow through the same translation.
-    //
-    #[allow(dead_code)]
-    codex_method: String,
 }
 
 struct SessionInfo {
     codex_thread_id: String,
-    #[allow(dead_code)]
-    client_id: String,
     //
     // Active turn id, set when `turn/start` resolves and cleared on
     // `turn/completed`. Required to drive Codex's `turn/interrupt`.
@@ -1209,7 +1194,6 @@ async fn handle_codex_response(
             pending.acp_session_id.clone(),
             SessionInfo {
                 codex_thread_id: thread_id,
-                client_id: pending.client_id.clone(),
                 current_turn_id: None,
                 yolo: pending.yolo,
             },
@@ -1633,13 +1617,9 @@ async fn forward_codex_approval(
         },
     });
 
-    state.pending_approvals.insert(
-        acp_request_id.clone(),
-        PendingApproval {
-            codex_request_id,
-            codex_method: codex_method.to_string(),
-        },
-    );
+    state
+        .pending_approvals
+        .insert(acp_request_id.clone(), PendingApproval { codex_request_id });
 
     let json_rpc = match serde_json::to_string(&request_frame) {
         Ok(s) => s,

@@ -61,34 +61,16 @@ impl InterceptTab {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ProtocolFilter {
-    All,
-    Http,
-    WebSocket,
-    Http2,
-}
-
 //
 // A row in the flattened display. HTTP entries show individually;
 // WS_*/H2_* frames are collapsed into groups keyed by (node_id, url) so
 // streaming endpoints don't flood the list.
 //
-// The node_id is part of the grouping key and is stored even though the
-// renderer currently only displays the URL; keeping it here means we
-// don't have to re-derive it from indices for filter/export purposes.
-//
 
 #[derive(Debug, Clone)]
 pub enum DisplayRow {
     Http(usize),
-    Group {
-        #[allow(dead_code)]
-        node_id: String,
-        url: String,
-        indices: Vec<usize>,
-    },
+    Group { url: String, indices: Vec<usize> },
 }
 
 impl DisplayRow {
@@ -124,7 +106,6 @@ pub struct InterceptState {
     pub search_focused: bool,
     pub search_input: String,
     search_regex: Option<Regex>,
-    pub protocol: ProtocolFilter,
     pub node_filter: Option<String>,
     pub agent_filter: Option<String>,
     pub initial_loaded: bool,
@@ -197,7 +178,6 @@ impl Default for InterceptState {
             search_focused: false,
             search_input: String::new(),
             search_regex: None,
-            protocol: ProtocolFilter::All,
             node_filter: None,
             agent_filter: None,
             initial_loaded: false,
@@ -370,12 +350,6 @@ impl InterceptState {
         self.display_dirty = true;
     }
 
-    #[allow(dead_code)]
-    pub fn set_protocol(&mut self, p: ProtocolFilter) {
-        self.protocol = p;
-        self.display_dirty = true;
-    }
-
     pub fn set_node_filter(&mut self, node_id: Option<String>) {
         if self.node_filter != node_id {
             self.agent_filter = None;
@@ -422,7 +396,6 @@ impl InterceptState {
                 } else {
                     group_index.insert(key.clone(), rows.len());
                     rows.push(DisplayRow::Group {
-                        node_id: key.0,
                         url: key.1,
                         indices: vec![i],
                     });
@@ -450,26 +423,6 @@ impl InterceptState {
             && &entry.agent_short_name != a
         {
             return false;
-        }
-
-        let method = entry.method.as_deref().unwrap_or("");
-        match self.protocol {
-            ProtocolFilter::All => {}
-            ProtocolFilter::Http => {
-                if method.starts_with("WS_") || method.starts_with("H2_") {
-                    return false;
-                }
-            }
-            ProtocolFilter::WebSocket => {
-                if !method.starts_with("WS_") {
-                    return false;
-                }
-            }
-            ProtocolFilter::Http2 => {
-                if !method.starts_with("H2_") {
-                    return false;
-                }
-            }
         }
 
         if self.search_input.is_empty() {
@@ -1236,78 +1189,6 @@ impl App {
             }
             Err(e) => self.intercept.set_error(format!("Clear: {}", e)),
         }
-    }
-
-    #[allow(dead_code)]
-    async fn toggle_intercept_for_selected(&mut self) {
-        let Some(entry) = self.intercept.selected_primary_entry() else {
-            return;
-        };
-        let node_id = entry.node_id.clone();
-        let currently_on = self
-            .intercept
-            .intercept_statuses
-            .get(&node_id)
-            .map(|s| s.enabled)
-            .unwrap_or(false);
-
-        if currently_on {
-            self.confirm = Some(ConfirmAction {
-                message: format!(
-                    "Disable interception on node {}?",
-                    common::short_id(&node_id)
-                ),
-                action: ConfirmKind::ToggleIntercept {
-                    node_id,
-                    enable: false,
-                    method: None,
-                },
-            });
-            return;
-        }
-
-        //
-        // Auto-pick method by the node's OS. If we don't know the node
-        // (e.g. it disappeared) or it's macOS, surface an error rather
-        // than guessing.
-        //
-        let os_lower = self
-            .nodes
-            .nodes
-            .iter()
-            .find(|n| n.node_id == node_id)
-            .map(|n| n.os_details.to_lowercase())
-            .unwrap_or_default();
-
-        let method = if os_lower.contains("linux") {
-            common::InterceptMethod::Tproxy
-        } else if os_lower.contains("windows") {
-            common::InterceptMethod::Vpn
-        } else {
-            self.intercept.set_error(format!(
-                "Interception not supported on node {}",
-                common::short_id(&node_id)
-            ));
-            return;
-        };
-
-        self.confirm = Some(ConfirmAction {
-            message: format!(
-                "Enable interception on node {} via {}?",
-                common::short_id(&node_id),
-                match method {
-                    common::InterceptMethod::Tproxy => "TPROXY",
-                    common::InterceptMethod::Vpn => "VPN",
-                    common::InterceptMethod::Proxy => "system proxy",
-                    common::InterceptMethod::Hosts => "hosts file",
-                }
-            ),
-            action: ConfirmKind::ToggleIntercept {
-                node_id,
-                enable: true,
-                method: Some(method),
-            },
-        });
     }
 
     //

@@ -222,12 +222,10 @@ impl AcpNodeProxy {
         self.sessions.write().await.insert(session_id, node_id);
     }
 
-    #[allow(dead_code)]
     pub async fn unregister_session(&self, session_id: &str) {
         self.sessions.write().await.remove(session_id);
     }
 
-    #[allow(dead_code)]
     pub async fn route_for_session(&self, session_id: &str) -> Option<String> {
         self.sessions.read().await.get(session_id).cloned()
     }

@@ -1,7 +1,6 @@
-use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::Command;
 
 //
 // Directories to skip during recursive scanning.
@@ -279,8 +278,8 @@ pub fn get_path_owner(path: &std::path::Path) -> Option<(u32, u32)> {
     std::fs::metadata(path).ok().map(|m| (m.uid(), m.gid()))
 }
 
-#[cfg(not(unix))]
 #[allow(dead_code)]
+#[cfg(not(unix))]
 pub fn get_path_owner(_path: &std::path::Path) -> Option<(u32, u32)> {
     None
 }
@@ -343,141 +342,4 @@ pub fn configure_command_for_directory(cmd: &mut Command, working_dir: &std::pat
 #[cfg(not(unix))]
 pub fn configure_command_for_directory(_cmd: &mut Command, _working_dir: &std::path::Path) {
     // No-op on non-Unix systems
-}
-
-//
-// Execute a command and return the trimmed stdout output.
-// Logs the command and output.
-//
-
-#[allow(dead_code)]
-pub fn run_command(cmd: &mut Command) -> Result<String> {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    //
-    // Log the full command line.
-    //
-    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
-    common::log_info!(
-        "command: {} {}",
-        cmd.get_program().to_string_lossy(),
-        args.join(" ")
-    );
-
-    let output = cmd
-        .output()
-        .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    //
-    // Log stderr if present (even on success, for debugging).
-    //
-    if !stderr.trim().is_empty() {
-        common::log_warn!("stderr: {}", stderr.trim());
-    }
-
-    if !output.status.success() {
-        common::log_error!(
-            "Command failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
-        return Err(anyhow!(
-            "Command exited with status {}: {}",
-            output.status,
-            stderr
-        ));
-    }
-
-    let trimmed = stdout.trim().to_string();
-    common::log_info!("output: {}", trimmed);
-    Ok(trimmed)
-}
-
-//
-// Execute a command silently (no logging) and return the raw output.
-// Useful for internal commands like --list-sessions.
-//
-
-#[allow(dead_code)]
-pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    cmd.output()
-        .map_err(|e| anyhow!("Failed to execute command: {}", e))
-}
-
-//
-// Execute a command with input piped to stdin and return the trimmed stdout.
-// Used for CLIs that require input via stdin (e.g., Gemini CLI).
-//
-
-#[allow(dead_code)]
-pub fn run_command_with_stdin(cmd: &mut Command, input: &str) -> Result<String> {
-    use std::io::Write;
-
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    //
-    // Log the full command line and prompt.
-    //
-    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
-    common::log_info!(
-        "command: {} {} (with stdin: {})",
-        cmd.get_program().to_string_lossy(),
-        args.join(" "),
-        input.replace('\n', " | ")
-    );
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
-
-    //
-    // Write input to stdin.
-    //
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(input.as_bytes())
-            .map_err(|e| anyhow!("Failed to write to stdin: {}", e))?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    //
-    // Log stderr if present (even on success, for debugging).
-    //
-    if !stderr.trim().is_empty() {
-        common::log_warn!("stderr: {}", stderr.trim());
-    }
-
-    if !output.status.success() {
-        common::log_error!(
-            "Command failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
-        return Err(anyhow!(
-            "Command exited with status {}: {}",
-            output.status,
-            stderr
-        ));
-    }
-
-    let trimmed = stdout.trim().to_string();
-    common::log_info!("output: {}", trimmed);
-    Ok(trimmed)
 }

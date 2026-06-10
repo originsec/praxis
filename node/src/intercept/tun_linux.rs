@@ -87,10 +87,10 @@ impl LinuxTunManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     /// Shutdown the device to unblock any blocking reads.
     ///
     /// This should be called before waiting for the packet engine to stop.
-    #[allow(dead_code)]
     pub fn shutdown_device(&self) {
         if let Some(device) = &self.device {
             common::log_debug!("Shutting down TUN device to unblock readers");
@@ -105,8 +105,8 @@ impl LinuxTunManager {
         self.device.clone()
     }
 
-    /// Check if the TUN adapter is active.
     #[allow(dead_code)]
+    /// Check if the TUN adapter is active.
     pub fn is_active(&self) -> bool {
         self.is_active
     }

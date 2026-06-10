@@ -36,22 +36,6 @@ impl VirtualTable {
             VirtualTable::SemanticOperationChainLogs => "SemanticOperationChainLogs",
         }
     }
-
-    #[allow(dead_code)]
-    pub fn is_db_backed(&self) -> bool {
-        matches!(
-            self,
-            VirtualTable::TrafficLogs
-                | VirtualTable::TrafficMatchLogs
-                | VirtualTable::ReconLogs
-                | VirtualTable::ReconToolLogs
-                | VirtualTable::ReconSessionLogs
-                | VirtualTable::EventLogs
-                | VirtualTable::ToolkitActionsLog
-                | VirtualTable::SemanticOperationLogs
-                | VirtualTable::SemanticOperationChainLogs
-        )
-    }
 }
 
 pub const ALL_TABLES: &[VirtualTable] = &[
