@@ -72,6 +72,16 @@ struct ClientState {
     chain_triggers: Vec<ChainTriggerInfo>,
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<oneshot::Sender<String>>,
+
+    //
+    // Awaitable list refreshes: when set, the matching list response fires
+    // the sender with the fresh data in addition to updating the cache.
+    //
+    pending_op_def_list: Option<oneshot::Sender<Vec<OperationDefinitionInfo>>>,
+    pending_semantic_op_list: Option<oneshot::Sender<Vec<SemanticOpUpdate>>>,
+    pending_chain_list: Option<oneshot::Sender<Vec<ChainDefinitionInfo>>>,
+    pending_chain_execution_list: Option<oneshot::Sender<Vec<ChainExecutionUpdate>>>,
+    pending_chain_trigger_list: Option<oneshot::Sender<Vec<ChainTriggerInfo>>>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
     intercept_targets_text: String,
     intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
@@ -212,12 +222,21 @@ impl Client {
             }
             ClientDirectMessage::SemanticOpList(ops) => {
                 state.operations = ops;
+                if let Some(tx) = state.pending_semantic_op_list.take() {
+                    let _ = tx.send(state.operations.clone());
+                }
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 state.operation_definitions = definitions;
+                if let Some(tx) = state.pending_op_def_list.take() {
+                    let _ = tx.send(state.operation_definitions.clone());
+                }
             }
             ClientDirectMessage::ChainDefListResponse { chains } => {
                 state.chain_definitions = chains;
+                if let Some(tx) = state.pending_chain_list.take() {
+                    let _ = tx.send(state.chain_definitions.clone());
+                }
             }
             ClientDirectMessage::ChainGetResponse { chain } => {
                 state.current_chain = chain;
@@ -235,6 +254,9 @@ impl Client {
             }
             ClientDirectMessage::ChainExecutionListResponse { executions } => {
                 state.chain_executions = executions;
+                if let Some(tx) = state.pending_chain_execution_list.take() {
+                    let _ = tx.send(state.chain_executions.clone());
+                }
             }
 
             //
@@ -243,6 +265,9 @@ impl Client {
             //
             ClientDirectMessage::ChainTriggerListResponse { triggers } => {
                 state.chain_triggers = triggers;
+                if let Some(tx) = state.pending_chain_trigger_list.take() {
+                    let _ = tx.send(state.chain_triggers.clone());
+                }
             }
             ClientDirectMessage::ChainTriggerCreated { trigger } => {
                 if let Some(existing) = state.chain_triggers.iter_mut().find(|t| t.id == trigger.id)
@@ -916,11 +941,60 @@ impl Client {
         rx
     }
 
-    pub async fn request_op_def_list(&self) -> Result<()> {
+    //
+    // Awaitable variants of the list refreshes: publish the request and
+    // resolve with the fresh list when the response arrives, instead of
+    // requiring callers to sleep and read the cache.
+    //
+
+    pub async fn fetch_operation_definitions(&self) -> Result<Vec<OperationDefinitionInfo>> {
         let message = ClientSignalMessage::OpDefList {
             client_id: self.client_id.clone(),
         };
-        self.publish_signal(message).await
+        self.request("op def list", |s| &mut s.pending_op_def_list, message)
+            .await
+    }
+
+    pub async fn fetch_operations(&self) -> Result<Vec<SemanticOpUpdate>> {
+        self.request(
+            "semantic op list",
+            |s| &mut s.pending_semantic_op_list,
+            ClientSignalMessage::SemanticOpListRequest,
+        )
+        .await
+    }
+
+    pub async fn fetch_chain_definitions(&self) -> Result<Vec<ChainDefinitionInfo>> {
+        let message = ClientSignalMessage::ChainDefList {
+            client_id: self.client_id.clone(),
+        };
+        self.request("chain list", |s| &mut s.pending_chain_list, message)
+            .await
+    }
+
+    pub async fn fetch_chain_executions(&self) -> Result<Vec<ChainExecutionUpdate>> {
+        let message = ClientSignalMessage::ChainExecutionList {
+            client_id: self.client_id.clone(),
+        };
+        self.request(
+            "chain execution list",
+            |s| &mut s.pending_chain_execution_list,
+            message,
+        )
+        .await
+    }
+
+    pub async fn fetch_chain_triggers(&self) -> Result<Vec<ChainTriggerInfo>> {
+        let message = ClientSignalMessage::ChainTriggerList {
+            client_id: self.client_id.clone(),
+            chain_id: None,
+        };
+        self.request(
+            "chain trigger list",
+            |s| &mut s.pending_chain_trigger_list,
+            message,
+        )
+        .await
     }
 
     pub async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
@@ -983,13 +1057,6 @@ impl Client {
     //
     // Chain methods.
     //
-
-    pub async fn request_chain_list(&self) -> Result<()> {
-        let message = ClientSignalMessage::ChainDefList {
-            client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
 
     pub async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
         self.state.lock().await.chain_definitions.clone()
@@ -1096,14 +1163,6 @@ impl Client {
     //
     // Chain triggers.
     //
-
-    pub async fn request_chain_triggers(&self) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerList {
-            client_id: self.client_id.clone(),
-            chain_id: None,
-        };
-        self.publish_signal(message).await
-    }
 
     pub async fn get_chain_triggers(&self) -> Vec<ChainTriggerInfo> {
         self.state.lock().await.chain_triggers.clone()

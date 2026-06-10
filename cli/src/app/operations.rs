@@ -9,19 +9,32 @@ impl App {
         tokio::spawn(async move {
             let Some(tx) = tx else { return };
 
-            let _ = client.request_op_def_list().await;
-            let _ = client.request_semantic_op_list().await;
-            let _ = client.request_chain_list().await;
-            let _ = client.request_chain_execution_list().await;
-            let _ = client.request_chain_triggers().await;
+            //
+            // Await each list response directly; on timeout fall back to the
+            // cached copy so a slow service degrades to stale data rather
+            // than an empty view.
+            //
 
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let op_definitions = client.get_operation_definitions().await;
-            let chain_definitions = client.get_chain_definitions().await;
-            let operations = client.get_operations().await;
-            let chain_executions = client.get_chain_executions().await;
-            let triggers = client.get_chain_triggers().await;
+            let op_definitions = match client.fetch_operation_definitions().await {
+                Ok(defs) => defs,
+                Err(_) => client.get_operation_definitions().await,
+            };
+            let operations = match client.fetch_operations().await {
+                Ok(ops) => ops,
+                Err(_) => client.get_operations().await,
+            };
+            let chain_definitions = match client.fetch_chain_definitions().await {
+                Ok(chains) => chains,
+                Err(_) => client.get_chain_definitions().await,
+            };
+            let chain_executions = match client.fetch_chain_executions().await {
+                Ok(execs) => execs,
+                Err(_) => client.get_chain_executions().await,
+            };
+            let triggers = match client.fetch_chain_triggers().await {
+                Ok(triggers) => triggers,
+                Err(_) => client.get_chain_triggers().await,
+            };
             let intercept_rules = client.list_intercept_rules().await.unwrap_or_default();
 
             let _ = tx.send(AppEvent::OperationsRefreshed {
@@ -48,10 +61,10 @@ impl App {
                 tokio::time::sleep(delay).await;
             }
 
-            let _ = client.request_chain_triggers().await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let triggers = client.get_chain_triggers().await;
+            let triggers = match client.fetch_chain_triggers().await {
+                Ok(triggers) => triggers,
+                Err(_) => client.get_chain_triggers().await,
+            };
             let intercept_rules = client.list_intercept_rules().await.unwrap_or_default();
             let _ = tx.send(AppEvent::TriggersRefreshed {
                 triggers,
@@ -71,12 +84,14 @@ impl App {
                 tokio::time::sleep(delay).await;
             }
 
-            let _ = client.request_op_def_list().await;
-            let _ = client.request_chain_list().await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let op_definitions = client.get_operation_definitions().await;
-            let chain_definitions = client.get_chain_definitions().await;
+            let op_definitions = match client.fetch_operation_definitions().await {
+                Ok(defs) => defs,
+                Err(_) => client.get_operation_definitions().await,
+            };
+            let chain_definitions = match client.fetch_chain_definitions().await {
+                Ok(chains) => chains,
+                Err(_) => client.get_chain_definitions().await,
+            };
 
             let _ = tx.send(AppEvent::LibraryRefreshed {
                 op_definitions,

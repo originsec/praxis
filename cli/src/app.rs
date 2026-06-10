@@ -1899,7 +1899,9 @@ impl App {
         let tabs_area = areas.tabs;
         let content_area = areas.content;
 
-        let split_percent = self.nodes.recon.as_ref().unwrap().recon_split_percent;
+        let Some(split_percent) = self.nodes.recon.as_ref().map(|r| r.recon_split_percent) else {
+            return;
+        };
         let left_pct = split_percent.min(80).max(20);
         let right_pct = 100u16.saturating_sub(left_pct);
         let pane_chunks = Layout::horizontal([
@@ -1912,7 +1914,9 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                let recon = self.nodes.recon.as_mut().unwrap();
+                let Some(recon) = self.nodes.recon.as_mut() else {
+                    return;
+                };
                 if recon.right_pane_focused {
                     recon.selected_right_scroll = recon.selected_right_scroll.saturating_sub(3);
                 } else {
@@ -1923,7 +1927,9 @@ impl App {
                 }
             }
             MouseEventKind::ScrollDown => {
-                let recon = self.nodes.recon.as_mut().unwrap();
+                let Some(recon) = self.nodes.recon.as_mut() else {
+                    return;
+                };
                 let left_max = match recon.active_tab {
                     ReconTab::Config => recon
                         .recon_result
@@ -1956,7 +1962,9 @@ impl App {
                     && mouse.column < tabs_area.x + tabs_area.width
                 {
                     let counts = {
-                        let recon = self.nodes.recon.as_ref().unwrap();
+                        let Some(recon) = self.nodes.recon.as_ref() else {
+                            return;
+                        };
                         [
                             recon
                                 .recon_result
@@ -1976,7 +1984,9 @@ impl App {
                     if let Some(new_tab) =
                         crate::ui::recon::tab_at(tabs_area.x, mouse.column, counts)
                     {
-                        let recon = self.nodes.recon.as_mut().unwrap();
+                        let Some(recon) = self.nodes.recon.as_mut() else {
+                            return;
+                        };
                         if recon.active_tab != new_tab {
                             recon.active_tab = new_tab;
                             recon.selected_left = 0;
@@ -1992,7 +2002,9 @@ impl App {
                 }
 
                 if crate::ui::common::hit_vertical_border(left_area, mouse.column, mouse.row) {
-                    self.nodes.recon.as_mut().unwrap().recon_dragging = true;
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        recon.recon_dragging = true;
+                    }
                     return;
                 }
 
@@ -2017,7 +2029,9 @@ impl App {
 
                     let mut fetch = false;
                     {
-                        let recon = self.nodes.recon.as_mut().unwrap();
+                        let Some(recon) = self.nodes.recon.as_mut() else {
+                            return;
+                        };
                         recon.right_pane_focused = false;
 
                         if in_list {
@@ -2066,12 +2080,16 @@ impl App {
                     && mouse.row >= right_area.y
                     && mouse.row < right_area.y + right_area.height
                 {
-                    self.nodes.recon.as_mut().unwrap().right_pane_focused = true;
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        recon.right_pane_focused = true;
+                    }
                     return;
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                let recon = self.nodes.recon.as_mut().unwrap();
+                let Some(recon) = self.nodes.recon.as_mut() else {
+                    return;
+                };
                 if recon.recon_dragging {
                     recon.recon_split_percent = crate::ui::common::drag_split_percent(
                         content_area.x,
@@ -2081,7 +2099,9 @@ impl App {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                self.nodes.recon.as_mut().unwrap().recon_dragging = false;
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.recon_dragging = false;
+                }
             }
             _ => {}
         }
