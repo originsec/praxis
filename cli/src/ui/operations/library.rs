@@ -1,10 +1,8 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
-use crate::ui::common::focused_panel;
 use crate::ui::chrome;
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
-};
+use crate::ui::common::focused_panel;
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -135,7 +133,10 @@ pub(super) fn render_library_detail(f: &mut Frame, area: Rect, state: &Operation
             lines.push(chrome::kv("mode", &def.mode));
             lines.push(chrome::kv("timeout", &format!("{}s", def.timeout)));
             if def.mode == "agent" {
-                lines.push(chrome::kv("iterations", &format!("{}", def.agent_iterations)));
+                lines.push(chrome::kv(
+                    "iterations",
+                    &format!("{}", def.agent_iterations),
+                ));
             }
             lines.push(Line::from(vec![
                 Span::styled("yolo: ", Style::default().fg(MUTED)),
@@ -203,4 +204,3 @@ pub(super) fn render_library_detail(f: &mut Frame, area: Rect, state: &Operation
 //
 // Executions view: running and recent, with detail.
 //
-

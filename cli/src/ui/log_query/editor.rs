@@ -81,7 +81,9 @@ fn render_body(f: &mut Frame, area: Rect, state: &LogQueryState, focused: bool) 
 
     let mut out: Vec<Line> = Vec::new();
     for (row_idx, line) in editor.lines.iter().enumerate() {
-        out.push(line_with_cursor(line, row_idx, cursor_row, cursor_col, focused));
+        out.push(line_with_cursor(
+            line, row_idx, cursor_row, cursor_col, focused,
+        ));
     }
 
     //
@@ -162,10 +164,7 @@ fn line_with_cursor(
     // Cursor past the end of the line: append a trailing block.
     //
     if cursor_col >= pos && focused {
-        out.push(Span::styled(
-            "▌".to_string(),
-            Style::default().fg(ACCENT),
-        ));
+        out.push(Span::styled("▌".to_string(), Style::default().fg(ACCENT)));
     }
 
     Line::from(out)
@@ -271,7 +270,9 @@ fn tokenize(line: &str) -> Vec<Token> {
         if matches!(first, '=' | '!' | '<' | '>' | '+' | '-' | '*' | '/' | '%') {
             let end = rest
                 .char_indices()
-                .take_while(|(_, c)| matches!(c, '=' | '!' | '<' | '>' | '+' | '-' | '*' | '/' | '%'))
+                .take_while(|(_, c)| {
+                    matches!(c, '=' | '!' | '<' | '>' | '+' | '-' | '*' | '/' | '%')
+                })
                 .last()
                 .map(|(i, c)| i + c.len_utf8())
                 .unwrap_or(1);
@@ -289,13 +290,20 @@ fn tokenize(line: &str) -> Vec<Token> {
         //
         let end = rest
             .char_indices()
-            .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '$' || *c == '!')
+            .take_while(|(_, c)| {
+                c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '$' || *c == '!'
+            })
             .last()
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(first.len_utf8());
         let (word, tail) = rest.split_at(end);
 
-        let style = if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        let style = if word
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             Style::default().fg(JSON_NUMBER)
         } else if is_known_table(word) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)

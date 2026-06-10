@@ -14,9 +14,7 @@ use ratatui::widgets::{Cell, Row, Table, TableState};
 use crate::app::App;
 use crate::ui::chrome;
 use crate::ui::common::titled_panel;
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     use ratatui::layout::Layout;

@@ -70,7 +70,8 @@ impl App {
             std::io::stdout(),
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen,
-        ).ok();
+        )
+        .ok();
 
         let status = std::process::Command::new(&editor).arg(&path).status();
 

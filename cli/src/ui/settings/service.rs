@@ -112,21 +112,14 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled("rabbitmq    ", Style::default().fg(MUTED)),
-        Span::styled(
-            &state.rabbitmq_url,
-            Style::default().fg(TEXT_BRIGHT),
-        ),
+        Span::styled(&state.rabbitmq_url, Style::default().fg(TEXT_BRIGHT)),
     ]));
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled("client id   ", Style::default().fg(MUTED)),
-        Span::styled(
-            &state.client_id,
-            Style::default().fg(TEXT_BRIGHT),
-        ),
+        Span::styled(&state.client_id, Style::default().fg(TEXT_BRIGHT)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
-

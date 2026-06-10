@@ -68,7 +68,12 @@ impl App {
                     .iter()
                     .position(|p| p.as_str() == def.provider)
                     .unwrap_or(0);
-                (pidx, def.api_key.clone(), def.base_url.clone().unwrap_or_default(), def.model.clone())
+                (
+                    pidx,
+                    def.api_key.clone(),
+                    def.base_url.clone().unwrap_or_default(),
+                    def.model.clone(),
+                )
             }
             None => {
                 let default_url = if providers[0].api_key_optional() {
@@ -311,7 +316,11 @@ impl App {
                     }
                     form.available_models.clear();
                     let p = providers[form.provider_idx];
-                    form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
+                    form.base_url = if p.api_key_optional() {
+                        p.base_url().to_string()
+                    } else {
+                        String::new()
+                    };
                 }
             }
             KeyCode::Right => {
@@ -321,7 +330,11 @@ impl App {
                     form.provider_idx = (form.provider_idx + 1) % providers.len();
                     form.available_models.clear();
                     let p = providers[form.provider_idx];
-                    form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
+                    form.base_url = if p.api_key_optional() {
+                        p.base_url().to_string()
+                    } else {
+                        String::new()
+                    };
                 }
             }
             KeyCode::Enter => {
@@ -366,7 +379,8 @@ impl App {
         }
 
         form.loading_models = true;
-        let result = common::ai::fetch_models_for_provider(&provider, &api_key, base_url.as_deref()).await;
+        let result =
+            common::ai::fetch_models_for_provider(&provider, &api_key, base_url.as_deref()).await;
 
         let form = match self.settings.model_form.as_mut() {
             Some(f) => f,

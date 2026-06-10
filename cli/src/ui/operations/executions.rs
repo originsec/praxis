@@ -2,8 +2,8 @@ use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
 use crate::ui::common::{focused_panel, short_id};
 use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_FAIL, STATUS_QUEUED, STATUS_RUNNING,
-    TEXT, TEXT_BRIGHT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_FAIL, STATUS_QUEUED, STATUS_RUNNING, TEXT,
+    TEXT_BRIGHT,
 };
 use common::{ChainExecutionStatus, SemanticOpStatus};
 use ratatui::Frame;
@@ -24,19 +24,13 @@ pub(super) fn render_executions(f: &mut Frame, area: Rect, state: &OperationsSta
     // Compute the sorted/filtered view once per frame and share it
     // between the list and detail panes.
     //
-    let sorted =
-        App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
+    let sorted = App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
 
     render_exec_list(f, chunks[0], state, &sorted);
     render_exec_detail(f, chunks[1], state, &sorted);
 }
 
-fn render_exec_list(
-    f: &mut Frame,
-    area: Rect,
-    state: &OperationsState,
-    entries: &[(bool, usize)],
-) {
+fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState, entries: &[(bool, usize)]) {
     let header = Row::new(vec![
         Cell::from(""),
         Cell::from("NAME"),

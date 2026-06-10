@@ -21,10 +21,7 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(
-                format!("v{}", version),
-                Style::default().fg(DIM),
-            ),
+            Span::styled(format!("v{}", version), Style::default().fg(DIM)),
             chrome::mid_dot(),
             Span::styled("by Origin ", Style::default().fg(MUTED)),
             Span::styled("[", Style::default().fg(MUTED)),
@@ -33,14 +30,12 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
         ]),
         Line::raw(""),
         Line::raw(""),
-        Line::from(vec![
-            Span::styled(
-                "About Origin",
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            "About Origin",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::raw(""),
         Line::from(vec![
             Span::styled(
@@ -66,14 +61,12 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
         )),
         Line::raw(""),
         Line::raw(""),
-        Line::from(vec![
-            Span::styled(
-                "About Praxis",
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            "About Praxis",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::raw(""),
         Line::from(vec![
             Span::styled(
@@ -119,4 +112,3 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
-

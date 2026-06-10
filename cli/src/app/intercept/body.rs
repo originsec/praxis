@@ -152,10 +152,7 @@ fn highlight_json_line(line: &str) -> Line<'static> {
         //
         let close = rest[1..].find('"').unwrap();
         let key = &rest[..close + 2];
-        spans.push(Span::styled(
-            key.to_string(),
-            Style::default().fg(JSON_KEY),
-        ));
+        spans.push(Span::styled(key.to_string(), Style::default().fg(JSON_KEY)));
         let after_key = &rest[close + 2..];
         //
         // Colon + separator.

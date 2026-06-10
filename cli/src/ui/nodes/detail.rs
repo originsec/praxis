@@ -116,10 +116,7 @@ pub(super) fn render_node_detail(
                     format!("  {} ", status_glyph),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(
-                    &op.spec.name,
-                    Style::default().fg(TEXT_BRIGHT),
-                ),
+                Span::styled(&op.spec.name, Style::default().fg(TEXT_BRIGHT)),
                 chrome::mid_dot(),
                 Span::styled(
                     format!("{} / {}", op.agent_short_name, op.spec.mode),
@@ -176,10 +173,7 @@ pub(super) fn render_node_detail(
                     format!("  {} ", status_glyph),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(
-                    &chain.chain_name,
-                    Style::default().fg(TEXT_BRIGHT),
-                ),
+                Span::styled(&chain.chain_name, Style::default().fg(TEXT_BRIGHT)),
                 chrome::mid_dot(),
                 Span::styled(
                     format!("{}/{} elements", done, total),
@@ -261,9 +255,10 @@ pub(super) fn render_node_detail(
                 Span::raw("")
             },
         ]),
-        Line::from(vec![
-            Span::styled(&node.os_details, Style::default().fg(MUTED)),
-        ]),
+        Line::from(vec![Span::styled(
+            &node.os_details,
+            Style::default().fg(MUTED),
+        )]),
         Line::from(vec![Span::styled(caps_str, Style::default().fg(DIM))]),
     ];
     f.render_widget(Paragraph::new(header_lines), chunks[0]);
@@ -276,10 +271,7 @@ pub(super) fn render_node_detail(
     agent_lines.push(chrome::rubric("Agents"));
 
     if node.discovered_agents.is_empty() {
-        agent_lines.push(Line::from(Span::styled(
-            "  none",
-            Style::default().fg(DIM),
-        )));
+        agent_lines.push(Line::from(Span::styled("  none", Style::default().fg(DIM))));
     } else {
         for (idx, agent) in node.discovered_agents.iter().enumerate() {
             let avail_dot = if agent.available {
@@ -299,7 +291,10 @@ pub(super) fn render_node_detail(
             spans.push(Span::raw(" "));
 
             let name_style = if has_session {
-                Style::default().fg(BG).bg(ACCENT).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(BG)
+                    .bg(ACCENT)
+                    .add_modifier(Modifier::BOLD)
             } else if is_cursor {
                 Style::default()
                     .fg(TEXT_BRIGHT)
@@ -311,10 +306,7 @@ pub(super) fn render_node_detail(
             spans.push(Span::styled(format!(" {} ", agent.short_name), name_style));
 
             if has_session {
-                spans.push(Span::styled(
-                    " session",
-                    Style::default().fg(ACCENT),
-                ));
+                spans.push(Span::styled(" session", Style::default().fg(ACCENT)));
             }
             if let Some(version) = agent.version.as_deref() {
                 spans.push(Span::styled(

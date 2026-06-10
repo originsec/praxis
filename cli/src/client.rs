@@ -1,25 +1,16 @@
 use anyhow::{Result, anyhow};
+use common::ClientTransport;
 use common::{
-    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
-    ChainDefinitionInput, ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage,
-    ClientDirectMessage,
+    CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo, ChainDefinitionInput,
+    ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage, ClientDirectMessage,
     ClientRegistration, ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
     InterceptedTrafficEntry, LuaAgentScriptInfo, OperationDefinitionInfo, RuleScope,
-    SemanticOpUpdate, SystemState, TargetDirection, TargetSpec, TerminalOutput,
-    TrafficLogFilters, TrafficMatchWithDetails, TrafficSearchFilters, TriggerConfig,
-    client_queue_name,
+    SemanticOpUpdate, SystemState, TargetDirection, TargetSpec, TerminalOutput, TrafficLogFilters,
+    TrafficMatchWithDetails, TrafficSearchFilters, TriggerConfig,
     mcp::{build_notification_frame, build_request_frame},
     publish_json, publish_terminal_command,
 };
-use futures_util::StreamExt;
-use lapin::{
-    Channel, Connection, ConnectionProperties, ExchangeKind,
-    options::{
-        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions,
-        QueueDeclareOptions,
-    },
-    types::FieldTable,
-};
+use lapin::Channel;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -66,6 +57,7 @@ struct PendingAcp {
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
+    pending_initial_state: Option<oneshot::Sender<()>>,
     acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
     pending_config: Option<oneshot::Sender<HashMap<String, String>>>,
@@ -79,7 +71,7 @@ struct ClientState {
     chain_executions: Vec<ChainExecutionUpdate>,
     chain_triggers: Vec<ChainTriggerInfo>,
     current_chain: Option<ChainDefinitionFull>,
-    pending_semantic_op: Option<String>,
+    pending_semantic_op: Option<oneshot::Sender<String>>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
     intercept_targets_text: String,
     intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
@@ -97,10 +89,8 @@ struct ClientState {
     pending_rules_list: Option<oneshot::Sender<Vec<InterceptRule>>>,
     pending_rule_op: Option<oneshot::Sender<RuleOpOutcome>>,
     pending_traffic_get: HashMap<i64, oneshot::Sender<Option<InterceptedTrafficEntry>>>,
-    intercept_entries_tx:
-        Option<tokio::sync::mpsc::UnboundedSender<Vec<InterceptedTrafficEntry>>>,
-    intercept_matches_tx:
-        Option<tokio::sync::mpsc::UnboundedSender<Vec<TrafficMatchWithDetails>>>,
+    intercept_entries_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<InterceptedTrafficEntry>>>,
+    intercept_matches_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<TrafficMatchWithDetails>>>,
     intercept_status_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptStatus>>,
 
     //
@@ -119,143 +109,35 @@ pub struct LogQueryResults {
 
 impl Client {
     pub async fn connect(url: &str, timeout_secs: u64, client_id: String) -> Result<Self> {
-        let connection = Connection::connect(url, ConnectionProperties::default())
-            .await
-            .map_err(|e| anyhow!("Failed to connect to RabbitMQ at {}: {}", url, e))?;
-
-        let channel = connection
-            .create_channel()
-            .await
-            .map_err(|e| anyhow!("Failed to create channel: {}", e))?;
-
-        let client_queue = client_queue_name(&client_id);
-
-        //
-        // Declare client-specific queue and purge any stale messages.
-        //
-        channel
-            .queue_declare(
-                client_queue.as_str().into(),
-                QueueDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-
-        channel
-            .queue_purge(
-                client_queue.as_str().into(),
-                lapin::options::QueuePurgeOptions::default(),
-            )
-            .await?;
-
-        //
-        // Declare broadcast exchange and bind a private queue.
-        //
-        channel
-            .exchange_declare(
-                CLIENT_BROADCAST_EXCHANGE.into(),
-                ExchangeKind::Fanout,
-                ExchangeDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-
-        let broadcast_queue = channel
-            .queue_declare(
-                "".into(),
-                QueueDeclareOptions {
-                    exclusive: true,
-                    auto_delete: true,
-                    ..QueueDeclareOptions::default()
-                },
-                FieldTable::default(),
-            )
-            .await?;
-
-        channel
-            .queue_bind(
-                broadcast_queue.name().as_str().into(),
-                CLIENT_BROADCAST_EXCHANGE.into(),
-                "".into(),
-                QueueBindOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
+        let transport = ClientTransport::connect(url, &client_id).await?;
 
         let state = Arc::new(Mutex::new(ClientState::default()));
 
-        let mut client = Self {
-            channel,
+        let direct_state = Arc::clone(&state);
+        let broadcast_state = Arc::clone(&state);
+        let consumer_handle = transport.start_consuming(
+            "tui",
+            move |data| {
+                let state = Arc::clone(&direct_state);
+                async move { Self::handle_direct_message(&state, &data).await }
+            },
+            move |data| {
+                let state = Arc::clone(&broadcast_state);
+                async move { Self::handle_broadcast_message(&state, &data).await }
+            },
+        );
+
+        let client = Self {
+            channel: transport.channel().clone(),
             client_id,
             timeout: Duration::from_secs(timeout_secs),
             state,
-            consumer_handle: None,
+            consumer_handle: Some(consumer_handle),
         };
 
-        client
-            .start_consuming(&client_queue, broadcast_queue.name().as_str())
-            .await?;
-
-        client.register(timeout_secs).await?;
+        client.register().await?;
 
         Ok(client)
-    }
-
-    async fn start_consuming(&mut self, client_queue: &str, broadcast_queue: &str) -> Result<()> {
-        let state = Arc::clone(&self.state);
-        let channel = self.channel.clone();
-        let client_queue = client_queue.to_string();
-        let broadcast_queue = broadcast_queue.to_string();
-
-        let handle = tokio::spawn(async move {
-            let consumer_tag = format!("tui_direct_{}", uuid::Uuid::new_v4());
-            let mut direct_consumer = match channel
-                .basic_consume(
-                    client_queue.as_str().into(),
-                    consumer_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-
-            let broadcast_tag = format!("tui_broadcast_{}", uuid::Uuid::new_v4());
-            let mut broadcast_consumer = match channel
-                .basic_consume(
-                    broadcast_queue.as_str().into(),
-                    broadcast_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-
-            loop {
-                tokio::select! {
-                    Some(delivery_result) = direct_consumer.next() => {
-                        if let Ok(delivery) = delivery_result {
-                            Self::handle_direct_message(&state, &delivery.data).await;
-                            let _ = delivery.ack(BasicAckOptions::default()).await;
-                        }
-                    }
-                    Some(delivery_result) = broadcast_consumer.next() => {
-                        if let Ok(delivery) = delivery_result {
-                            Self::handle_broadcast_message(&state, &delivery.data).await;
-                            let _ = delivery.ack(BasicAckOptions::default()).await;
-                        }
-                    }
-                }
-            }
-        });
-
-        self.consumer_handle = Some(handle);
-        Ok(())
     }
 
     async fn handle_direct_message(state: &Arc<Mutex<ClientState>>, data: &[u8]) {
@@ -284,6 +166,9 @@ impl Client {
             ClientDirectMessage::RegistrationAck(_) => {}
             ClientDirectMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
+                if let Some(tx) = state.pending_initial_state.take() {
+                    let _ = tx.send(());
+                }
             }
 
             ClientDirectMessage::ServiceConfigResponse { values } => {
@@ -304,14 +189,15 @@ impl Client {
             } => {
                 if let Some(ref recon) = recon_result {
                     state.cached_project_paths = recon.config.project_paths.clone();
-                    state.recon_cache.insert(
-                        (node_id.clone(), agent_short_name.clone()),
-                        recon.clone(),
-                    );
+                    state
+                        .recon_cache
+                        .insert((node_id.clone(), agent_short_name.clone()), recon.clone());
                 }
             }
             ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
-                state.pending_semantic_op = Some(operation_id);
+                if let Some(tx) = state.pending_semantic_op.take() {
+                    let _ = tx.send(operation_id);
+                }
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
                 if let Some(idx) = state
@@ -359,10 +245,7 @@ impl Client {
                 state.chain_triggers = triggers;
             }
             ClientDirectMessage::ChainTriggerCreated { trigger } => {
-                if let Some(existing) = state
-                    .chain_triggers
-                    .iter_mut()
-                    .find(|t| t.id == trigger.id)
+                if let Some(existing) = state.chain_triggers.iter_mut().find(|t| t.id == trigger.id)
                 {
                     *existing = trigger;
                 } else {
@@ -370,10 +253,7 @@ impl Client {
                 }
             }
             ClientDirectMessage::ChainTriggerUpdated { trigger } => {
-                if let Some(existing) = state
-                    .chain_triggers
-                    .iter_mut()
-                    .find(|t| t.id == trigger.id)
+                if let Some(existing) = state.chain_triggers.iter_mut().find(|t| t.id == trigger.id)
                 {
                     *existing = trigger;
                 } else {
@@ -414,7 +294,11 @@ impl Client {
                 // Trigger a re-fetch handled by the app layer.
             }
 
-            ClientDirectMessage::InterceptTargetsState { text, targets, error } => {
+            ClientDirectMessage::InterceptTargetsState {
+                text,
+                targets,
+                error,
+            } => {
                 state.intercept_targets_text = text;
                 state.intercept_targets_parsed = targets;
                 state.intercept_targets_error = error;
@@ -499,7 +383,11 @@ impl Client {
             //
             // LogQuery responses. Only one query is in flight at a time.
             //
-            ClientDirectMessage::LogQueryResponse { columns, rows, total_count } => {
+            ClientDirectMessage::LogQueryResponse {
+                columns,
+                rows,
+                total_count,
+            } => {
                 if let Some(tx) = state.pending_log_query.take() {
                     let _ = tx.send(Ok(LogQueryResults {
                         columns,
@@ -575,25 +463,13 @@ impl Client {
         }
     }
 
-    async fn register(&self, timeout_secs: u64) -> Result<()> {
+    async fn register(&self) -> Result<()> {
         let registration = ClientRegistration {
             client_id: self.client_id.clone(),
         };
         let message = ClientSignalMessage::Registration(registration);
-        self.publish_signal(message).await?;
-
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = (timeout_secs * 10) as usize;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let state = self.state.lock().await;
-            if state.system_state.is_some() {
-                return Ok(());
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for initial state from service"))
+        self.request("initial state", |s| &mut s.pending_initial_state, message)
+            .await
     }
 
     pub async fn disconnect(self) {
@@ -605,6 +481,44 @@ impl Client {
     async fn publish_signal(&self, message: ClientSignalMessage) -> Result<()> {
         publish_json(&self.channel, CLIENT_SIGNAL_QUEUE, &message).await?;
         Ok(())
+    }
+
+    //
+    // Generic request/response over the signal queue: store a oneshot sender
+    // in the pending slot, publish the signal, and await the response with
+    // the client timeout. The slot is cleared on publish failure or timeout
+    // so a late response can't fire into a stale sender.
+    //
+
+    async fn request<T>(
+        &self,
+        op_name: &str,
+        slot: impl Fn(&mut ClientState) -> &mut Option<oneshot::Sender<T>>,
+        message: ClientSignalMessage,
+    ) -> Result<T> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            *slot(&mut state) = Some(tx);
+        }
+
+        if let Err(e) = self.publish_signal(message).await {
+            *slot(&mut *self.state.lock().await) = None;
+            return Err(e);
+        }
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(_)) => Err(anyhow!("{} response channel closed", op_name)),
+            Err(_) => {
+                *slot(&mut *self.state.lock().await) = None;
+                Err(anyhow!(
+                    "Timeout after {}s waiting for {} response",
+                    self.timeout.as_secs(),
+                    op_name
+                ))
+            }
+        }
     }
 
     pub async fn get_state(&self) -> Option<SystemState> {
@@ -641,26 +555,12 @@ impl Client {
     //
 
     pub async fn get_config(&self, keys: Vec<String>) -> Result<HashMap<String, String>> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_config = Some(tx);
-        }
-
         let message = ClientSignalMessage::ServiceConfigGet {
             client_id: self.client_id.clone(),
             keys,
         };
-        self.publish_signal(message).await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(values)) => Ok(values),
-            Ok(Err(_)) => Err(anyhow!("Config response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_config = None;
-                Err(anyhow!("Timeout waiting for config response"))
-            }
-        }
+        self.request("config", |s| &mut s.pending_config, message)
+            .await
     }
 
     pub async fn set_config(&self, values: HashMap<String, String>) -> Result<()> {
@@ -681,12 +581,7 @@ impl Client {
     // `params._meta.praxis.nodeId` so the service routes the frame.
     //
 
-    pub async fn acp_request(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<Value> {
+    pub async fn acp_request(&self, node_id: &str, method: &str, params: Value) -> Result<Value> {
         self.do_acp_request(node_id, method, params, false)
             .await
             .map(|(v, _)| v)
@@ -712,12 +607,7 @@ impl Client {
     // e.g. session/cancel.
     //
 
-    pub async fn acp_notification(
-        &self,
-        node_id: &str,
-        method: &str,
-        params: Value,
-    ) -> Result<()> {
+    pub async fn acp_notification(&self, node_id: &str, method: &str, params: Value) -> Result<()> {
         let frame = build_notification_frame(node_id, method, params);
         self.publish_signal(ClientSignalMessage::AcpMessage {
             client_id: self.client_id.clone(),
@@ -747,7 +637,11 @@ impl Client {
                 request_id.clone(),
                 PendingAcp {
                     response_tx: Some(tx),
-                    text_buf: if collect_text { Some(String::new()) } else { None },
+                    text_buf: if collect_text {
+                        Some(String::new())
+                    } else {
+                        None
+                    },
                     session_id,
                 },
             );
@@ -823,7 +717,9 @@ impl Client {
             let Some(pending) = state.pending_acp.get_mut(&request_id) else {
                 return;
             };
-            let Some(tx) = pending.response_tx.take() else { return };
+            let Some(tx) = pending.response_tx.take() else {
+                return;
+            };
 
             if let Some(err) = msg.get("error") {
                 let message = err
@@ -1051,32 +947,20 @@ impl Client {
         operation_name: String,
         working_dir: Option<String>,
     ) -> Result<String> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_semantic_op = None;
-        }
-
         let message = ClientSignalMessage::SemanticOpRun {
             client_id: self.client_id.clone(),
             node_id,
             agent_short_name,
             operation_name,
-            request_id: request_id.clone(),
+            request_id: uuid::Uuid::new_v4().to_string(),
             working_dir,
         };
-        self.publish_signal(message).await?;
-
-        let poll_interval = Duration::from_millis(100);
-        for _ in 0..50 {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(op_id) = state.pending_semantic_op.take() {
-                return Ok(op_id);
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for operation to be queued"))
+        self.request(
+            "semantic op queued",
+            |s| &mut s.pending_semantic_op,
+            message,
+        )
+        .await
     }
 
     pub async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
@@ -1419,25 +1303,12 @@ impl Client {
         &self,
         filters: TrafficLogFilters,
     ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_log = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::TrafficLogRequest {
+        let message = ClientSignalMessage::TrafficLogRequest {
             client_id: self.client_id.clone(),
             filters,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(r)) => Ok(r),
-            Ok(Err(_)) => Err(anyhow!("Traffic log response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_traffic_log = None;
-                Err(anyhow!("Timeout waiting for traffic log response"))
-            }
-        }
+        };
+        self.request("traffic log", |s| &mut s.pending_traffic_log, message)
+            .await
     }
 
     #[allow(dead_code)]
@@ -1445,25 +1316,12 @@ impl Client {
         &self,
         filters: TrafficSearchFilters,
     ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_search = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::TrafficSearchRequest {
+        let message = ClientSignalMessage::TrafficSearchRequest {
             client_id: self.client_id.clone(),
             filters,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(r)) => Ok(r),
-            Ok(Err(_)) => Err(anyhow!("Traffic search response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_traffic_search = None;
-                Err(anyhow!("Timeout waiting for traffic search response"))
-            }
-        }
+        };
+        self.request("traffic search", |s| &mut s.pending_traffic_search, message)
+            .await
     }
 
     pub async fn request_traffic_matches(
@@ -1472,54 +1330,29 @@ impl Client {
         limit: usize,
         offset: usize,
     ) -> Result<(Vec<TrafficMatchWithDetails>, usize)> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_matches = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::TrafficMatchesRequest {
+        let message = ClientSignalMessage::TrafficMatchesRequest {
             client_id: self.client_id.clone(),
             rule_id,
             limit,
             offset,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(r)) => Ok(r),
-            Ok(Err(_)) => Err(anyhow!("Traffic matches response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_traffic_matches = None;
-                Err(anyhow!("Timeout waiting for traffic matches response"))
-            }
-        }
+        };
+        self.request(
+            "traffic matches",
+            |s| &mut s.pending_traffic_matches,
+            message,
+        )
+        .await
     }
 
     pub async fn clear_all_traffic(&self) -> Result<usize> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_clear = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::TrafficClear {
+        let message = ClientSignalMessage::TrafficClear {
             client_id: self.client_id.clone(),
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(n)) => Ok(n),
-            Ok(Err(_)) => Err(anyhow!("Traffic clear response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_traffic_clear = None;
-                Err(anyhow!("Timeout waiting for traffic clear response"))
-            }
-        }
+        };
+        self.request("traffic clear", |s| &mut s.pending_traffic_clear, message)
+            .await
     }
 
-    pub async fn fetch_traffic_entry(
-        &self,
-        id: i64,
-    ) -> Result<Option<InterceptedTrafficEntry>> {
+    pub async fn fetch_traffic_entry(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {
         let (tx, rx) = oneshot::channel();
         {
             let mut state = self.state.lock().await;
@@ -1546,24 +1379,11 @@ impl Client {
     //
 
     pub async fn list_intercept_rules(&self) -> Result<Vec<InterceptRule>> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_rules_list = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::InterceptRuleList {
+        let message = ClientSignalMessage::InterceptRuleList {
             client_id: self.client_id.clone(),
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(rules)) => Ok(rules),
-            Ok(Err(_)) => Err(anyhow!("Rules list response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_rules_list = None;
-                Err(anyhow!("Timeout waiting for rules list response"))
-            }
-        }
+        };
+        self.request("rules list", |s| &mut s.pending_rules_list, message)
+            .await
     }
 
     pub async fn create_intercept_rule(
@@ -1574,30 +1394,21 @@ impl Client {
         scope: RuleScope,
         summarization_prompt: Option<String>,
     ) -> Result<InterceptRule> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_rule_op = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::InterceptRuleCreate {
+        let message = ClientSignalMessage::InterceptRuleCreate {
             client_id: self.client_id.clone(),
             name,
             regex_pattern,
             target_direction,
             scope,
             summarization_prompt,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(RuleOpOutcome::Created(rule))) => Ok(rule),
-            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
-            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
-            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_rule_op = None;
-                Err(anyhow!("Timeout waiting for rule create response"))
-            }
+        };
+        match self
+            .request("rule create", |s| &mut s.pending_rule_op, message)
+            .await?
+        {
+            RuleOpOutcome::Created(rule) => Ok(rule),
+            RuleOpOutcome::Error(msg) => Err(anyhow!(msg)),
+            other => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
         }
     }
 
@@ -1612,12 +1423,7 @@ impl Client {
         enabled: Option<bool>,
         summarization_prompt: Option<Option<String>>,
     ) -> Result<InterceptRule> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_rule_op = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::InterceptRuleUpdate {
+        let message = ClientSignalMessage::InterceptRuleUpdate {
             client_id: self.client_id.clone(),
             id,
             name,
@@ -1626,42 +1432,29 @@ impl Client {
             scope,
             enabled,
             summarization_prompt,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(RuleOpOutcome::Updated(rule))) => Ok(rule),
-            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
-            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
-            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_rule_op = None;
-                Err(anyhow!("Timeout waiting for rule update response"))
-            }
+        };
+        match self
+            .request("rule update", |s| &mut s.pending_rule_op, message)
+            .await?
+        {
+            RuleOpOutcome::Updated(rule) => Ok(rule),
+            RuleOpOutcome::Error(msg) => Err(anyhow!(msg)),
+            other => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
         }
     }
 
     pub async fn delete_intercept_rule(&self, id: i64) -> Result<bool> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_rule_op = Some(tx);
-        }
-        self.publish_signal(ClientSignalMessage::InterceptRuleDelete {
+        let message = ClientSignalMessage::InterceptRuleDelete {
             client_id: self.client_id.clone(),
             id,
-        })
-        .await?;
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(RuleOpOutcome::Deleted { success, .. })) => Ok(success),
-            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
-            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
-            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_rule_op = None;
-                Err(anyhow!("Timeout waiting for rule delete response"))
-            }
+        };
+        match self
+            .request("rule delete", |s| &mut s.pending_rule_op, message)
+            .await?
+        {
+            RuleOpOutcome::Deleted { success, .. } => Ok(success),
+            RuleOpOutcome::Error(msg) => Err(anyhow!(msg)),
+            other => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
         }
     }
 
@@ -1697,29 +1490,12 @@ impl Client {
     //
 
     pub async fn run_log_query(&self, query: String) -> Result<LogQueryResults, String> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
-            state.pending_log_query = Some(tx);
-        }
-        if let Err(e) = self
-            .publish_signal(ClientSignalMessage::LogQuery {
-                client_id: self.client_id.clone(),
-                query,
-            })
+        let message = ClientSignalMessage::LogQuery {
+            client_id: self.client_id.clone(),
+            query,
+        };
+        self.request("log query", |s| &mut s.pending_log_query, message)
             .await
-        {
-            self.state.lock().await.pending_log_query = None;
-            return Err(format!("Failed to send query: {}", e));
-        }
-
-        match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("Log query response channel closed".to_string()),
-            Err(_) => {
-                self.state.lock().await.pending_log_query = None;
-                Err("Timeout waiting for log query response".to_string())
-            }
-        }
+            .map_err(|e| e.to_string())?
     }
 }

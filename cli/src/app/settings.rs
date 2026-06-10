@@ -107,7 +107,6 @@ pub fn sorted_providers() -> Vec<common::Provider> {
     providers
 }
 
-
 impl Default for SettingsState {
     fn default() -> Self {
         Self {
@@ -354,7 +353,8 @@ impl App {
             std::io::stdout(),
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen,
-        ).ok();
+        )
+        .ok();
 
         let status = std::process::Command::new(&editor).arg(&path).status();
 
@@ -382,7 +382,8 @@ impl App {
                 Ok(content) => {
                     self.settings.praxis_agent_prompt_buffer = content.clone();
                     self.settings.praxis_agent_system_prompt = content.clone();
-                    self.save_setting("praxis_agent_system_prompt", &content).await;
+                    self.save_setting("praxis_agent_system_prompt", &content)
+                        .await;
                 }
                 Err(e) => {
                     self.settings.status_message = Some(format!("Failed to read file: {}", e));
@@ -665,7 +666,6 @@ impl App {
             self.handle_model_form_key(key).await;
             return;
         }
-
 
         match key.code {
             KeyCode::Tab => {
@@ -961,15 +961,13 @@ impl App {
                     }
                 }
             }
-            SettingsTab::Agents => {
-                match sel {
-                    1 => {
-                        self.settings.praxis_agent_thinking_effort = val.clone();
-                        self.save_praxis_agent_settings().await;
-                    }
-                    _ => {}
+            SettingsTab::Agents => match sel {
+                1 => {
+                    self.settings.praxis_agent_thinking_effort = val.clone();
+                    self.save_praxis_agent_settings().await;
                 }
-            }
+                _ => {}
+            },
             SettingsTab::Service => match sel {
                 1 => {
                     self.settings.mcp_port = val.clone();
@@ -998,7 +996,6 @@ impl App {
         }
     }
 
-
     pub(crate) async fn handle_settings_mouse(
         &mut self,
         mouse: MouseEvent,
@@ -1024,8 +1021,8 @@ impl App {
                     } else {
                         0
                     };
-                    let popup_h = (base_lines + dropdown_extra)
-                        .min(terminal_area.height.saturating_sub(4));
+                    let popup_h =
+                        (base_lines + dropdown_extra).min(terminal_area.height.saturating_sub(4));
                     let popup_w = 60u16.min(terminal_area.width.saturating_sub(4));
                     let px = (terminal_area.width.saturating_sub(popup_w)) / 2;
                     let py = (terminal_area.height.saturating_sub(popup_h)) / 2;
@@ -1050,7 +1047,11 @@ impl App {
                         if rel_col > 14 {
                             form.provider_idx = (form.provider_idx + 1) % providers.len();
                             let p = providers[form.provider_idx];
-                            form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
+                            form.base_url = if p.api_key_optional() {
+                                p.base_url().to_string()
+                            } else {
+                                String::new()
+                            };
                         }
                     } else if rel_row == 1 {
                         form.focused_field = 1;
@@ -1108,8 +1109,7 @@ impl App {
                         .map(|d| d.name.len())
                         .max()
                         .unwrap_or(20);
-                    let popup_w =
-                        (max_name as u16 + 6).min(terminal_area.width.saturating_sub(4));
+                    let popup_w = (max_name as u16 + 6).min(terminal_area.width.saturating_sub(4));
                     let px = content_area.x + (content_area.width.saturating_sub(popup_w)) / 2;
                     let py = content_area.y + (content_area.height.saturating_sub(popup_h)) / 2;
                     let inner_x = px + 1;
@@ -1280,8 +1280,7 @@ impl App {
                         // Located at row 13 in the about content.
                         //
                         if rel_row == 13 {
-                            let rel_col =
-                                mouse.column.saturating_sub(settings_content.x) as usize;
+                            let rel_col = mouse.column.saturating_sub(settings_content.x) as usize;
                             if rel_col < 12 {
                                 Self::open_url("https://originhq.com");
                             } else if rel_col >= 15 {
@@ -1348,7 +1347,11 @@ impl App {
         let editor = std::env::var("VISUAL")
             .or_else(|_| std::env::var("EDITOR"))
             .unwrap_or_else(|_| {
-                if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() }
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
             });
 
         let tmp = match tempfile::Builder::new()
@@ -1372,13 +1375,15 @@ impl App {
 
         let path = tmp.path().to_path_buf();
 
-        self.terminal_paused.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         crossterm::terminal::disable_raw_mode().ok();
         crossterm::execute!(
             std::io::stdout(),
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen,
-        ).ok();
+        )
+        .ok();
 
         let status = std::process::Command::new(&editor).arg(&path).status();
 
@@ -1387,9 +1392,11 @@ impl App {
             crossterm::terminal::EnterAlternateScreen,
             crossterm::event::EnableMouseCapture,
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
-        ).ok();
+        )
+        .ok();
         crossterm::terminal::enable_raw_mode().ok();
-        self.terminal_paused.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.terminal_resume.notify_one();
 
         while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
@@ -1445,5 +1452,3 @@ impl App {
         self.load_intercept_targets().await;
     }
 }
-
-

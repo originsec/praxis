@@ -6,9 +6,8 @@
 //
 
 use crate::app::{
-    input_port_count, output_port_count, BlockField, ChainElementDraft, ChainForm,
-    ChainFormEditor, ConditionKind, ConnectionDraft, Drag, EditTarget, ElementKind, PortSide,
-    Selected,
+    BlockField, ChainElementDraft, ChainForm, ChainFormEditor, ConditionKind, ConnectionDraft,
+    Drag, EditTarget, ElementKind, PortSide, Selected, input_port_count, output_port_count,
 };
 use crate::ui::theme::{
     ACCENT, BG, BG_ELEMENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, ERROR, MUTED, OK,
@@ -149,12 +148,7 @@ fn render_divider(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_header_strip(
-    f: &mut Frame,
-    area: Rect,
-    form: &ChainForm,
-    hit: &mut ChainFormHitMap,
-) {
+fn render_header_strip(f: &mut Frame, area: Rect, form: &ChainForm, hit: &mut ChainFormHitMap) {
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -244,7 +238,8 @@ fn render_header_strip(
         )),
         rect_from(to_rect),
     );
-    hit.header_fields.push((EditTarget::HeaderCategory, cat_rect));
+    hit.header_fields
+        .push((EditTarget::HeaderCategory, cat_rect));
     hit.header_fields.push((EditTarget::HeaderTimeout, to_rect));
 
     //
@@ -261,7 +256,8 @@ fn render_header_strip(
         )),
         rect_from(desc_rect),
     );
-    hit.header_fields.push((EditTarget::HeaderDescription, desc_rect));
+    hit.header_fields
+        .push((EditTarget::HeaderDescription, desc_rect));
 }
 
 enum FieldKind {
@@ -493,12 +489,13 @@ fn draw_block(
         vx + 2,
         vy + 2,
         &truncate(&summary, (w - 4) as usize),
-        Style::default().fg(if el.kind == ElementKind::Trigger {
-            TEXT_BRIGHT
-        } else {
-            TEXT
-        })
-        .bg(bg_color),
+        Style::default()
+            .fg(if el.kind == ElementKind::Trigger {
+                TEXT_BRIGHT
+            } else {
+                TEXT
+            })
+            .bg(bg_color),
     );
 
     //
@@ -727,11 +724,7 @@ fn draw_connector(
     }
 }
 
-fn path_char(
-    here: (i32, i32),
-    prev: Option<(i32, i32)>,
-    next: Option<(i32, i32)>,
-) -> char {
+fn path_char(here: (i32, i32), prev: Option<(i32, i32)>, next: Option<(i32, i32)>) -> char {
     let (x, y) = here;
     let dx_p = prev.map(|p| p.0 - x).unwrap_or(0);
     let dy_p = prev.map(|p| p.1 - y).unwrap_or(0);
@@ -818,12 +811,7 @@ fn draw_rubberband(
 // connection), with click-to-edit hit rects.
 //
 
-fn render_properties_strip(
-    f: &mut Frame,
-    area: Rect,
-    form: &ChainForm,
-    hit: &mut ChainFormHitMap,
-) {
+fn render_properties_strip(f: &mut Frame, area: Rect, form: &ChainForm, hit: &mut ChainFormHitMap) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER_SUBTLE))
@@ -886,7 +874,9 @@ fn render_block_properties(
     f.render_widget(
         Paragraph::new(Span::styled(
             el.id.clone(),
-            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
         )),
         Rect::new(x, inner.y, id_w, 1),
     );
@@ -895,19 +885,13 @@ fn render_block_properties(
     let kw = kind_cycle_text.chars().count() as u16;
     let kind_cycle_rect = HitRect::new(x, inner.y, kw, 1);
     f.render_widget(
-        Paragraph::new(Span::styled(
-            kind_cycle_text,
-            Style::default().fg(ACCENT),
-        )),
+        Paragraph::new(Span::styled(kind_cycle_text, Style::default().fg(ACCENT))),
         rect_from(kind_cycle_rect),
     );
     hit.kind_cycle_button = kind_cycle_rect;
     let del_rect = HitRect::new(inner.x + inner.width.saturating_sub(11), inner.y, 10, 1);
     f.render_widget(
-        Paragraph::new(Span::styled(
-            "[Delete]",
-            Style::default().fg(ERROR),
-        )),
+        Paragraph::new(Span::styled("[Delete]", Style::default().fg(ERROR))),
         rect_from(del_rect),
     );
     hit.delete_element_button = del_rect;
@@ -983,12 +967,7 @@ fn render_block_properties(
             //
             // The "[pick]" suffix is its own hit rect on the right side.
             //
-            let pick_rect = HitRect::new(
-                inner.x + inner.width.saturating_sub(8),
-                row,
-                8,
-                1,
-            );
+            let pick_rect = HitRect::new(inner.x + inner.width.saturating_sub(8), row, 8, 1);
             hit.pick_op_button = pick_rect;
         }
         row += 1;
@@ -1012,7 +991,9 @@ fn render_connection_properties(
     f.render_widget(
         Paragraph::new(Span::styled(
             header,
-            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
         )),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
@@ -1087,10 +1068,7 @@ fn render_connection_properties(
 
     let del_rect = HitRect::new(inner.x + inner.width.saturating_sub(11), row, 10, 1);
     f.render_widget(
-        Paragraph::new(Span::styled(
-            "[Delete]",
-            Style::default().fg(ERROR),
-        )),
+        Paragraph::new(Span::styled("[Delete]", Style::default().fg(ERROR))),
         rect_from(del_rect),
     );
     hit.delete_connection_button = del_rect;

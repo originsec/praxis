@@ -49,10 +49,7 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
                 .add_modifier(Modifier::BOLD),
         ),
         chrome::mid_dot(),
-        Span::styled(
-            &overlay.agent_short_name,
-            Style::default().fg(ACCENT),
-        ),
+        Span::styled(&overlay.agent_short_name, Style::default().fg(ACCENT)),
         chrome::mid_dot(),
         Span::styled(
             format!("@ {}", short_id(&overlay.node_id)),
@@ -70,7 +67,9 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
             let style = if msg == "Saved" || msg == "No changes" {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(STATUS_FAIL).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .add_modifier(Modifier::BOLD)
             };
             spans.push(Span::styled(msg.clone(), style));
         }
@@ -93,10 +92,7 @@ fn render_header(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         ));
     } else if let Some(ref at) = overlay.performed_at {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("[{}]", at),
-            Style::default().fg(DIM),
-        ));
+        spans.push(Span::styled(format!("[{}]", at), Style::default().fg(DIM)));
     }
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -174,11 +170,8 @@ fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 pub fn common_two_pane_layout(area: Rect, split_percent: u16) -> (Rect, Rect) {
     let left = split_percent.min(80).max(20);
     let right = 100u16.saturating_sub(left);
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(left),
-        Constraint::Percentage(right),
-    ])
-    .split(area);
+    let chunks = Layout::horizontal([Constraint::Percentage(left), Constraint::Percentage(right)])
+        .split(area);
     (chunks[0], chunks[1])
 }
 

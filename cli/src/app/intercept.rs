@@ -245,11 +245,7 @@ impl InterceptState {
     // response included and marks the display dirty.
     //
 
-    pub fn replace_buffer(
-        &mut self,
-        entries: Vec<InterceptedTrafficEntry>,
-        total: usize,
-    ) {
+    pub fn replace_buffer(&mut self, entries: Vec<InterceptedTrafficEntry>, total: usize) {
         self.buffer.clear();
         for mut entry in entries {
             if let Some(id) = entry.id {
@@ -489,8 +485,7 @@ impl InterceptState {
             {
                 return true;
             }
-            s.to_lowercase()
-                .contains(&self.search_input.to_lowercase())
+            s.to_lowercase().contains(&self.search_input.to_lowercase())
         };
 
         if hit(&entry.url) {
@@ -702,10 +697,7 @@ impl InterceptState {
     // Body cache helpers.
     //
 
-    pub fn request_body_for<'a>(
-        &'a self,
-        entry: &'a InterceptedTrafficEntry,
-    ) -> Option<&'a [u8]> {
+    pub fn request_body_for<'a>(&'a self, entry: &'a InterceptedTrafficEntry) -> Option<&'a [u8]> {
         if let Some(ref body) = entry.request_body {
             return Some(body.as_slice());
         }
@@ -713,10 +705,7 @@ impl InterceptState {
         self.body_cache.get(&id).and_then(|(req, _)| req.as_deref())
     }
 
-    pub fn response_body_for<'a>(
-        &'a self,
-        entry: &'a InterceptedTrafficEntry,
-    ) -> Option<&'a [u8]> {
+    pub fn response_body_for<'a>(&'a self, entry: &'a InterceptedTrafficEntry) -> Option<&'a [u8]> {
         if let Some(ref body) = entry.response_body {
             return Some(body.as_slice());
         }
@@ -840,7 +829,9 @@ impl App {
                 // the existing entry (matched by id) so the fetched
                 // bodies become visible without a second code path.
                 //
-                let _ = tx.send(crate::event::AppEvent::InterceptEntriesAppended(vec![entry]));
+                let _ = tx.send(crate::event::AppEvent::InterceptEntriesAppended(vec![
+                    entry,
+                ]));
             }
         });
     }
@@ -937,8 +928,7 @@ impl App {
             }
             KeyCode::Up => {
                 if self.intercept.detail_focus {
-                    self.intercept.detail_scroll =
-                        self.intercept.detail_scroll.saturating_sub(1);
+                    self.intercept.detail_scroll = self.intercept.detail_scroll.saturating_sub(1);
                 } else {
                     self.intercept.move_selection(-1);
                     self.fetch_body_for_selected().await;
@@ -956,8 +946,7 @@ impl App {
             }
             KeyCode::PageUp => {
                 if self.intercept.detail_focus {
-                    self.intercept.detail_scroll =
-                        self.intercept.detail_scroll.saturating_sub(10);
+                    self.intercept.detail_scroll = self.intercept.detail_scroll.saturating_sub(10);
                 } else {
                     self.intercept.move_selection(-10);
                     self.fetch_body_for_selected().await;
@@ -1087,8 +1076,11 @@ impl App {
             KeyCode::Down => {
                 if self.intercept.match_detail_focus {
                     let max = self.intercept.match_detail_max_scroll.get();
-                    self.intercept.match_detail_scroll =
-                        self.intercept.match_detail_scroll.saturating_add(1).min(max);
+                    self.intercept.match_detail_scroll = self
+                        .intercept
+                        .match_detail_scroll
+                        .saturating_add(1)
+                        .min(max);
                 } else {
                     self.intercept.move_match_selection(1);
                 }
@@ -1225,9 +1217,7 @@ impl App {
     pub async fn delete_intercept_rule(&mut self, id: i64) {
         match self.client.delete_intercept_rule(id).await {
             Ok(true) => self.intercept.remove_rule(id),
-            Ok(false) => self
-                .intercept
-                .set_error("Rule delete rejected".to_string()),
+            Ok(false) => self.intercept.set_error("Rule delete rejected".to_string()),
             Err(e) => self.intercept.set_error(format!("Delete rule: {}", e)),
         }
     }
@@ -1294,8 +1284,10 @@ impl App {
         } else if os_lower.contains("windows") {
             common::InterceptMethod::Vpn
         } else {
-            self.intercept
-                .set_error(format!("Interception not supported on node {}", common::short_id(&node_id)));
+            self.intercept.set_error(format!(
+                "Interception not supported on node {}",
+                common::short_id(&node_id)
+            ));
             return;
         };
 
@@ -1364,11 +1356,7 @@ impl App {
         self.intercept.set_agent_filter(new);
     }
 
-    pub(crate) async fn handle_intercept_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        content_area: Rect,
-    ) {
+    pub(crate) async fn handle_intercept_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
         use ratatui::layout::{Constraint, Layout};
 
         let chunks = Layout::vertical([
@@ -1424,11 +1412,8 @@ impl App {
                 });
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(
-                            split[0],
-                            mouse.column,
-                            mouse.row,
-                        ) {
+                        if crate::ui::common::hit_vertical_border(split[0], mouse.column, mouse.row)
+                        {
                             self.intercept.log_dragging = true;
                             return;
                         }
@@ -1494,11 +1479,8 @@ impl App {
                 });
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(
-                            split[0],
-                            mouse.column,
-                            mouse.row,
-                        ) {
+                        if crate::ui::common::hit_vertical_border(split[0], mouse.column, mouse.row)
+                        {
                             self.intercept.match_dragging = true;
                             return;
                         }

@@ -62,10 +62,7 @@ pub fn render_popup(f: &mut Frame, area: Rect, state: &LogQueryState) {
         height: 1,
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "esc",
-            Style::default().fg(MUTED),
-        ))),
+        Paragraph::new(Line::from(Span::styled("esc", Style::default().fg(MUTED)))),
         esc_row,
     );
 
@@ -132,9 +129,7 @@ pub fn render_popup(f: &mut Frame, area: Rect, state: &LogQueryState) {
                     Span::raw("  "),
                     Span::styled(
                         format!("\u{2014} {}", col.description),
-                        Style::default()
-                            .fg(DIM)
-                            .add_modifier(Modifier::ITALIC),
+                        Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
                     ),
                 ]));
             }

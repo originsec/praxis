@@ -69,7 +69,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
         } else {
             (chrome::dot(OK), Style::default().fg(MUTED))
         };
-        let line = Line::from(vec![icon, Span::raw(" "), Span::styled(msg.as_str(), style)]);
+        let line = Line::from(vec![
+            icon,
+            Span::raw(" "),
+            Span::styled(msg.as_str(), style),
+        ]);
         f.render_widget(Paragraph::new(line), chunks[3]);
     }
 }
@@ -104,9 +108,7 @@ pub(super) fn setting_row<'a>(
     edit_buffer: &'a str,
 ) -> Line<'a> {
     let label_style = if selected {
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
@@ -138,9 +140,7 @@ pub(super) fn setting_row<'a>(
 
 pub(super) fn toggle_row(label: &str, enabled: bool, selected: bool) -> Line<'_> {
     let label_style = if selected {
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };

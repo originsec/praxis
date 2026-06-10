@@ -93,7 +93,10 @@ async fn create_session(
             .get_config(vec!["prompt_timeout_secs".to_string()])
             .await
             .ok()
-            .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse::<u64>().ok())),
+            .and_then(|cfg| {
+                cfg.get("prompt_timeout_secs")
+                    .and_then(|v| v.parse::<u64>().ok())
+            }),
     };
 
     let cwd = project.clone().unwrap_or_else(|| "/".to_string());
@@ -109,11 +112,15 @@ async fn create_session(
     }
 
     let result = client
-        .acp_request(&node_id, "session/new", json!({
-            "cwd": cwd,
-            "mcpServers": [],
-            "_meta": { "praxis": praxis_meta }
-        }))
+        .acp_request(
+            &node_id,
+            "session/new",
+            json!({
+                "cwd": cwd,
+                "mcpServers": [],
+                "_meta": { "praxis": praxis_meta }
+            }),
+        )
         .await?;
 
     let session_id = result
@@ -154,15 +161,19 @@ async fn send_prompt(client: &Client, node_prefix: &str, text: &str) -> Result<(
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let cli_state = CliState::load().unwrap_or_default();
-    let session_id = cli_state.get_session(&node_id).ok_or_else(|| {
-        anyhow!("No active session for node. Run `session create` first.")
-    })?;
+    let session_id = cli_state
+        .get_session(&node_id)
+        .ok_or_else(|| anyhow!("No active session for node. Run `session create` first."))?;
 
     let (_result, text) = client
-        .acp_request_collecting_text(&node_id, "session/prompt", json!({
-            "sessionId": session_id,
-            "prompt": [{ "type": "text", "text": text }],
-        }))
+        .acp_request_collecting_text(
+            &node_id,
+            "session/prompt",
+            json!({
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": text }],
+            }),
+        )
         .await?;
 
     println!("{}", text);
@@ -178,14 +189,18 @@ async fn close_session(client: &Client, node_prefix: &str) -> Result<()> {
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let mut cli_state = CliState::load().unwrap_or_default();
-    let session_id = cli_state.get_session(&node_id).ok_or_else(|| {
-        anyhow!("No active session for node.")
-    })?;
+    let session_id = cli_state
+        .get_session(&node_id)
+        .ok_or_else(|| anyhow!("No active session for node."))?;
 
     client
-        .acp_request(&node_id, "session/close", json!({
-            "sessionId": session_id,
-        }))
+        .acp_request(
+            &node_id,
+            "session/close",
+            json!({
+                "sessionId": session_id,
+            }),
+        )
         .await?;
 
     cli_state.clear_session(&node_id)?;

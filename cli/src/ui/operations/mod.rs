@@ -205,7 +205,9 @@ fn append_filter_hint(spans: &mut Vec<Span<'static>>, state: &OperationsState) {
     } else {
         spans.push(Span::styled(
             "/ to filter",
-            Style::default().fg(DIM).add_modifier(ratatui::style::Modifier::ITALIC),
+            Style::default()
+                .fg(DIM)
+                .add_modifier(ratatui::style::Modifier::ITALIC),
         ));
     }
 }

@@ -77,10 +77,7 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
         ]));
     }
 
-    f.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        chunks[2],
-    );
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[2]);
 
     render_hints(f, chunks[3]);
     let _ = (BG, BG_ELEMENT, TEXT);
@@ -89,9 +86,7 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
 fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormField) {
     let focused = form.focus == field;
     let label_style = if focused {
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
@@ -141,16 +136,14 @@ fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormFi
         }
         RuleFormField::Scope => (
             "scope",
-            vec![
-                if focused {
-                    chrome::pill(form.scope.label(), ACCENT)
-                } else {
-                    Span::styled(
-                        format!(" {} ", form.scope.label()),
-                        Style::default().fg(TEXT_BRIGHT).bg(BG_ELEMENT),
-                    )
-                },
-            ],
+            vec![if focused {
+                chrome::pill(form.scope.label(), ACCENT)
+            } else {
+                Span::styled(
+                    format!(" {} ", form.scope.label()),
+                    Style::default().fg(TEXT_BRIGHT).bg(BG_ELEMENT),
+                )
+            }],
         ),
         RuleFormField::ScopeNode => (
             "node id",
@@ -182,9 +175,7 @@ fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormFi
         }
     };
 
-    let mut full = vec![
-        Span::styled(format!("{:>14}  ", label), label_style),
-    ];
+    let mut full = vec![Span::styled(format!("{:>14}  ", label), label_style)];
     full.append(&mut spans);
     out.push(Line::from(full));
 }

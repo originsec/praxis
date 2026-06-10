@@ -80,9 +80,7 @@ impl RuleForm {
     pub fn from_rule(rule: &InterceptRule) -> Self {
         let (scope, scope_node, scope_agent) = match &rule.scope {
             RuleScope::All => (RuleFormScope::All, String::new(), String::new()),
-            RuleScope::Node { node_id } => {
-                (RuleFormScope::Node, node_id.clone(), String::new())
-            }
+            RuleScope::Node { node_id } => (RuleFormScope::Node, node_id.clone(), String::new()),
             RuleScope::Agent {
                 node_id,
                 agent_short_name,
@@ -190,16 +188,7 @@ impl RuleForm {
 
     pub fn build(
         &self,
-    ) -> Result<
-        (
-            String,
-            String,
-            TargetDirection,
-            RuleScope,
-            Option<String>,
-        ),
-        String,
-    > {
+    ) -> Result<(String, String, TargetDirection, RuleScope, Option<String>), String> {
         let name = self.name.trim().to_string();
         if name.is_empty() {
             return Err("Name is required.".into());

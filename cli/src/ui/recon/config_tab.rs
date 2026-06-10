@@ -23,10 +23,7 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         } else {
             Style::default().fg(STATUS_FAIL)
         };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, style))),
-            area,
-        );
+        f.render_widget(Paragraph::new(Line::from(Span::styled(msg, style))), area);
         return;
     }
 
@@ -38,7 +35,12 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     render_right_pane(f, right, overlay, result);
 }
 
-fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_left_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let block = focused_titled_panel(
         &format!(" Config Files ({}) ", result.config.items.len()),
         !overlay.right_pane_focused,
@@ -49,7 +51,10 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
 
     if result.config.items.is_empty() {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" No config files", Style::default().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(
+                " No config files",
+                Style::default().fg(DIM),
+            ))),
             inner,
         );
         return;
@@ -140,11 +145,19 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_right_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let selected_idx = overlay.selected_left;
     let Some(item) = result.config.items.get(selected_idx) else {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" Select a file", Style::default().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(
+                " Select a file",
+                Style::default().fg(DIM),
+            ))),
             area,
         );
         return;
@@ -157,7 +170,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
 
     if overlay.config_loading {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" Fetching...", Style::default().fg(STATUS_RUNNING)))),
+            Paragraph::new(Line::from(Span::styled(
+                " Fetching...",
+                Style::default().fg(STATUS_RUNNING),
+            ))),
             inner,
         );
         return;
@@ -165,7 +181,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
 
     if let Some(ref error) = overlay.config_content_error {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(format!(" Error: {}", error), Style::default().fg(STATUS_FAIL)))),
+            Paragraph::new(Line::from(Span::styled(
+                format!(" Error: {}", error),
+                Style::default().fg(STATUS_FAIL),
+            ))),
             inner,
         );
         return;
@@ -174,7 +193,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
     if let Some(ref content) = item.contents {
         let mut lines: Vec<Line> = Vec::new();
         for line in content.lines() {
-            lines.push(Line::from(Span::styled(line.to_string(), Style::default().fg(TEXT))));
+            lines.push(Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(TEXT),
+            )));
         }
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let total_visual_lines = paragraph.line_count(inner.width) as u16;
@@ -184,11 +206,11 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         f.render_widget(paragraph.scroll((effective, 0)), inner);
     } else {
         f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Content not available", Style::default().fg(DIM)),
-            ])),
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Content not available",
+                Style::default().fg(DIM),
+            )])),
             inner,
         );
     }
 }
-

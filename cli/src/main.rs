@@ -24,9 +24,7 @@ use std::io;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(
-    about = "Praxis CLI - terminal interface for the Praxis C2 framework",
-)]
+#[command(about = "Praxis CLI - terminal interface for the Praxis C2 framework")]
 #[command(version)]
 struct Cli {
     /// Connection and command timeout in seconds
@@ -99,9 +97,9 @@ impl Commands {
             Commands::Node { command } => commands::node::execute(client, command).await,
             Commands::Agent { command } => commands::agent::execute(client, command).await,
             Commands::Session { command } => commands::session::execute(client, command).await,
-            Commands::SetRabbitmqUrl { .. } | Commands::Config => unreachable!(
-                "config subcommands handled before connecting to a client"
-            ),
+            Commands::SetRabbitmqUrl { .. } | Commands::Config => {
+                unreachable!("config subcommands handled before connecting to a client")
+            }
         }
     }
 }
@@ -249,14 +247,15 @@ fn select_session_interactive() -> Result<Option<session_store::StoredSession>> 
                 }
             })
             .unwrap_or_else(|| "(empty)".to_string());
-        let when = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
-            s.updated_at_ms as i64,
-        )
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-        .unwrap_or_default();
+        let when = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(s.updated_at_ms as i64)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
         println!("  [{}] {}  {}", i + 1, when, preview);
     }
-    print!("Select session (1-{}, or empty to cancel): ", sessions.len());
+    print!(
+        "Select session (1-{}, or empty to cancel): ",
+        sessions.len()
+    );
     use std::io::Write;
     std::io::stdout().flush().ok();
 
@@ -335,19 +334,20 @@ async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
             // Parse to check if this is a response we should forward.
             //
 
-            let should_forward = if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&json_rpc) {
-                if let Some(id) = msg.get("id") {
-                    if msg.get("method").is_some() {
-                        true // server-initiated request — forward
+            let should_forward =
+                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&json_rpc) {
+                    if let Some(id) = msg.get("id") {
+                        if msg.get("method").is_some() {
+                            true // server-initiated request — forward
+                        } else {
+                            pending_ids_rx.lock().unwrap().remove(id) // response — only if we sent the request
+                        }
                     } else {
-                        pending_ids_rx.lock().unwrap().remove(id) // response — only if we sent the request
+                        true // notification (no id) — always forward
                     }
                 } else {
-                    true // notification (no id) — always forward
-                }
-            } else {
-                true // parse error — forward anyway
-            };
+                    true // parse error — forward anyway
+                };
 
             if !should_forward {
                 continue;

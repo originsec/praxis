@@ -28,11 +28,8 @@ const COL_SAMPLE_ROWS: usize = 200;
 
 pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     if state.row_expanded && !state.rows.is_empty() {
-        let cols = Layout::horizontal([
-            Constraint::Percentage(60),
-            Constraint::Percentage(40),
-        ])
-        .split(area);
+        let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(area);
         render_table(f, cols[0], state);
         detail::render(f, cols[1], state);
     } else {
@@ -89,9 +86,7 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
             Cell::from(Line::from(vec![
                 Span::styled(
                     truncate(name, widths[i] as usize),
-                    Style::default()
-                        .fg(MUTED)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(indicator, Style::default().fg(ACCENT)),
             ]))
@@ -104,7 +99,12 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
         .filter_map(|v| {
             let src_idx = state.visible_to_source(v)?;
             let row = state.rows.get(src_idx)?;
-            Some(build_row(row, &state.columns, &widths, v == state.selected_row))
+            Some(build_row(
+                row,
+                &state.columns,
+                &widths,
+                v == state.selected_row,
+            ))
         })
         .collect();
 
@@ -144,19 +144,11 @@ fn build_title(state: &LogQueryState) -> String {
     let sort_bit = match (state.sort_column, state.sort_direction) {
         (Some(i), SortDirection::Asc) => format!(
             " · sort {} ▲",
-            state
-                .columns
-                .get(i)
-                .cloned()
-                .unwrap_or_default()
+            state.columns.get(i).cloned().unwrap_or_default()
         ),
         (Some(i), SortDirection::Desc) => format!(
             " · sort {} ▼",
-            state
-                .columns
-                .get(i)
-                .cloned()
-                .unwrap_or_default()
+            state.columns.get(i).cloned().unwrap_or_default()
         ),
         _ => String::new(),
     };
@@ -203,10 +195,7 @@ fn render_cell(value: Option<&Value>, column: &str, width: usize, selected: bool
                 Style::default().fg(DIM)
             },
         ),
-        Some(Value::Number(n)) => (
-            n.to_string(),
-            number_style(column, n.as_i64(), n.as_f64()),
-        ),
+        Some(Value::Number(n)) => (n.to_string(), number_style(column, n.as_i64(), n.as_f64())),
         Some(Value::String(s)) => (s.clone(), text_style(column)),
         Some(other) => (other.to_string(), Style::default().fg(MUTED)),
     };
@@ -270,11 +259,7 @@ fn compute_column_widths(state: &LogQueryState, area_width: u16) -> Vec<u16> {
         .map(|c| (c.chars().count() as u16 + 2).max(MIN_COL_WIDTH))
         .collect();
 
-    let sample = state
-        .rows
-        .iter()
-        .take(COL_SAMPLE_ROWS)
-        .collect::<Vec<_>>();
+    let sample = state.rows.iter().take(COL_SAMPLE_ROWS).collect::<Vec<_>>();
     for row in sample {
         for (i, cell) in row.iter().enumerate().take(n) {
             let w = (cell_to_string(cell).chars().count() as u16).min(MAX_COL_WIDTH);
@@ -297,7 +282,9 @@ fn compute_column_widths(state: &LogQueryState, area_width: u16) -> Vec<u16> {
     // minimum width.
     //
     let spacing = (n as u16).saturating_sub(1);
-    let budget = area_width.saturating_sub(spacing).max(MIN_COL_WIDTH * n as u16);
+    let budget = area_width
+        .saturating_sub(spacing)
+        .max(MIN_COL_WIDTH * n as u16);
     let scale = budget as f32 / total.saturating_sub(spacing) as f32;
     for w in widths.iter_mut() {
         let scaled = ((*w as f32) * scale).max(MIN_COL_WIDTH as f32);

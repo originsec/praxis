@@ -315,10 +315,7 @@ pub struct ConnectionDraft {
 //
 
 pub enum ChainFormEditor {
-    PickOpName {
-        cursor: usize,
-        filter: String,
-    },
+    PickOpName { cursor: usize, filter: String },
 }
 
 //
@@ -373,7 +370,6 @@ pub enum Drag {
         cursor_row: u16,
     },
 }
-
 
 //
 // Which text field is currently being edited inline. The canvas widgets

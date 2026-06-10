@@ -39,11 +39,7 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
             def.name.clone()
         };
 
-        let api_hint_color = if def.api_key.is_empty() {
-            DIM
-        } else {
-            OK
-        };
+        let api_hint_color = if def.api_key.is_empty() { DIM } else { OK };
         let api_hint = if def.api_key.is_empty() {
             "(no key)".to_string()
         } else {
@@ -147,4 +143,3 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
-

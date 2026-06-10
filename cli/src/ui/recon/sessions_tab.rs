@@ -24,10 +24,7 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         } else {
             Style::default().fg(STATUS_FAIL)
         };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, style))),
-            area,
-        );
+        f.render_widget(Paragraph::new(Line::from(Span::styled(msg, style))), area);
         return;
     }
 
@@ -39,7 +36,12 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     render_right_pane(f, right, overlay, result);
 }
 
-fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_left_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let block = focused_titled_panel(
         &format!(" Sessions ({}) ", result.sessions.items.len()),
         !overlay.right_pane_focused,
@@ -49,7 +51,10 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
 
     if result.sessions.items.is_empty() {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" No sessions discovered", Style::default().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(
+                " No sessions discovered",
+                Style::default().fg(DIM),
+            ))),
             inner,
         );
         return;
@@ -160,11 +165,19 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_right_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let selected_idx = overlay.selected_left;
     let Some(session) = result.sessions.items.get(selected_idx) else {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" Select a session", Style::default().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(
+                " Select a session",
+                Style::default().fg(DIM),
+            ))),
             area,
         );
         return;
@@ -179,7 +192,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
 
     if overlay.session_loading {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" Fetching...", Style::default().fg(STATUS_RUNNING)))),
+            Paragraph::new(Line::from(Span::styled(
+                " Fetching...",
+                Style::default().fg(STATUS_RUNNING),
+            ))),
             inner,
         );
         return;
@@ -187,7 +203,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
 
     if let Some(ref error) = overlay.session_content_error {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(format!(" Error: {}", error), Style::default().fg(STATUS_FAIL)))),
+            Paragraph::new(Line::from(Span::styled(
+                format!(" Error: {}", error),
+                Style::default().fg(STATUS_FAIL),
+            ))),
             inner,
         );
         return;
@@ -221,7 +240,10 @@ fn parse_session_content(content: &Option<String>) -> Vec<Line<'static>> {
     };
 
     if text.trim().is_empty() {
-        return vec![Line::from(Span::styled(" (empty)", Style::default().fg(DIM)))];
+        return vec![Line::from(Span::styled(
+            " (empty)",
+            Style::default().fg(DIM),
+        ))];
     }
 
     // Try JSONL first
@@ -360,10 +382,7 @@ fn render_content_block(b: &Map<String, Value>) -> Option<String> {
             .filter(|s| !s.is_empty())
             .map(|s| format!("[thinking] {}", s)),
         "tool_use" | "function_call" => {
-            let name = b
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("tool");
+            let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
             Some(format!("[tool_use: {}]", name))
         }
         "tool_result" | "function_call_output" => {
@@ -399,19 +418,18 @@ fn format_parsed_messages(messages: &[ParsedMessage]) -> Vec<Line<'static>> {
     for msg in messages {
         let (role_label, role_color) = match msg.role.as_str() {
             "user" | "human" => ("USER", ACCENT),
-            "assistant" | "model" | "gemini" => (
-                "AGENT",
-                ratatui::style::Color::Rgb(180, 130, 220),
-            ),
+            "assistant" | "model" | "gemini" => {
+                ("AGENT", ratatui::style::Color::Rgb(180, 130, 220))
+            }
             "system" => ("SYS", DIM),
             "summary" => ("SUMMARY", MUTED),
             "tool" | "tool_use" | "tool_result" => ("TOOL", MUTED),
             _ => ("?", MUTED),
         };
 
-        lines.push(Line::from(vec![
-            crate::ui::chrome::pill(role_label, role_color),
-        ]));
+        lines.push(Line::from(vec![crate::ui::chrome::pill(
+            role_label, role_color,
+        )]));
 
         if msg.content.is_empty() {
             lines.push(Line::from(Span::styled(

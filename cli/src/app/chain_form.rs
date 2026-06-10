@@ -36,8 +36,10 @@ impl App {
 
         let trig_id = form.next_element_id(ElementKind::Trigger);
         let term_id = form.next_element_id(ElementKind::Termination);
-        form.elements
-            .push(ChainElementDraft::new(trig_id.clone(), ElementKind::Trigger));
+        form.elements.push(ChainElementDraft::new(
+            trig_id.clone(),
+            ElementKind::Trigger,
+        ));
         form.elements.push(ChainElementDraft::new(
             term_id.clone(),
             ElementKind::Termination,
@@ -261,10 +263,7 @@ impl App {
     //
 
     pub(crate) fn add_element_at_centre(&mut self, kind: ElementKind) {
-        let centre = self
-            .chain_form_hits
-            .borrow()
-            .canvas_centre_for_new_block();
+        let centre = self.chain_form_hits.borrow().canvas_centre_for_new_block();
         let Some(form) = self.chain_form.as_mut() else {
             return;
         };
@@ -287,7 +286,12 @@ impl App {
         //
         // Op picker overlay swallows input first.
         //
-        if self.chain_form.as_ref().and_then(|f| f.editor.as_ref()).is_some() {
+        if self
+            .chain_form
+            .as_ref()
+            .and_then(|f| f.editor.as_ref())
+            .is_some()
+        {
             self.handle_op_picker_key(key).await;
             return;
         }
@@ -348,7 +352,11 @@ impl App {
         let Some(form) = self.chain_form.as_mut() else {
             return;
         };
-        let Some(ChainFormEditor::PickOpName { mut cursor, mut filter }) = form.editor.take() else {
+        let Some(ChainFormEditor::PickOpName {
+            mut cursor,
+            mut filter,
+        }) = form.editor.take()
+        else {
             return;
         };
         let filtered: Vec<String> = form
@@ -396,7 +404,12 @@ impl App {
     //
 
     pub(crate) async fn handle_chain_form_mouse(&mut self, mouse: MouseEvent) {
-        if self.chain_form.as_ref().and_then(|f| f.editor.as_ref()).is_some() {
+        if self
+            .chain_form
+            .as_ref()
+            .and_then(|f| f.editor.as_ref())
+            .is_some()
+        {
             //
             // Op picker overlay: any click outside closes it; clicks
             // inside are handled by the picker (currently keyboard-only).
@@ -573,7 +586,11 @@ impl App {
                 let grab_dy = canvas_row - pos.1;
                 if let Some(form) = self.chain_form.as_mut() {
                     form.selected = Selected::Block(id.clone());
-                    form.drag = Drag::Block { id, grab_dx, grab_dy };
+                    form.drag = Drag::Block {
+                        id,
+                        grab_dx,
+                        grab_dy,
+                    };
                     form.editing = None;
                 }
                 return;
@@ -612,14 +629,17 @@ impl App {
             return;
         };
         match form.drag.clone() {
-            Drag::Block { id, grab_dx, grab_dy } => {
+            Drag::Block {
+                id,
+                grab_dx,
+                grab_dy,
+            } => {
                 if !hit.canvas.is_empty() {
                     let canvas_col = (col as i32 - hit.canvas.x as i32) + form.camera_x;
                     let canvas_row = (row as i32 - hit.canvas.y as i32) + form.camera_y;
                     let new_x = canvas_col - grab_dx;
                     let new_y = canvas_row - grab_dy;
-                    form.positions
-                        .insert(id, (new_x.max(0), new_y.max(0)));
+                    form.positions.insert(id, (new_x.max(0), new_y.max(0)));
                 }
             }
             Drag::Canvas { last_col, last_row } => {
@@ -633,9 +653,7 @@ impl App {
                 };
             }
             Drag::Port {
-                from_id,
-                from_port,
-                ..
+                from_id, from_port, ..
             } => {
                 form.drag = Drag::Port {
                     from_id,
@@ -665,13 +683,16 @@ impl App {
             // On release, hit-test the cursor against input ports. If a
             // hit, create the connection.
             //
-            let canvas_col = (mouse.column as i32 - hit.canvas.x as i32) + self.chain_form_camera_x();
+            let canvas_col =
+                (mouse.column as i32 - hit.canvas.x as i32) + self.chain_form_camera_x();
             let canvas_row = (mouse.row as i32 - hit.canvas.y as i32) + self.chain_form_camera_y();
             if let Some((to_id, to_port, side)) = self.port_at(canvas_col, canvas_row) {
                 if side == PortSide::To && to_id != from_id {
                     if let Some(form) = self.chain_form.as_mut() {
-                        let next_id =
-                            format!("c_{}", form.connections.len() + 1 + form.element_id_seq as usize);
+                        let next_id = format!(
+                            "c_{}",
+                            form.connections.len() + 1 + form.element_id_seq as usize
+                        );
                         form.connections.push(ConnectionDraft {
                             id: next_id,
                             from_element: from_id,
@@ -1002,11 +1023,7 @@ pub fn delete_selection(form: &mut ChainForm) {
             // Refuse to delete the last Trigger or Termination — that
             // would invalidate the chain.
             //
-            let kind = form
-                .elements
-                .iter()
-                .find(|e| e.id == id)
-                .map(|e| e.kind);
+            let kind = form.elements.iter().find(|e| e.id == id).map(|e| e.kind);
             form.elements.retain(|e| e.id != id);
             form.connections
                 .retain(|c| c.from_element != id && c.to_element != id);
@@ -1107,7 +1124,9 @@ fn draft_to_element(d: &ChainElementDraft) -> ChainElement {
 
 fn element_to_draft(el: &ChainElement) -> ChainElementDraft {
     match el {
-        ChainElement::Trigger { id, .. } => ChainElementDraft::new(id.clone(), ElementKind::Trigger),
+        ChainElement::Trigger { id, .. } => {
+            ChainElementDraft::new(id.clone(), ElementKind::Trigger)
+        }
         ChainElement::Operation {
             id,
             operation_name,

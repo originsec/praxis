@@ -266,9 +266,5 @@ fn previous_token(prefix: &str, current: &str) -> Option<String> {
         .chars()
         .rev()
         .collect();
-    if tok.is_empty() {
-        None
-    } else {
-        Some(tok)
-    }
+    if tok.is_empty() { None } else { Some(tok) }
 }

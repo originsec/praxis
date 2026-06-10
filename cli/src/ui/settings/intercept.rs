@@ -13,7 +13,9 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
     lines.push(Line::from(vec![
         Span::styled(
             "Intercept Targets",
-            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("    "),
         Span::styled(
@@ -32,7 +34,9 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
         lines.push(Line::from(vec![
             Span::styled(
                 "  Parse error: ",
-                Style::default().fg(STATUS_FAIL).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(err.to_string(), Style::default().fg(STATUS_FAIL)),
         ]));
@@ -88,7 +92,9 @@ fn action_row(label: &str, selected: bool, active_color: ratatui::style::Color) 
         Style::default().fg(DIM)
     };
     let label_style = if selected {
-        Style::default().fg(active_color).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(active_color)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(DIM)
     };

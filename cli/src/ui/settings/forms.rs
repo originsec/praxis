@@ -312,9 +312,7 @@ pub(super) fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm)
     if form.loading_models {
         lines.push(Line::from(Span::styled(
             "  Loading models…",
-            Style::default()
-                .fg(MUTED)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
         )));
     }
 

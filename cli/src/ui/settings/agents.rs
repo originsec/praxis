@@ -1,9 +1,7 @@
 use super::{section_header, setting_row, toggle_row};
 use crate::app::SettingsState;
 use crate::ui::chrome;
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_FAIL, TERTIARY, TEXT_BRIGHT, WARN,
-};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, STATUS_FAIL, TERTIARY, TEXT_BRIGHT, WARN};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -187,4 +185,3 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
-

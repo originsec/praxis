@@ -1,8 +1,6 @@
 use crate::app::{ReconOverlay, ReconTab};
 use crate::ui::common::focused_titled_panel;
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -23,10 +21,7 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         } else {
             Style::default().fg(crate::ui::theme::STATUS_FAIL)
         };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, style))),
-            area,
-        );
+        f.render_widget(Paragraph::new(Line::from(Span::styled(msg, style))), area);
         return;
     }
 
@@ -38,7 +33,12 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     render_right_pane(f, right, overlay, result);
 }
 
-fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_left_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let block = focused_titled_panel(" Categories ", !overlay.right_pane_focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -57,7 +57,12 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, (name, count)) in categories.iter().enumerate().skip(scroll_offset).take(visible_items) {
+    for (idx, (name, count)) in categories
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_items)
+    {
         let is_selected = overlay.active_tab == ReconTab::Tools && overlay.selected_left == idx;
 
         let mut name_style = Style::default().fg(TEXT_BRIGHT);
@@ -80,7 +85,12 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
+fn render_right_pane(
+    f: &mut Frame,
+    area: Rect,
+    overlay: &ReconOverlay,
+    result: &common::ReconResult,
+) {
     let title = match overlay.selected_left {
         0 => " MCP Servers ",
         1 => " Skills ",
@@ -96,14 +106,25 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
     match overlay.selected_left {
         0 => {
             if result.tools.mcp_servers.is_empty() {
-                lines.push(Line::from(Span::styled(" No MCP servers discovered", Style::default().fg(DIM))));
+                lines.push(Line::from(Span::styled(
+                    " No MCP servers discovered",
+                    Style::default().fg(DIM),
+                )));
             } else {
                 for server in &result.tools.mcp_servers {
                     lines.push(Line::from(""));
                     lines.push(Line::from(vec![
                         Span::styled("▸ ", Style::default().fg(ACCENT)),
-                        Span::styled(server.name.clone(), Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
-                        Span::styled(format!("  [{}]", server.transport), Style::default().fg(MUTED)),
+                        Span::styled(
+                            server.name.clone(),
+                            Style::default()
+                                .fg(TEXT_BRIGHT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  [{}]", server.transport),
+                            Style::default().fg(MUTED),
+                        ),
                     ]));
 
                     if let Some(ref cmd) = server.command {
@@ -120,9 +141,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                     }
 
                     if !server.tools.is_empty() {
-                        lines.push(Line::from(vec![
-                            Span::styled("   tools:", Style::default().fg(MUTED)),
-                        ]));
+                        lines.push(Line::from(vec![Span::styled(
+                            "   tools:",
+                            Style::default().fg(MUTED),
+                        )]));
                         for tool in &server.tools {
                             lines.push(Line::from(vec![
                                 Span::styled("     • ", Style::default().fg(ACCENT)),
@@ -131,7 +153,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                             if !tool.description.is_empty() {
                                 lines.push(Line::from(vec![
                                     Span::styled("       ", Style::default().fg(DIM)),
-                                    Span::styled(tool.description.clone(), Style::default().fg(DIM)),
+                                    Span::styled(
+                                        tool.description.clone(),
+                                        Style::default().fg(DIM),
+                                    ),
                                 ]));
                             }
                         }
@@ -141,7 +166,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         }
         1 => {
             if result.tools.skills.is_empty() {
-                lines.push(Line::from(Span::styled(" No skills discovered", Style::default().fg(DIM))));
+                lines.push(Line::from(Span::styled(
+                    " No skills discovered",
+                    Style::default().fg(DIM),
+                )));
             } else {
                 for skill in &result.tools.skills {
                     lines.push(Line::from(vec![
@@ -160,7 +188,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         }
         _ => {
             if result.tools.internal_tools.is_empty() {
-                lines.push(Line::from(Span::styled(" No internal tools discovered", Style::default().fg(DIM))));
+                lines.push(Line::from(Span::styled(
+                    " No internal tools discovered",
+                    Style::default().fg(DIM),
+                )));
             } else {
                 for tool in &result.tools.internal_tools {
                     lines.push(Line::from(vec![

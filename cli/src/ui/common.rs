@@ -107,11 +107,7 @@ pub fn spinner_char() -> char {
 
 #[allow(dead_code)]
 pub fn border_color_for(focused: bool) -> ratatui::style::Color {
-    if focused {
-        ACCENT
-    } else {
-        BORDER
-    }
+    if focused { ACCENT } else { BORDER }
 }
 
 #[allow(dead_code)]

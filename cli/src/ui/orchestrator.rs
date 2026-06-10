@@ -47,9 +47,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         .unwrap_or(false);
     let show_welcome = no_sessions || session_idle;
 
-    let has_plan = session
-        .and_then(|s| s.current_plan.as_ref())
-        .is_some();
+    let has_plan = session.and_then(|s| s.current_plan.as_ref()).is_some();
 
     let tab_height = if show_tabs { 1 } else { 0 };
 
@@ -90,11 +88,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         //
         let (conv_area, plan_area) = if has_plan {
             let plan_width = (chunks[1].width / 3).clamp(28, 42);
-            let split = Layout::horizontal([
-                Constraint::Min(1),
-                Constraint::Length(plan_width),
-            ])
-            .split(chunks[1]);
+            let split = Layout::horizontal([Constraint::Min(1), Constraint::Length(plan_width)])
+                .split(chunks[1]);
             (split[0], Some(split[1]))
         } else {
             (chunks[1], None)
@@ -125,10 +120,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             spans.push(chrome::tab_sep());
         }
         if is_active {
-            spans.push(Span::styled(
-                "\u{25c6} ",
-                Style::default().fg(ACCENT),
-            ));
+            spans.push(Span::styled("\u{25c6} ", Style::default().fg(ACCENT)));
             let label = if session.is_streaming {
                 format!("{} {}", spinner_char(), session.label)
             } else {
@@ -169,10 +161,7 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("\u{2503}", Style::default().fg(DIM)),
-            Span::styled(
-                "  Type a prompt to begin.",
-                Style::default().fg(MUTED),
-            ),
+            Span::styled("  Type a prompt to begin.", Style::default().fg(MUTED)),
         ]));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
         return;
@@ -230,15 +219,10 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
                                     continue;
                                 }
                                 lines.push(Line::from(vec![
-                                    Span::styled(
-                                        "\u{2503}",
-                                        Style::default().fg(DIM),
-                                    ),
+                                    Span::styled("\u{2503}", Style::default().fg(DIM)),
                                     Span::styled(
                                         format!("  {}", line),
-                                        Style::default()
-                                            .fg(MUTED)
-                                            .add_modifier(Modifier::ITALIC),
+                                        Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
                                     ),
                                 ]));
                             }
@@ -279,10 +263,7 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![
                     Span::styled("\u{2503}", Style::default().fg(ERROR_FG)),
-                    Span::styled(
-                        format!("  \u{25b3} {}", msg),
-                        Style::default().fg(ERROR_FG),
-                    ),
+                    Span::styled(format!("  \u{25b3} {}", msg), Style::default().fg(ERROR_FG)),
                 ]));
             }
         }
@@ -455,11 +436,7 @@ fn build_tool_entry(
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Some(o) if o.success => (
-            "\u{2713}".to_string(),
-            TOOL_OK,
-            Style::default().fg(MUTED),
-        ),
+        Some(o) if o.success => ("\u{2713}".to_string(), TOOL_OK, Style::default().fg(MUTED)),
         Some(_) => (
             "\u{2717}".to_string(),
             TOOL_FAIL,
@@ -779,11 +756,8 @@ fn render_meta(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         .sum::<u16>();
     let right = Line::from(right_spans).alignment(ratatui::layout::Alignment::Right);
 
-    let chunks = Layout::horizontal([
-        Constraint::Min(1),
-        Constraint::Length(right_width),
-    ])
-    .split(area);
+    let chunks =
+        Layout::horizontal([Constraint::Min(1), Constraint::Length(right_width)]).split(area);
     f.render_widget(Paragraph::new(Line::from(left_spans)), chunks[0]);
     f.render_widget(Paragraph::new(right), chunks[1]);
 }
@@ -815,9 +789,7 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let prompt = Span::styled(
         "\u{276f} ",
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
     );
     let cursor = Span::styled("\u{2588}", Style::default().fg(ACCENT));
     let text_style = Style::default().fg(TEXT_BRIGHT);
@@ -846,8 +818,7 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         let line_start = byte_cursor;
         let line_end = line_start + line_str.len();
         let cursor_on_this = cursor_pos >= line_start
-            && (cursor_pos < line_end
-                || (cursor_pos == line_end && idx + 1 == total_lines));
+            && (cursor_pos < line_end || (cursor_pos == line_end && idx + 1 == total_lines));
 
         let lead: Span = if idx == 0 {
             prompt.clone()
@@ -877,7 +848,6 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
-
 
 fn render_status_hints(_f: &mut Frame, _area: Rect, _state: &OrchestratorState) {}
 

@@ -14,9 +14,7 @@ use serde_json::Value;
 
 use crate::app::LogQueryState;
 use crate::ui::common::titled_panel;
-use crate::ui::theme::{
-    ACCENT, DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT,
-};
+use crate::ui::theme::{ACCENT, DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT};
 
 pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     let title = row_title(state);
@@ -156,7 +154,12 @@ fn render_entry(
                 prefix.push(Span::styled(": ", Style::default().fg(JSON_PUNCT)));
             }
             prefix.push(Span::styled(
-                if matches!(value, Value::Object(_)) { "{" } else { "[" }.to_string(),
+                if matches!(value, Value::Object(_)) {
+                    "{"
+                } else {
+                    "["
+                }
+                .to_string(),
                 Style::default().fg(JSON_PUNCT),
             ));
             out.push(Line::from(indented(indent, prefix)));
@@ -176,7 +179,12 @@ fn render_entry(
                 render_entry(indent + 2, k, v, i + 1 == inner, out);
             }
             let mut closer_spans = vec![Span::styled(
-                if matches!(value, Value::Object(_)) { "}" } else { "]" }.to_string(),
+                if matches!(value, Value::Object(_)) {
+                    "}"
+                } else {
+                    "]"
+                }
+                .to_string(),
                 Style::default().fg(JSON_PUNCT),
             )];
             if !is_last {
@@ -220,10 +228,7 @@ fn render_scalar_line(
             "null",
             Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
         )),
-        _ => spans.push(Span::styled(
-            value.to_string(),
-            Style::default().fg(MUTED),
-        )),
+        _ => spans.push(Span::styled(value.to_string(), Style::default().fg(MUTED))),
     }
     if trailing_comma {
         spans.push(Span::styled(",", Style::default().fg(JSON_PUNCT)));

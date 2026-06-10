@@ -34,7 +34,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetInterceptTargets,
-    ResetNode(String), // node_id
+    ResetNode(String),  // node_id
     DeleteNode(String), // node_id — service handles whether it's local or remote
     ClearAllTraffic,
     DeleteInterceptRule(i64),
@@ -77,7 +77,9 @@ impl App {
             ConfirmKind::DeleteOp(full_name) => {
                 if let Err(e) = self.client.delete_op_def(full_name).await {
                     if let Some(session) = self.orchestrator.active_session_mut() {
-                        session.messages.push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+                        session
+                            .messages
+                            .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
                     }
                 }
                 self.refresh_library_after(Duration::from_millis(300));
@@ -113,9 +115,12 @@ impl App {
                 for local_id in to_drop {
                     self.nodes.sessions.remove(&local_id);
                 }
-                if self.nodes.active_session_id.as_ref().is_some_and(|id| {
-                    !self.nodes.sessions.contains_key(id)
-                }) {
+                if self
+                    .nodes
+                    .active_session_id
+                    .as_ref()
+                    .is_some_and(|id| !self.nodes.sessions.contains_key(id))
+                {
                     self.nodes.active_session_id = None;
                 }
                 //
@@ -220,7 +225,11 @@ impl App {
             ConfirmKind::DeleteInterceptRule(id) => {
                 self.delete_intercept_rule(id).await;
             }
-            ConfirmKind::ToggleIntercept { node_id, enable, method } => {
+            ConfirmKind::ToggleIntercept {
+                node_id,
+                enable,
+                method,
+            } => {
                 let result = if enable {
                     self.client.enable_intercept(node_id, method).await
                 } else {
@@ -428,14 +437,16 @@ impl App {
     pub(crate) async fn select_model(&mut self, model_name: &str) {
         self.close_active_orchestrator_session().await;
 
-        if let Err(e) = self.acp.create_session(".", Some(model_name), Vec::new()).await {
+        if let Err(e) = self
+            .acp
+            .create_session(".", Some(model_name), Vec::new())
+            .await
+        {
             if let Some(session) = self.orchestrator.active_session_mut() {
-                session
-                    .messages
-                    .push(ConversationEntry::Error(format!(
-                        "Failed to create session: {}",
-                        e
-                    )));
+                session.messages.push(ConversationEntry::Error(format!(
+                    "Failed to create session: {}",
+                    e
+                )));
             }
         }
     }
@@ -543,20 +554,16 @@ impl App {
 
         match std::fs::write(&expanded, &md) {
             Ok(_) => {
-                session
-                    .messages
-                    .push(ConversationEntry::Info(format!(
-                        "Session saved to {}",
-                        expanded
-                    )));
+                session.messages.push(ConversationEntry::Info(format!(
+                    "Session saved to {}",
+                    expanded
+                )));
             }
             Err(e) => {
-                session
-                    .messages
-                    .push(ConversationEntry::Error(format!(
-                        "Failed to save session: {}",
-                        e
-                    )));
+                session.messages.push(ConversationEntry::Error(format!(
+                    "Failed to save session: {}",
+                    e
+                )));
             }
         }
     }

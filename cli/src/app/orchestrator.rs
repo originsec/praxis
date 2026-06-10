@@ -135,8 +135,7 @@ pub struct OrchestratorState {
 
 impl OrchestratorState {
     pub fn active_session(&self) -> Option<&OrchestratorSessionState> {
-        self.active_session_index
-            .and_then(|i| self.sessions.get(i))
+        self.active_session_index.and_then(|i| self.sessions.get(i))
     }
 
     pub fn active_session_mut(&mut self) -> Option<&mut OrchestratorSessionState> {
@@ -219,7 +218,9 @@ impl App {
     }
 
     pub(crate) fn persist_message(&mut self, role: &str, text: &str) {
-        let Some(stored) = self.orchestrator.stored.as_mut() else { return };
+        let Some(stored) = self.orchestrator.stored.as_mut() else {
+            return;
+        };
         //
         // De-dupe: ACP user-prompt notifications echo back our local
         // input so we don't want to record the same turn twice.
@@ -293,7 +294,12 @@ impl App {
             // one exists.
             //
 
-            if let Some(idx) = self.orchestrator.sessions.iter().position(|s| s.session_id == session_id) {
+            if let Some(idx) = self
+                .orchestrator
+                .sessions
+                .iter()
+                .position(|s| s.session_id == session_id)
+            {
                 self.orchestrator.sessions.remove(idx);
                 if self.orchestrator.sessions.is_empty() {
                     self.orchestrator.active_session_index = None;
@@ -535,12 +541,10 @@ impl App {
             }
             _ => {
                 if let Some(session) = self.orchestrator.active_session_mut() {
-                    session
-                        .messages
-                        .push(ConversationEntry::Error(format!(
-                            "Unknown command: /{}",
-                            cmd
-                        )));
+                    session.messages.push(ConversationEntry::Error(format!(
+                        "Unknown command: /{}",
+                        cmd
+                    )));
                 }
             }
         }
@@ -548,7 +552,11 @@ impl App {
 
     pub(crate) async fn handle_acp_notification(&mut self, notif: AcpNotification) {
         match notif {
-            AcpNotification::SessionCreated { session_id, provider, model } => {
+            AcpNotification::SessionCreated {
+                session_id,
+                provider,
+                model,
+            } => {
                 //
                 // One orchestrator session per client. Drop any prior
                 // local session state and install the new one.
@@ -584,8 +592,9 @@ impl App {
                 // were resuming, carry the prior stored history forward
                 // under the new session_id.
                 //
-                let mut stored = self.orchestrator.stored.take()
-                    .unwrap_or_else(|| crate::session_store::StoredSession::new(session_id.clone()));
+                let mut stored = self.orchestrator.stored.take().unwrap_or_else(|| {
+                    crate::session_store::StoredSession::new(session_id.clone())
+                });
                 stored.session_id = session_id.clone();
                 stored.provider = provider;
                 stored.model = model;
@@ -599,7 +608,9 @@ impl App {
 
                 if let Some(prompt) = self.orchestrator.pending_prompt.take() {
                     if let Some(session) = self.orchestrator.active_session_mut() {
-                        session.messages.push(ConversationEntry::UserPrompt(prompt.clone()));
+                        session
+                            .messages
+                            .push(ConversationEntry::UserPrompt(prompt.clone()));
                         session.is_streaming = true;
                         session.prompt_seq += 1;
                     }
@@ -640,11 +651,14 @@ impl App {
                     // Only add if the message isn't already there (replay).
                     //
 
-                    let already = session.messages.iter().any(|m| {
-                        matches!(m, ConversationEntry::UserPrompt(t) if t == &text)
-                    });
+                    let already = session
+                        .messages
+                        .iter()
+                        .any(|m| matches!(m, ConversationEntry::UserPrompt(t) if t == &text));
                     if !already {
-                        session.messages.push(ConversationEntry::UserPrompt(text.clone()));
+                        session
+                            .messages
+                            .push(ConversationEntry::UserPrompt(text.clone()));
                     }
                 }
                 self.persist_message("user", &text);
@@ -676,7 +690,12 @@ impl App {
                 }
             }
 
-            AcpNotification::ToolCall { session_id, tool_id, name, raw_input } => {
+            AcpNotification::ToolCall {
+                session_id,
+                tool_id,
+                name,
+                raw_input,
+            } => {
                 //
                 // Node-session sessions live in app.nodes.sessions; check
                 // there first so cursor/claude tool calls render inline in
@@ -698,7 +717,12 @@ impl App {
                 }
             }
 
-            AcpNotification::ToolResult { session_id, tool_id, success, result } => {
+            AcpNotification::ToolResult {
+                session_id,
+                tool_id,
+                success,
+                result,
+            } => {
                 if self.dispatch_node_tool_result(&session_id, &tool_id, success, &result) {
                     return;
                 }
@@ -712,18 +736,14 @@ impl App {
                         // entry if we somehow received a result without
                         // a preceding request.
                         //
-                        let updated = session
-                            .messages
-                            .iter_mut()
-                            .rev()
-                            .find_map(|m| match m {
-                                ConversationEntry::Tool {
-                                    name: n,
-                                    outcome: outcome @ None,
-                                    ..
-                                } if *n == tool_name => Some(outcome),
-                                _ => None,
-                            });
+                        let updated = session.messages.iter_mut().rev().find_map(|m| match m {
+                            ConversationEntry::Tool {
+                                name: n,
+                                outcome: outcome @ None,
+                                ..
+                            } if *n == tool_name => Some(outcome),
+                            _ => None,
+                        });
                         if let Some(slot) = updated {
                             *slot = Some(ToolOutcome {
                                 success,
@@ -937,7 +957,11 @@ impl App {
         }
     }
 
-    pub(crate) async fn handle_orchestrator_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
+    pub(crate) async fn handle_orchestrator_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        content_area: Rect,
+    ) {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             let active_session = self.orchestrator.active_session();
             let show_tabs = self.orchestrator.sessions.len() > 1;

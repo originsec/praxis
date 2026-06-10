@@ -2,8 +2,8 @@ use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
-    InterceptRule, InterceptStatus, InterceptedTrafficEntry, OperationDefinitionInfo,
-    ReconResult, SemanticOpUpdate, SystemState, TerminalOutput, TrafficMatchWithDetails,
+    InterceptRule, InterceptStatus, InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult,
+    SemanticOpUpdate, SystemState, TerminalOutput, TrafficMatchWithDetails,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;

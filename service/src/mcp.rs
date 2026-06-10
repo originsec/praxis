@@ -6,17 +6,12 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use common::{
-    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate,
-    ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
-    InterceptedTrafficEntry, OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate,
-    SystemState, TrafficSearchFilters, client_queue_name, mcp::McpClient, publish_json,
+    CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate, ClientBroadcastMessage,
+    ClientDirectMessage, ClientRegistration, ClientSignalMessage, InterceptedTrafficEntry,
+    OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate, SystemState,
+    TrafficSearchFilters, mcp::McpClient, publish_json,
 };
-use futures_util::StreamExt;
-use lapin::{
-    Channel, Connection, ConnectionProperties, ExchangeKind,
-    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions},
-    types::FieldTable,
-};
+use lapin::Channel;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -71,87 +66,30 @@ impl ServiceMcpClient {
     pub async fn connect(url: &str, timeout_secs: u64) -> Result<Self> {
         let client_id = format!("mcp-server-{}", Uuid::new_v4());
 
-        let connection = Connection::connect(url, ConnectionProperties::default())
-            .await
-            .map_err(|e| anyhow!("Failed to connect to RabbitMQ at {}: {}", url, e))?;
-
-        let channel = connection
-            .create_channel()
-            .await
-            .map_err(|e| anyhow!("Failed to create channel: {}", e))?;
-
-        let client_queue = client_queue_name(&client_id);
-
-        //
-        // Declare client-specific queue.
-        //
-
-        channel
-            .queue_declare(
-                client_queue.as_str().into(),
-                QueueDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-
-        channel
-            .queue_purge(
-                client_queue.as_str().into(),
-                lapin::options::QueuePurgeOptions::default(),
-            )
-            .await?;
-
-        //
-        // Declare broadcast exchange and bind a private queue.
-        //
-
-        channel
-            .exchange_declare(
-                CLIENT_BROADCAST_EXCHANGE.into(),
-                ExchangeKind::Fanout,
-                ExchangeDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
-
-        let broadcast_queue = channel
-            .queue_declare(
-                "".into(),
-                QueueDeclareOptions {
-                    exclusive: true,
-                    auto_delete: true,
-                    ..QueueDeclareOptions::default()
-                },
-                FieldTable::default(),
-            )
-            .await?;
-
-        channel
-            .queue_bind(
-                broadcast_queue.name().as_str().into(),
-                CLIENT_BROADCAST_EXCHANGE.into(),
-                "".into(),
-                lapin::options::QueueBindOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
+        let transport = common::ClientTransport::connect(url, &client_id).await?;
 
         let state = Arc::new(Mutex::new(ClientState::default()));
 
-        let mut client = Self {
-            channel,
+        let direct_state = Arc::clone(&state);
+        let broadcast_state = Arc::clone(&state);
+        transport.start_consuming(
+            "mcp",
+            move |data| {
+                let state = Arc::clone(&direct_state);
+                async move { Self::handle_direct_message(&state, &data).await }
+            },
+            move |data| {
+                let state = Arc::clone(&broadcast_state);
+                async move { Self::handle_broadcast_message(&state, &data).await }
+            },
+        );
+
+        let client = Self {
+            channel: transport.channel().clone(),
             client_id,
             timeout: Duration::from_secs(timeout_secs),
             state,
         };
-
-        //
-        // Start consuming messages.
-        //
-
-        client
-            .start_consuming(&client_queue, broadcast_queue.name().as_str())
-            .await?;
 
         //
         // Register with the service.
@@ -160,68 +98,6 @@ impl ServiceMcpClient {
         client.register().await?;
 
         Ok(client)
-    }
-
-    async fn start_consuming(&mut self, client_queue: &str, broadcast_queue: &str) -> Result<()> {
-        let state = Arc::clone(&self.state);
-        let channel = self.channel.clone();
-        let client_queue = client_queue.to_string();
-        let broadcast_queue = broadcast_queue.to_string();
-
-        tokio::spawn(async move {
-            let consumer_tag = format!("mcp_direct_{}", Uuid::new_v4());
-            let mut direct_consumer = match channel
-                .basic_consume(
-                    client_queue.as_str().into(),
-                    consumer_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    common::log_error!("Failed to create direct consumer: {}", e);
-                    return;
-                }
-            };
-
-            let broadcast_tag = format!("mcp_broadcast_{}", Uuid::new_v4());
-            let mut broadcast_consumer = match channel
-                .basic_consume(
-                    broadcast_queue.as_str().into(),
-                    broadcast_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    common::log_error!("Failed to create broadcast consumer: {}", e);
-                    return;
-                }
-            };
-
-            loop {
-                tokio::select! {
-                    Some(delivery_result) = direct_consumer.next() => {
-                        if let Ok(delivery) = delivery_result {
-                            Self::handle_direct_message(&state, &delivery.data).await;
-                            let _ = delivery.ack(BasicAckOptions::default()).await;
-                        }
-                    }
-                    Some(delivery_result) = broadcast_consumer.next() => {
-                        if let Ok(delivery) = delivery_result {
-                            Self::handle_broadcast_message(&state, &delivery.data).await;
-                            let _ = delivery.ack(BasicAckOptions::default()).await;
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(())
     }
 
     async fn handle_direct_message(state: &Arc<Mutex<ClientState>>, data: &[u8]) {

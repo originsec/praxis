@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredMessage {
-    pub role: String,    // "user" | "assistant"
+    pub role: String, // "user" | "assistant"
     pub text: String,
 }
 
@@ -57,7 +57,8 @@ fn now_ms() -> u128 {
 }
 
 pub fn sessions_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     Ok(home.join(".praxis").join("sessions"))
 }
 

@@ -60,7 +60,10 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     }
     if let Some(ref wd) = session.working_dir {
         header_spans.push(Span::raw("  "));
-        header_spans.push(Span::styled(format!("dir: {}", wd), Style::default().fg(DIM)));
+        header_spans.push(Span::styled(
+            format!("dir: {}", wd),
+            Style::default().fg(DIM),
+        ));
     }
     if session.yolo {
         header_spans.push(Span::raw("  "));
@@ -143,15 +146,10 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
-                Span::styled(
-                    "  \u{25b3} ",
-                    Style::default().fg(SECONDARY),
-                ),
+                Span::styled("  \u{25b3} ", Style::default().fg(SECONDARY)),
                 Span::styled(
                     &perm.tool_name,
-                    Style::default()
-                        .fg(SECONDARY)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" wants to run", Style::default().fg(MUTED)),
             ]));
@@ -179,23 +177,19 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
         if session.streaming_content.is_empty() && session.pending_permission.is_none() {
             let status_text = session.agent_status.as_deref().unwrap_or("thinking");
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("   {} {}", spinner, status_text),
-                    Style::default().fg(MUTED),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("   {} {}", spinner, status_text),
+                Style::default().fg(MUTED),
+            )]));
         } else if session.pending_permission.is_none() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!(
-                        "   {} {}",
-                        spinner,
-                        session.agent_status.as_deref().unwrap_or("streaming")
-                    ),
-                    Style::default().fg(MUTED),
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "   {} {}",
+                    spinner,
+                    session.agent_status.as_deref().unwrap_or("streaming")
                 ),
-            ]));
+                Style::default().fg(MUTED),
+            )]));
         }
     }
 
@@ -239,9 +233,7 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(
         "\u{276f}",
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::raw(" "));
 
@@ -253,9 +245,7 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
         spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
         spans.push(Span::styled(
             "  Send to agent…",
-            Style::default()
-                .fg(DIM)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
         ));
     } else {
         //
@@ -392,10 +382,7 @@ pub(super) fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOp
                 .add_modifier(Modifier::BOLD),
         ),
         chrome::mid_dot(),
-        Span::styled(
-            &opts.agent_name,
-            Style::default().fg(ACCENT),
-        ),
+        Span::styled(&opts.agent_name, Style::default().fg(ACCENT)),
         chrome::mid_dot(),
         Span::styled(
             format!("@ {}", short_id(&opts.node_id)),

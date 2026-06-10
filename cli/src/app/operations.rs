@@ -644,7 +644,9 @@ impl App {
 
         if let Err(e) = self.client.add_op_def(op_def.to_string()).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
-                session.messages.push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
+                session
+                    .messages
+                    .push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
             }
         }
 
@@ -1046,7 +1048,8 @@ impl App {
                     // + "  │  " (5) + " Library " (9) + count + sep + ...
                     //
                     let exec_start = 2i32;
-                    let exec_width = (" Executions ".len() + format!("{} ", exec_count).len()) as i32;
+                    let exec_width =
+                        (" Executions ".len() + format!("{} ", exec_count).len()) as i32;
                     let sep = 5i32;
                     let lib_start = exec_start + exec_width + sep;
                     let lib_width = (" Library ".len() + format!("{} ", lib_count).len()) as i32;
@@ -1160,11 +1163,8 @@ impl App {
                         y: main_area.y,
                         ..list_area
                     };
-                    if crate::ui::common::hit_vertical_border(
-                        border_rect,
-                        mouse.column,
-                        mouse.row,
-                    ) {
+                    if crate::ui::common::hit_vertical_border(border_rect, mouse.column, mouse.row)
+                    {
                         self.operations.dragging = true;
                         return;
                     }
@@ -1252,15 +1252,11 @@ impl App {
                     }
                     return;
                 }
-
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.operations.dragging {
-                    self.operations.split_percent = crate::ui::common::drag_split_percent(
-                        0,
-                        self.terminal_width,
-                        mouse.column,
-                    );
+                    self.operations.split_percent =
+                        crate::ui::common::drag_split_percent(0, self.terminal_width, mouse.column);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -1440,7 +1436,10 @@ impl App {
 
         let (kind, schedule_kind, hour, minute, interval_minutes, recurring, rule_cursor) =
             match &trigger.trigger_config {
-                TriggerConfig::Scheduled { schedule, recurring } => {
+                TriggerConfig::Scheduled {
+                    schedule,
+                    recurring,
+                } => {
                     let (sk, h, m, iv) = match schedule {
                         common::ScheduleSpec::DailyAt { hour, minute } => {
                             (ScheduleKind::DailyAt, *hour, *minute, 60)
@@ -1452,10 +1451,7 @@ impl App {
                     (TriggerKind::Scheduled, sk, h, m, iv, *recurring, 0)
                 }
                 TriggerConfig::InterceptMatch { rule_id } => {
-                    let rc = rules
-                        .iter()
-                        .position(|(id, _)| id == rule_id)
-                        .unwrap_or(0);
+                    let rc = rules.iter().position(|(id, _)| id == rule_id).unwrap_or(0);
                     (
                         TriggerKind::InterceptMatch,
                         ScheduleKind::Interval,
@@ -1491,11 +1487,7 @@ impl App {
             rule_cursor,
             nodes,
             agents,
-            os_filter: trigger
-                .target_spec
-                .os_filter
-                .clone()
-                .unwrap_or_default(),
+            os_filter: trigger.target_spec.os_filter.clone().unwrap_or_default(),
             include_triggering_node: trigger.target_spec.include_triggering_node,
             focused_section: TriggerFormSection::Chain,
             cursor: 0,
@@ -1609,7 +1601,11 @@ impl App {
             }
             KeyCode::Left | KeyCode::Right => {
                 if let Some(form) = self.trigger_form.as_mut() {
-                    let delta: i32 = if matches!(key.code, KeyCode::Left) { -1 } else { 1 };
+                    let delta: i32 = if matches!(key.code, KeyCode::Left) {
+                        -1
+                    } else {
+                        1
+                    };
                     Self::tweak_trigger_form_field(form, delta);
                 }
             }
@@ -1709,8 +1705,7 @@ impl App {
                     return;
                 }
                 let n = form.chains.len() as i32;
-                form.chain_cursor =
-                    (((form.chain_cursor as i32) + delta).rem_euclid(n)) as usize;
+                form.chain_cursor = (((form.chain_cursor as i32) + delta).rem_euclid(n)) as usize;
             }
             S::Type => {
                 let variants = [
@@ -1718,10 +1713,7 @@ impl App {
                     TriggerKind::InterceptMatch,
                     TriggerKind::NewNode,
                 ];
-                let idx = variants
-                    .iter()
-                    .position(|k| *k == form.kind)
-                    .unwrap_or(0) as i32;
+                let idx = variants.iter().position(|k| *k == form.kind).unwrap_or(0) as i32;
                 let n = variants.len() as i32;
                 let next = (idx + delta).rem_euclid(n) as usize;
                 form.kind = variants[next];
@@ -1757,8 +1749,7 @@ impl App {
                     return;
                 }
                 let n = form.rules.len() as i32;
-                form.rule_cursor =
-                    (((form.rule_cursor as i32) + delta).rem_euclid(n)) as usize;
+                form.rule_cursor = (((form.rule_cursor as i32) + delta).rem_euclid(n)) as usize;
             }
             S::Nodes => {
                 if form.nodes.is_empty() {

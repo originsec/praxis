@@ -205,8 +205,12 @@ impl App {
                     }
                 }
                 KeyCode::Char('r') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    let Some(node) = self.nodes.nodes.get(self.nodes.selected) else { return };
-                    let Some(agent) = node.discovered_agents.get(self.nodes.agent_selected) else { return };
+                    let Some(node) = self.nodes.nodes.get(self.nodes.selected) else {
+                        return;
+                    };
+                    let Some(agent) = node.discovered_agents.get(self.nodes.agent_selected) else {
+                        return;
+                    };
                     self.open_recon(node.node_id.clone(), agent.short_name.clone());
                 }
                 KeyCode::Enter => {
@@ -501,16 +505,13 @@ impl App {
             }
             KeyCode::Tab | KeyCode::Down => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    form.focused_field =
-                        (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
+                    form.focused_field = (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
                     form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
                 }
             }
             KeyCode::BackTab | KeyCode::Up => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    form.focused_field = (form.focused_field
-                        + AddRemoteNodeForm::FIELD_COUNT
-                        - 1)
+                    form.focused_field = (form.focused_field + AddRemoteNodeForm::FIELD_COUNT - 1)
                         % AddRemoteNodeForm::FIELD_COUNT;
                     form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
                 }
@@ -573,8 +574,7 @@ impl App {
                 // matching the Add Model form's convention.
                 //
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    form.focused_field =
-                        (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
+                    form.focused_field = (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
                     form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
                 }
             }
@@ -679,9 +679,13 @@ impl App {
                         .await;
                 }
                 let _ = client
-                    .acp_request(&node_id, "session/close", serde_json::json!({
-                        "sessionId": session_id,
-                    }))
+                    .acp_request(
+                        &node_id,
+                        "session/close",
+                        serde_json::json!({
+                            "sessionId": session_id,
+                        }),
+                    )
                     .await;
             });
         }
@@ -950,32 +954,35 @@ impl App {
         let local_id = uuid::Uuid::new_v4().to_string();
         let now = std::time::Instant::now();
 
-        self.nodes.sessions.insert(local_id.clone(), SessionChat {
-            local_id: local_id.clone(),
-            node_id: node_id.clone(),
-            agent_name: agent.clone(),
-            session_id: None,
-            active_transaction_id: None,
-            created_at: now,
-            last_activity_at: now,
-            messages: Vec::new(),
-            input: String::new(),
-            cursor_pos: 0,
-            scroll_offset: 0,
-            max_scroll: std::cell::Cell::new(0),
-            is_waiting: false,
-            history: Vec::new(),
-            history_index: None,
-            saved_input: String::new(),
-            yolo,
-            working_dir: working_dir.clone(),
-            streaming_content: String::new(),
-            revealed_chars: 0,
-            had_tool_call: false,
-            agent_status: None,
-            pending_permission: None,
-            tool_calls: Vec::new(),
-        });
+        self.nodes.sessions.insert(
+            local_id.clone(),
+            SessionChat {
+                local_id: local_id.clone(),
+                node_id: node_id.clone(),
+                agent_name: agent.clone(),
+                session_id: None,
+                active_transaction_id: None,
+                created_at: now,
+                last_activity_at: now,
+                messages: Vec::new(),
+                input: String::new(),
+                cursor_pos: 0,
+                scroll_offset: 0,
+                max_scroll: std::cell::Cell::new(0),
+                is_waiting: false,
+                history: Vec::new(),
+                history_index: None,
+                saved_input: String::new(),
+                yolo,
+                working_dir: working_dir.clone(),
+                streaming_content: String::new(),
+                revealed_chars: 0,
+                had_tool_call: false,
+                agent_status: None,
+                pending_permission: None,
+                tool_calls: Vec::new(),
+            },
+        );
         self.nodes.active_session_id = Some(local_id.clone());
 
         let client = self.client.clone();
@@ -1007,11 +1014,15 @@ impl App {
             }
 
             match client
-                .acp_request(&node_id, "session/new", serde_json::json!({
-                    "cwd": cwd,
-                    "mcpServers": [],
-                    "_meta": { "praxis": praxis_meta }
-                }))
+                .acp_request(
+                    &node_id,
+                    "session/new",
+                    serde_json::json!({
+                        "cwd": cwd,
+                        "mcpServers": [],
+                        "_meta": { "praxis": praxis_meta }
+                    }),
+                )
                 .await
             {
                 Ok(value) => {
@@ -1060,7 +1071,9 @@ impl App {
                     };
                     let client = self.client.clone();
                     let node_id = session.node_id.clone();
-                    session.messages.push(ChatMessage::System("Cancelling...".to_string()));
+                    session
+                        .messages
+                        .push(ChatMessage::System("Cancelling...".to_string()));
                     tokio::spawn(async move {
                         //
                         // session/cancel is a JSON-RPC notification
@@ -1440,9 +1453,7 @@ impl App {
                         .map(|n| n.discovered_agents.len())
                         .unwrap_or(0);
 
-                    if mouse.row >= agents_start
-                        && mouse.row < agents_start + agent_count as u16
-                    {
+                    if mouse.row >= agents_start && mouse.row < agents_start + agent_count as u16 {
                         let clicked_agent = (mouse.row - agents_start) as usize;
                         self.nodes.agent_selected = clicked_agent;
                         if is_dbl {
@@ -1451,7 +1462,6 @@ impl App {
                     }
                     return;
                 }
-
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.nodes.dragging {

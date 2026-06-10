@@ -12,7 +12,6 @@ pub struct CliState {
     // Active ACP session ids keyed by node id. Populated by
     // `session create`, consumed by `session prompt` / `session close`.
     //
-
     #[serde(default)]
     pub sessions: HashMap<String, String>,
 }
@@ -23,7 +22,8 @@ impl CliState {
     }
 
     pub fn set_session(&mut self, node_id: &str, session_id: &str) -> Result<()> {
-        self.sessions.insert(node_id.to_string(), session_id.to_string());
+        self.sessions
+            .insert(node_id.to_string(), session_id.to_string());
         self.save()?;
         Ok(())
     }

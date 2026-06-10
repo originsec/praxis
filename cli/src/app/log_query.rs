@@ -180,7 +180,8 @@ impl LogQueryState {
             .iter()
             .enumerate()
             .filter(|(_, row)| {
-                row.iter().any(|cell| cell_to_string(cell).to_lowercase().contains(&needle))
+                row.iter()
+                    .any(|cell| cell_to_string(cell).to_lowercase().contains(&needle))
             })
             .map(|(i, _)| i)
             .collect();
@@ -307,7 +308,9 @@ impl crate::app::App {
                     return;
                 }
                 KeyCode::Down => {
-                    let max = crate::app::log_query::schema::TABLES.len().saturating_sub(1);
+                    let max = crate::app::log_query::schema::TABLES
+                        .len()
+                        .saturating_sub(1);
                     if self.log_query.schema_selected < max {
                         self.log_query.schema_selected += 1;
                         self.log_query.schema_scroll =
@@ -316,18 +319,17 @@ impl crate::app::App {
                     return;
                 }
                 KeyCode::PageUp => {
-                    self.log_query.schema_scroll =
-                        self.log_query.schema_scroll.saturating_sub(10);
+                    self.log_query.schema_scroll = self.log_query.schema_scroll.saturating_sub(10);
                     self.log_query.schema_selected =
                         self.log_query.schema_selected.saturating_sub(10);
                     return;
                 }
                 KeyCode::PageDown => {
-                    let max = crate::app::log_query::schema::TABLES.len().saturating_sub(1);
-                    self.log_query.schema_selected =
-                        (self.log_query.schema_selected + 10).min(max);
-                    self.log_query.schema_scroll =
-                        self.log_query.schema_scroll.saturating_add(10);
+                    let max = crate::app::log_query::schema::TABLES
+                        .len()
+                        .saturating_sub(1);
+                    self.log_query.schema_selected = (self.log_query.schema_selected + 10).min(max);
+                    self.log_query.schema_scroll = self.log_query.schema_scroll.saturating_add(10);
                     return;
                 }
                 KeyCode::Enter => {
@@ -405,21 +407,24 @@ impl crate::app::App {
                 }
                 KeyCode::Down => {
                     if !self.log_query.suggestions.is_empty() {
-                        self.log_query.suggestion_index =
-                            (self.log_query.suggestion_index + 1) % self.log_query.suggestions.len();
+                        self.log_query.suggestion_index = (self.log_query.suggestion_index + 1)
+                            % self.log_query.suggestions.len();
                     }
                     return;
                 }
                 KeyCode::Tab => {
                     if !self.log_query.suggestions.is_empty() {
-                        self.log_query.suggestion_index =
-                            (self.log_query.suggestion_index + 1) % self.log_query.suggestions.len();
+                        self.log_query.suggestion_index = (self.log_query.suggestion_index + 1)
+                            % self.log_query.suggestions.len();
                     }
                     return;
                 }
                 KeyCode::Enter => {
-                    if let Some(s) =
-                        self.log_query.suggestions.get(self.log_query.suggestion_index).cloned()
+                    if let Some(s) = self
+                        .log_query
+                        .suggestions
+                        .get(self.log_query.suggestion_index)
+                        .cloned()
                     {
                         self.log_query.editor.replace_current_token(&s.label);
                     }
@@ -532,7 +537,8 @@ impl crate::app::App {
             }
             (KeyCode::PageDown, _) => {
                 let n = self.log_query.visible_row_count();
-                self.log_query.selected_row = (self.log_query.selected_row + 10).min(n.saturating_sub(1));
+                self.log_query.selected_row =
+                    (self.log_query.selected_row + 10).min(n.saturating_sub(1));
                 self.log_query.detail_scroll = 0;
             }
             (KeyCode::Enter, _) => {

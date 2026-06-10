@@ -16,9 +16,7 @@ use crate::app::intercept::InterceptState;
 use crate::ui::chrome;
 use crate::ui::common::focused_titled_panel;
 use crate::ui::intercept::body_lines;
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_DONE, TEXT, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_DONE, TEXT, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
@@ -128,7 +126,10 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
 fn render_detail(f: &mut Frame, area: Rect, app: &App) {
     let block = focused_titled_panel(" Match detail ", app.intercept.match_detail_focus);
 
-    let Some(m) = app.intercept.filtered_match_at(app.intercept.match_selected) else {
+    let Some(m) = app
+        .intercept
+        .filtered_match_at(app.intercept.match_selected)
+    else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "No match selected.",

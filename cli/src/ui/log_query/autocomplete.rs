@@ -92,9 +92,8 @@ pub fn render(f: &mut Frame, editor_area: Rect, state: &LogQueryState) {
             .bg(row_bg);
         let badge = s.kind.badge();
         let label = truncate(&s.label, (inner.width as usize).saturating_sub(6));
-        let pad_count = (inner.width as usize).saturating_sub(
-            label.chars().count() + badge.chars().count() + 2,
-        );
+        let pad_count = (inner.width as usize)
+            .saturating_sub(label.chars().count() + badge.chars().count() + 2);
         let pad = " ".repeat(pad_count);
         lines.push(Line::from(vec![
             Span::styled(" ".to_string(), label_style),

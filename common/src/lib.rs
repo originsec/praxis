@@ -1,5 +1,6 @@
 pub mod acp_ext;
 pub mod ai;
+pub mod client_transport;
 pub mod config;
 pub mod id;
 pub mod logging;
@@ -17,6 +18,8 @@ pub use ai::{
 };
 
 pub use config::{FileConfig, find_config_file, load_from_paths};
+
+pub use client_transport::ClientTransport;
 
 pub use id::short_id;
 

@@ -110,9 +110,7 @@ pub fn section_title(title: &str, focused: bool) -> Line<'static> {
 pub fn rubric(title: &str) -> Line<'static> {
     Line::from(Span::styled(
         format!(" {}", title),
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -123,18 +121,13 @@ pub fn rubric(title: &str) -> Line<'static> {
 
 pub fn tab(label: &str, count: Option<usize>, active: bool) -> Vec<Span<'static>> {
     let label_style = if active {
-        Style::default()
-            .fg(ACCENT)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
     let mut spans = vec![Span::styled(format!(" {} ", label), label_style)];
     if let Some(n) = count {
-        spans.push(Span::styled(
-            format!("{} ", n),
-            Style::default().fg(DIM),
-        ));
+        spans.push(Span::styled(format!("{} ", n), Style::default().fg(DIM)));
     }
     spans
 }
@@ -155,12 +148,7 @@ pub fn tab_sep() -> Span<'static> {
 // the work.
 //
 
-pub fn modal_panel(
-    f: &mut Frame,
-    area: Rect,
-    title: &str,
-    esc_hint: &str,
-) -> Rect {
+pub fn modal_panel(f: &mut Frame, area: Rect, title: &str, esc_hint: &str) -> Rect {
     modal_panel_line(f, area, modal_title(title), esc_hint)
 }
 
@@ -171,12 +159,7 @@ pub fn modal_panel(
 // bold-bright title span.
 //
 
-pub fn modal_panel_line(
-    f: &mut Frame,
-    area: Rect,
-    title: Line<'static>,
-    esc_hint: &str,
-) -> Rect {
+pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hint: &str) -> Rect {
     f.render_widget(Clear, area);
     let block = Block::default().style(Style::default().bg(BG_MENU));
     f.render_widget(block, area);
@@ -200,11 +183,8 @@ pub fn modal_panel_line(
     } else {
         esc_hint.len() as u16 + 1
     };
-    let header_chunks = Layout::horizontal([
-        Constraint::Min(1),
-        Constraint::Length(hint_width),
-    ])
-    .split(header[0]);
+    let header_chunks =
+        Layout::horizontal([Constraint::Min(1), Constraint::Length(hint_width)]).split(header[0]);
 
     f.render_widget(
         Paragraph::new(title).style(Style::default().bg(BG_MENU)),

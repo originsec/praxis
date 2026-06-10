@@ -1,9 +1,7 @@
 use crate::app::NodesState;
 use crate::ui::chrome;
 use crate::ui::common::short_id;
-use crate::ui::theme::{
-    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, OK, STATUS_RUNNING, TEXT_BRIGHT,
-};
+use crate::ui::theme::{ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, OK, STATUS_RUNNING, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
