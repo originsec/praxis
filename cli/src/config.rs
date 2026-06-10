@@ -6,8 +6,6 @@ use std::path::PathBuf;
 const CONFIG_DIR: &str = "praxis";
 const CONFIG_FILE: &str = "config";
 
-pub const DEFAULT_RABBITMQ_URL: &str = "amqp://praxis:praxis@localhost:5672";
-
 //
 // User-level CLI config. Stored at ~/.config/praxis/config in
 // KEY=VALUE form so it lines up with /etc/praxis/env on the
@@ -80,5 +78,5 @@ pub fn set(key: &str, value: &str) -> Result<PathBuf> {
 pub fn resolve_rabbitmq_url() -> String {
     get("PRAXIS_RABBITMQ_URL")
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_RABBITMQ_URL.to_string())
+        .unwrap_or_else(|| common::DEFAULT_RABBITMQ_URL.to_string())
 }

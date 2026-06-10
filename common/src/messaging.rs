@@ -31,7 +31,7 @@ pub const CLIENT_SIGNAL_QUEUE: &str = "ClientSignal";
 pub const CLIENT_BROADCAST_EXCHANGE: &str = "ClientBroadcast";
 
 /// Default RabbitMQ URL if PRAXIS_RABBITMQ_URL environment variable is not set
-const DEFAULT_RABBITMQ_URL: &str = "amqp://praxis:praxis@localhost:5672";
+pub const DEFAULT_RABBITMQ_URL: &str = "amqp://praxis:praxis@localhost:5672";
 
 static RABBITMQ_URL_CELL: OnceLock<String> = OnceLock::new();
 

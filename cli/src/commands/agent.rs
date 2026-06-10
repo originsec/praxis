@@ -170,15 +170,6 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
     }
 }
 
-fn find_node_id(state: &common::SystemState, prefix: &str) -> Option<String> {
-    let search = prefix.to_lowercase();
-    state
-        .nodes
-        .iter()
-        .find(|node| node.node_id.to_lowercase().starts_with(&search))
-        .map(|node| node.node_id.clone())
-}
-
 async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
     let state = client
         .get_state()
@@ -264,7 +255,7 @@ async fn read_file(
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix)
+    let node_id = super::find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let mut params = json!({
@@ -318,7 +309,7 @@ async fn write_file(
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix)
+    let node_id = super::find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let result = client
@@ -361,7 +352,7 @@ async fn grep_file(
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix)
+    let node_id = super::find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let result = client

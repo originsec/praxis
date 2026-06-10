@@ -78,11 +78,7 @@ async fn select_node(client: &Client, prefix: &str) -> Result<()> {
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
 
-    let search = prefix.to_lowercase();
-    let node = state
-        .nodes
-        .iter()
-        .find(|node| node.node_id.to_lowercase().starts_with(&search))
+    let node = super::find_node(&state, prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))?;
 
     print_success(&format!(
@@ -99,11 +95,7 @@ async fn reset_node(client: &Client, prefix: &str) -> Result<()> {
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
 
-    let search = prefix.to_lowercase();
-    let node = state
-        .nodes
-        .iter()
-        .find(|node| node.node_id.to_lowercase().starts_with(&search))
+    let node = super::find_node(&state, prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))?;
 
     client.reset_node(&node.node_id).await?;
