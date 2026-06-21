@@ -67,19 +67,24 @@
   static inline void sleep_ms(unsigned ms) { Sleep(ms); }
 
   //
-  // MinGW's msvcrt-based libc does not ship strndup. Provide a drop-in
-  // replacement so the rest of the codebase doesn't need #ifdefs.
+  // MinGW's msvcrt-based libc historically did not ship strndup. Provide
+  // a drop-in replacement so the rest of the codebase doesn't need
+  // #ifdefs. MinGW-w64 12.0+ headers declare strndup in <string.h> when
+  // _GNU_SOURCE is set, so only provide our own on older MinGW (or MSVC,
+  // which never has it) — otherwise the static inline conflicts with the
+  // header's non-static declaration.
   //
-
-  static inline char *strndup(const char *s, size_t n) {
-      size_t len = 0;
-      while (len < n && s[len]) len++;
-      char *r = (char *)malloc(len + 1);
-      if (!r) return NULL;
-      memcpy(r, s, len);
-      r[len] = '\0';
-      return r;
-  }
+  #if !defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 12
+    static inline char *strndup(const char *s, size_t n) {
+        size_t len = 0;
+        while (len < n && s[len]) len++;
+        char *r = (char *)malloc(len + 1);
+        if (!r) return NULL;
+        memcpy(r, s, len);
+        r[len] = '\0';
+        return r;
+    }
+  #endif
 #else
   #include <sys/socket.h>
   #include <netinet/in.h>
