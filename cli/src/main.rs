@@ -424,28 +424,37 @@ async fn run_tui(
     let client = client::Client::connect(rabbitmq_url, timeout, client_id.clone()).await?;
     let client = Arc::new(client);
 
+    //
+    // The Kitty keyboard protocol enhancement is unsupported on the legacy
+    // Windows console API, where crossterm returns an error rather than
+    // silently ignoring the request. Probe support up front and only push
+    // (and later pop) the flags when the terminal actually supports them, so
+    // launch does not fail on legacy Windows consoles.
+    //
+    let keyboard_enhancement =
+        crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(
-            io::stdout(),
-            crossterm::event::PopKeyboardEnhancementFlags,
-            LeaveAlternateScreen,
-            DisableMouseCapture,
-        );
+        if keyboard_enhancement {
+            let _ = execute!(io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
+        }
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         original_hook(info);
     }));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        crossterm::event::PushKeyboardEnhancementFlags(
-            crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
-        ),
-    )?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    if keyboard_enhancement {
+        execute!(
+            stdout,
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+            ),
+        )?;
+    }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -506,9 +515,14 @@ async fn run_tui(
     }
 
     disable_raw_mode()?;
+    if keyboard_enhancement {
+        execute!(
+            terminal.backend_mut(),
+            crossterm::event::PopKeyboardEnhancementFlags,
+        )?;
+    }
     execute!(
         terminal.backend_mut(),
-        crossterm::event::PopKeyboardEnhancementFlags,
         LeaveAlternateScreen,
         DisableMouseCapture,
     )?;
