@@ -99,7 +99,8 @@ RUN set -eux; \
 COPY pkg/systemd/praxis-service.service /etc/systemd/system/praxis-service.service
 COPY pkg/systemd/praxis.env.example     /etc/praxis/env
 COPY pkg/praxisctl/praxisctl            /usr/local/bin/praxisctl
-RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service && \
+RUN sed -i 's/\r$//' /usr/local/bin/praxisctl && \
+    chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service && \
     sed -i 's|@localhost:5672|@rabbitmq:5672|' /etc/praxis/env
 
 #

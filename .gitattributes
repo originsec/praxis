@@ -1,2 +1,6 @@
 # Ensure shell scripts always use LF line endings
 *.sh text eol=lf
+
+# Extensionless shell scripts that ship into Linux images/packages must
+# stay LF, otherwise a CRLF shebang (e.g. `bash\r`) breaks execution.
+pkg/praxisctl/praxisctl text eol=lf
