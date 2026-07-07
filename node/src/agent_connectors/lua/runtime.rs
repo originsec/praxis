@@ -901,7 +901,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "sqlite_query",
             lua.create_function(|_, (db_path, sql): (String, String)| {
-                let output = std::process::Command::new("sqlite3")
+                let output = crate::utils::silent_command("sqlite3")
                     .arg(&db_path)
                     .arg(&sql)
                     .output();
