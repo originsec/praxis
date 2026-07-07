@@ -91,10 +91,11 @@
 - **Do not initiate any release steps unless explicitly asked to.**
 
 1. **Version bump**: Ensure the version is updated on the `prerelease` branch. Bump the last (patch) number only over the current `main` version, unless specifically asked otherwise.
-2. **Documentation**: Before creating the release PR, ensure all documentation in `docs/` is updated to reflect every change included in the release. Review all commits since the last release and update relevant doc pages.
-3. **Create PR**: Create a PR from `prerelease` into `main` with a clear, well-written description summarizing all changes since the last release.
-4. **Squash merge**: Squash-merge the PR into `main`.
-5. **GitHub release**: Create a GitHub release on `main` with an excellent changelog covering all notable changes, new features, fixes, and breaking changes.
-6. **Tag and push**: Create a version tag matching the version number set on the `prerelease` branch (e.g., `v0.10.0`), push the tag, and push the release.
-7. **AUR package**: Handled automatically — a GitHub Action updates the `originsec/praxis-aur` repo on each release.
-8. **Back-merge into `prerelease`**: After the release completes (and once the automated AUR commits have landed on `main`), merge `main` back into `prerelease`. The squash-merge from step 4 and the AUR auto-commits land only on `main`, so without this step `prerelease` drifts behind `main`. That drift makes the next release PR show a misleading merge-base diff and risks silently reverting `main`-only changes (e.g. hotfixes merged directly to `main`) when squash-merged.
+2. **Regenerate `Cargo.lock`**: After bumping the version, run `cargo build` (or `cargo update -w`) so the workspace crate versions in `Cargo.lock` match `Cargo.toml`, then commit the regenerated `Cargo.lock`. Skipping this leaves the lockfile a patch behind and breaks the source AUR build, which compiles with `cargo build --frozen` (fails on any lockfile mismatch).
+3. **Documentation**: Before creating the release PR, ensure all documentation in `docs/` is updated to reflect every change included in the release. Review all commits since the last release and update relevant doc pages.
+4. **Create PR**: Create a PR from `prerelease` into `main` with a clear, well-written description summarizing all changes since the last release.
+5. **Squash merge**: Squash-merge the PR into `main`.
+6. **GitHub release**: Create a GitHub release on `main` with an excellent changelog covering all notable changes, new features, fixes, and breaking changes.
+7. **Tag and push**: Create a version tag matching the version number set on the `prerelease` branch (e.g., `v0.10.0`), push the tag, and push the release.
+8. **AUR package**: Handled automatically — a GitHub Action updates the `originsec/praxis-aur` repo on each release.
+9. **Back-merge into `prerelease`**: After the release completes (and once the automated AUR commits have landed on `main`), merge `main` back into `prerelease`. The squash-merge from step 5 and the AUR auto-commits land only on `main`, so without this step `prerelease` drifts behind `main`. That drift makes the next release PR show a misleading merge-base diff and risks silently reverting `main`-only changes (e.g. hotfixes merged directly to `main`) when squash-merged.
