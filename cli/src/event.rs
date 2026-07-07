@@ -15,6 +15,11 @@ pub enum AppEvent {
     Terminal(Event),
     AcpNotification(AcpNotification),
     SessionListPoll,
+    //
+    // Fired (after a backoff delay) to retry recreating a lost orchestrator
+    // session. See App::schedule_orchestrator_recovery_retry.
+    //
+    OrchestratorRetryRecovery,
     StateUpdate(SystemState),
     OperationsRefreshed {
         op_definitions: Vec<OperationDefinitionInfo>,

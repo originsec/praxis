@@ -163,7 +163,7 @@ impl OrchestratorManager {
         let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
 
         let mcp_service = match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
+            std::time::Duration::from_secs(8),
             ().serve(transport),
         )
         .await
@@ -186,7 +186,7 @@ impl OrchestratorManager {
         let peer = mcp_service.peer().clone();
 
         let mcp_tools =
-            match tokio::time::timeout(std::time::Duration::from_secs(15), peer.list_all_tools())
+            match tokio::time::timeout(std::time::Duration::from_secs(8), peer.list_all_tools())
                 .await
             {
                 Ok(Ok(t)) => t,

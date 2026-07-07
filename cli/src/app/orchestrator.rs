@@ -132,11 +132,27 @@ pub struct OrchestratorState {
     //
     pub configured_model: String,
     //
-    // True while auto-recovering a session the service reported lost.
-    // Guards against a recreate→resend→lost loop: a second lost report
-    // while still recovering surfaces an error instead of retrying.
+    // Auto-recovery state for a session the service reported lost (e.g.
+    // after a service restart). While `recovering` is true the TUI retries
+    // recreating the session with backoff, resending `recovery_prompt` and
+    // re-seeding `recovery_history` on each attempt, until it succeeds or
+    // `recovery_attempts` reaches the cap.
     //
     pub recovering: bool,
+    pub recovery_attempts: u32,
+    pub recovery_prompt: Option<String>,
+    pub recovery_history: Option<Vec<(String, String)>>,
+}
+
+//
+// Recovery retries before giving up, and the per-attempt backoff. The
+// service can be unreachable for ~30-60s after a restart (its MCP backend
+// waits on RabbitMQ), so the schedule needs to span that window.
+//
+pub(crate) const RECOVERY_MAX_ATTEMPTS: u32 = 6;
+
+pub(crate) fn recovery_backoff_ms(attempt: u32) -> u64 {
+    (1500u64 * attempt as u64).min(6000)
 }
 
 impl OrchestratorState {
@@ -170,6 +186,9 @@ impl Default for OrchestratorState {
             stored: None,
             configured_model: String::new(),
             recovering: false,
+            recovery_attempts: 0,
+            recovery_prompt: None,
+            recovery_history: None,
         }
     }
 }
@@ -283,6 +302,67 @@ impl App {
                     e
                 )));
             }
+        }
+    }
+
+    //
+    // Issue a fresh session/new as part of recovering a lost session.
+    // Re-populates pending_prompt/pending_history each call because
+    // create_new_orchestrator_session consumes them, and keeps the current
+    // session in a streaming state so the UI reads as "reconnecting"
+    // rather than a dead turn.
+    //
+
+    pub(crate) async fn attempt_orchestrator_recovery(&mut self) {
+        self.orchestrator.pending_prompt = self.orchestrator.recovery_prompt.clone();
+        self.orchestrator.pending_history = self.orchestrator.recovery_history.clone();
+
+        if let Some(session) = self.orchestrator.active_session_mut() {
+            session.is_streaming = true;
+        }
+
+        self.create_new_orchestrator_session().await;
+    }
+
+    //
+    // A recovery recreate attempt failed (service still starting). Retry
+    // with backoff up to RECOVERY_MAX_ATTEMPTS, then give up with a
+    // visible, actionable error.
+    //
+
+    pub(crate) fn schedule_orchestrator_recovery_retry(&mut self) {
+        self.orchestrator.recovery_attempts += 1;
+        let attempt = self.orchestrator.recovery_attempts;
+
+        if attempt >= RECOVERY_MAX_ATTEMPTS {
+            self.orchestrator.recovering = false;
+            self.orchestrator.recovery_attempts = 0;
+            self.orchestrator.recovery_prompt = None;
+            self.orchestrator.recovery_history = None;
+            self.orchestrator.pending_prompt = None;
+            self.orchestrator.pending_seed_messages = None;
+
+            let idx = self
+                .orchestrator
+                .sessions
+                .iter()
+                .position(|s| s.is_streaming)
+                .or(self.orchestrator.active_session_index);
+            if let Some(session) = idx.and_then(|i| self.orchestrator.sessions.get_mut(i)) {
+                session.is_streaming = false;
+                session.messages.push(ConversationEntry::Error(
+                    "Could not reconnect to the orchestrator service after several attempts — it may still be starting. Send another message to retry, or /clear to start fresh.".to_string(),
+                ));
+            }
+            return;
+        }
+
+        let delay = recovery_backoff_ms(attempt);
+        if let Some(tx) = self.event_tx.clone() {
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                let _ = tx.send(crate::event::AppEvent::OrchestratorRetryRecovery);
+            });
         }
     }
 
@@ -594,6 +674,14 @@ impl App {
                 self.orchestrator.active_session_index = Some(0);
 
                 //
+                // Session is live — clear any in-progress recovery.
+                //
+                self.orchestrator.recovering = false;
+                self.orchestrator.recovery_attempts = 0;
+                self.orchestrator.recovery_prompt = None;
+                self.orchestrator.recovery_history = None;
+
+                //
                 // Initialise the on-disk record for this session. If we
                 // were resuming, carry the prior stored history forward
                 // under the new session_id.
@@ -653,26 +741,24 @@ impl App {
                 //
                 // The service no longer has this orchestrator session (it
                 // most likely restarted). Recreate a fresh session and
-                // resend the prompt so the turn isn't dead-ended. If we're
-                // already mid-recovery, don't loop — surface an error.
+                // resend the prompt so the turn isn't dead-ended.
+                //
+                // If we're already recovering, this is a stale duplicate
+                // (e.g. the user sent another prompt to the dead session
+                // mid-recovery) — the in-flight recovery already resends the
+                // original prompt, so ignore it rather than restarting.
                 //
                 if self.orchestrator.recovering {
-                    self.orchestrator.recovering = false;
-                    if let Some(session) = self.orchestrator.active_session_mut() {
-                        session.is_streaming = false;
-                        session.messages.push(ConversationEntry::Error(
-                            "Orchestrator session was lost and could not be re-established. Try /clear."
-                                .to_string(),
-                        ));
-                    }
                     return;
                 }
                 self.orchestrator.recovering = true;
+                self.orchestrator.recovery_attempts = 0;
+                self.orchestrator.recovery_prompt = Some(prompt.clone());
 
                 //
                 // Preserve the visible transcript across the recreate. Drop
-                // the trailing user prompt — it is resent via pending_prompt
-                // and re-added when the new session is confirmed.
+                // the trailing user prompt — it is resent and re-added when
+                // the new session is confirmed.
                 //
                 let mut seed: Vec<ConversationEntry> = self
                     .orchestrator
@@ -686,7 +772,8 @@ impl App {
 
                 //
                 // Reseed the model context from the on-disk record so the
-                // recreated service session isn't blank.
+                // recreated service session isn't blank. Held in
+                // recovery_history so it survives across retry attempts.
                 //
                 if let Some(stored) = self.orchestrator.stored.as_ref() {
                     let history: Vec<(String, String)> = stored
@@ -695,12 +782,11 @@ impl App {
                         .map(|m| (m.role.clone(), m.text.clone()))
                         .collect();
                     if !history.is_empty() {
-                        self.orchestrator.pending_history = Some(history);
+                        self.orchestrator.recovery_history = Some(history);
                     }
                 }
 
-                self.orchestrator.pending_prompt = Some(prompt);
-                self.create_new_orchestrator_session().await;
+                self.attempt_orchestrator_recovery().await;
             }
 
             AcpNotification::InitializeResult => {}
@@ -848,6 +934,9 @@ impl App {
                 // succeeded — clear the guard.
                 //
                 self.orchestrator.recovering = false;
+                self.orchestrator.recovery_attempts = 0;
+                self.orchestrator.recovery_prompt = None;
+                self.orchestrator.recovery_history = None;
                 //
                 // Find the session that was streaming, flush pending
                 // tools, and snapshot the assistant turn to disk.
@@ -902,6 +991,16 @@ impl App {
             }
 
             AcpNotification::Error { message } => {
+                //
+                // While recovering, an error means the recreate attempt
+                // failed (the service is still coming up). Retry with
+                // backoff rather than surfacing it, until the attempt cap.
+                //
+                if self.orchestrator.recovering {
+                    self.schedule_orchestrator_recovery_retry();
+                    return;
+                }
+
                 //
                 // Show error in the streaming session if one exists,
                 // otherwise the active session.

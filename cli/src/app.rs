@@ -478,6 +478,12 @@ impl App {
                 true
             }
             AppEvent::SessionListPoll => false,
+            AppEvent::OrchestratorRetryRecovery => {
+                if self.orchestrator.recovering {
+                    self.attempt_orchestrator_recovery().await;
+                }
+                true
+            }
             AppEvent::StateUpdate(state) => {
                 let had_no_nodes = self.nodes.nodes.is_empty();
                 self.handle_state_update(state);
