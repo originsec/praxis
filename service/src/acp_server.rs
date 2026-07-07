@@ -442,7 +442,8 @@ impl AcpServer {
             .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
         drop(config);
 
-        self.orchestrator_manager
+        let created = self
+            .orchestrator_manager
             .create_session(
                 client_id,
                 &session_id,
@@ -453,19 +454,38 @@ impl AcpServer {
             )
             .await;
 
-        if let Some(id) = id {
-            let model_id = format!("{}/{}", provider, model_name);
-            let model_state = acp::schema::SessionModelState::new(
-                model_id.clone(),
-                vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
-            );
-            let resp = NewSessionResponse::new(session_id).models(model_state);
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_response(id, serde_json::to_value(resp).unwrap()),
-            )
-            .await;
+        //
+        // Only confirm the session when it is actually live. On failure,
+        // report the real reason against the request id so the client shows
+        // it, instead of a bare success response that leaves the client with
+        // a session the service never created.
+        //
+
+        let Some(id) = id else { return };
+
+        match created {
+            Ok(()) => {
+                let model_id = format!("{}/{}", provider, model_name);
+                let model_state = acp::schema::SessionModelState::new(
+                    model_id.clone(),
+                    vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
+                );
+                let resp = NewSessionResponse::new(session_id).models(model_state);
+                let _ = send_to_client(
+                    publish_channel,
+                    client_id,
+                    acp_response(id, serde_json::to_value(resp).unwrap()),
+                )
+                .await;
+            }
+            Err(message) => {
+                let _ = send_to_client(
+                    publish_channel,
+                    client_id,
+                    acp_error_response(id, -32000, &message),
+                )
+                .await;
+            }
         }
     }
 

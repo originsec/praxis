@@ -131,6 +131,12 @@ pub struct OrchestratorState {
     // arrives.
     //
     pub configured_model: String,
+    //
+    // True while auto-recovering a session the service reported lost.
+    // Guards against a recreate→resend→lost loop: a second lost report
+    // while still recovering surfaces an error instead of retrying.
+    //
+    pub recovering: bool,
 }
 
 impl OrchestratorState {
@@ -163,6 +169,7 @@ impl Default for OrchestratorState {
             pending_seed_messages: None,
             stored: None,
             configured_model: String::new(),
+            recovering: false,
         }
     }
 }
@@ -642,6 +649,60 @@ impl App {
                 }
             }
 
+            AcpNotification::SessionLost { session_id, prompt } => {
+                //
+                // The service no longer has this orchestrator session (it
+                // most likely restarted). Recreate a fresh session and
+                // resend the prompt so the turn isn't dead-ended. If we're
+                // already mid-recovery, don't loop — surface an error.
+                //
+                if self.orchestrator.recovering {
+                    self.orchestrator.recovering = false;
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session.is_streaming = false;
+                        session.messages.push(ConversationEntry::Error(
+                            "Orchestrator session was lost and could not be re-established. Try /clear."
+                                .to_string(),
+                        ));
+                    }
+                    return;
+                }
+                self.orchestrator.recovering = true;
+
+                //
+                // Preserve the visible transcript across the recreate. Drop
+                // the trailing user prompt — it is resent via pending_prompt
+                // and re-added when the new session is confirmed.
+                //
+                let mut seed: Vec<ConversationEntry> = self
+                    .orchestrator
+                    .session_by_id_mut(&session_id)
+                    .map(|s| s.messages.iter().map(clone_conversation_entry).collect())
+                    .unwrap_or_default();
+                if matches!(seed.last(), Some(ConversationEntry::UserPrompt(t)) if *t == prompt) {
+                    seed.pop();
+                }
+                self.orchestrator.pending_seed_messages = Some(seed);
+
+                //
+                // Reseed the model context from the on-disk record so the
+                // recreated service session isn't blank.
+                //
+                if let Some(stored) = self.orchestrator.stored.as_ref() {
+                    let history: Vec<(String, String)> = stored
+                        .messages
+                        .iter()
+                        .map(|m| (m.role.clone(), m.text.clone()))
+                        .collect();
+                    if !history.is_empty() {
+                        self.orchestrator.pending_history = Some(history);
+                    }
+                }
+
+                self.orchestrator.pending_prompt = Some(prompt);
+                self.create_new_orchestrator_session().await;
+            }
+
             AcpNotification::InitializeResult => {}
 
             AcpNotification::UserPrompt { session_id, text } => {
@@ -782,6 +843,11 @@ impl App {
             }
 
             AcpNotification::PromptComplete { .. } => {
+                //
+                // A turn completed, so any prior session-loss recovery
+                // succeeded — clear the guard.
+                //
+                self.orchestrator.recovering = false;
                 //
                 // Find the session that was streaming, flush pending
                 // tools, and snapshot the assistant turn to disk.

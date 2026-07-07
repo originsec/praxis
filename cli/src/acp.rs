@@ -8,6 +8,7 @@ use acp::schema::{
     ToolCallContent, ToolCallStatus,
 };
 use agent_client_protocol as acp;
+use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -61,6 +62,15 @@ pub enum AcpNotification {
         total_tokens: u32,
     },
     PromptComplete,
+    //
+    // The service no longer has the orchestrator session a prompt targeted
+    // (e.g. the service restarted). The TUI transparently recreates the
+    // session and resends `prompt`.
+    //
+    SessionLost {
+        session_id: String,
+        prompt: String,
+    },
     //
     // Agent-initiated `session/request_permission` request. The TUI
     // surfaces this as `pending_permission` on the matching session,
@@ -585,24 +595,39 @@ async fn run_bridge(
                             }
 
                             let result = cx_clone.send_request(req).block_task().await;
-                            if let Ok(resp) = &result {
-                                let (provider, model) = resp
-                                    .models
-                                    .as_ref()
-                                    .map(|m| {
-                                        let id = m.current_model_id.to_string();
-                                        let (p, m) = id.split_once('/').unwrap_or(("unknown", &id));
-                                        (Some(p.to_string()), Some(m.to_string()))
-                                    })
-                                    .unwrap_or((None, None));
+                            match &result {
+                                Ok(resp) => {
+                                    let (provider, model) = resp
+                                        .models
+                                        .as_ref()
+                                        .map(|m| {
+                                            let id = m.current_model_id.to_string();
+                                            let (p, m) =
+                                                id.split_once('/').unwrap_or(("unknown", &id));
+                                            (Some(p.to_string()), Some(m.to_string()))
+                                        })
+                                        .unwrap_or((None, None));
 
-                                let _ = event_tx.send(AppEvent::AcpNotification(
-                                    AcpNotification::SessionCreated {
-                                        session_id: resp.session_id.to_string(),
-                                        provider,
-                                        model,
-                                    },
-                                ));
+                                    let _ = event_tx.send(AppEvent::AcpNotification(
+                                        AcpNotification::SessionCreated {
+                                            session_id: resp.session_id.to_string(),
+                                            provider,
+                                            model,
+                                        },
+                                    ));
+                                }
+                                Err(e) => {
+                                    //
+                                    // Session creation failed (MCP down, no
+                                    // model/key, etc.). Surface the real
+                                    // reason instead of silently dropping it.
+                                    //
+                                    let _ = event_tx.send(AppEvent::AcpNotification(
+                                        AcpNotification::Error {
+                                            message: e.to_string(),
+                                        },
+                                    ));
+                                }
                             }
                             let _ = reply.send(result);
                         }
@@ -629,8 +654,8 @@ async fn run_bridge(
                         } => {
                             let result = cx_clone
                                 .send_request(PromptRequest::new(
-                                    SessionId::from(session_id),
-                                    vec![ContentBlock::Text(TextContent::new(text))],
+                                    SessionId::from(session_id.clone()),
+                                    vec![ContentBlock::Text(TextContent::new(text.clone()))],
                                 ))
                                 .block_task()
                                 .await;
@@ -638,6 +663,23 @@ async fn run_bridge(
                                 Ok(_) => {
                                     let _ = event_tx.send(AppEvent::AcpNotification(
                                         AcpNotification::PromptComplete,
+                                    ));
+                                }
+                                Err(e)
+                                    if i32::from(e.code) as i64
+                                        == ERR_ORCHESTRATOR_SESSION_NOT_FOUND =>
+                                {
+                                    //
+                                    // The service lost this session (e.g. it
+                                    // restarted). Ask the TUI to recreate the
+                                    // session and resend the prompt rather
+                                    // than dead-ending the turn.
+                                    //
+                                    let _ = event_tx.send(AppEvent::AcpNotification(
+                                        AcpNotification::SessionLost {
+                                            session_id: session_id.clone(),
+                                            prompt: text.clone(),
+                                        },
                                     ));
                                 }
                                 Err(e) => {

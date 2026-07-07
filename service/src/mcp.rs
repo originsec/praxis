@@ -871,20 +871,42 @@ impl McpClient for ServiceMcpClient {
 // MCP server manager that starts/stops the SSE server based on config.
 //
 
+struct RunningMcpServer {
+    port: u16,
+    cancel: CancellationToken,
+    serve_task: tokio::task::JoinHandle<()>,
+}
+
 pub struct McpServerManager {
-    cancellation_token: RwLock<Option<CancellationToken>>,
+    running: RwLock<Option<RunningMcpServer>>,
 }
 
 impl McpServerManager {
     pub fn new() -> Self {
         Self {
-            cancellation_token: RwLock::new(None),
+            running: RwLock::new(None),
         }
     }
 
     pub async fn start(&self, rabbitmq_url: &str, port: u16) -> Result<()> {
         //
-        // Stop existing server if running.
+        // If a server is already running on the requested port there is
+        // nothing to do. A single settings save writes one config key at a
+        // time, so the config-change handler can fire several start() calls
+        // in a burst; without this guard each one would tear the listener
+        // down and rebind, racing the OS socket release and failing the
+        // rebind with "address already in use" — leaving no server running.
+        //
+
+        if let Some(r) = self.running.read().await.as_ref() {
+            if r.port == port {
+                return Ok(());
+            }
+        }
+
+        //
+        // Stop any server on a different port. stop() now waits for the old
+        // listener to fully release the socket before we rebind below.
         //
 
         self.stop().await;
@@ -931,13 +953,17 @@ impl McpServerManager {
         let router = axum::Router::new().nest_service("/mcp", service);
         let listener = tokio::net::TcpListener::bind(bind_addr).await?;
         let shutdown_ct = ct.clone();
-        tokio::spawn(async move {
+        let serve_task = tokio::spawn(async move {
             let _ = axum::serve(listener, router)
                 .with_graceful_shutdown(async move { shutdown_ct.cancelled_owned().await })
                 .await;
         });
 
-        *self.cancellation_token.write().await = Some(ct);
+        *self.running.write().await = Some(RunningMcpServer {
+            port,
+            cancel: ct,
+            serve_task,
+        });
 
         common::log_info!(
             "MCP streamable-http server started on port {} (endpoint /mcp)",
@@ -947,10 +973,38 @@ impl McpServerManager {
     }
 
     pub async fn stop(&self) {
-        let mut guard = self.cancellation_token.write().await;
-        if let Some(ct) = guard.take() {
-            common::log_info!("Stopping MCP SSE server");
-            ct.cancel();
+        //
+        // Take the handle out of the lock before awaiting so a concurrent
+        // start() can't deadlock waiting on the write lock we'd otherwise
+        // hold across the await.
+        //
+
+        let running = self.running.write().await.take();
+        let Some(running) = running else {
+            return;
+        };
+
+        common::log_info!("Stopping MCP streamable-http server");
+        running.cancel.cancel();
+
+        //
+        // Wait for the serve task to actually exit so the listening socket is
+        // released before any subsequent bind. The graceful-shutdown future
+        // fires on cancel but hyper still drains in-flight connections, and
+        // the orchestrator holds a long-lived MCP session that will not close
+        // on its own — so bound the wait and abort the task (which drops the
+        // listener and frees the port) if it overruns.
+        //
+
+        let abort = running.serve_task.abort_handle();
+        if tokio::time::timeout(Duration::from_secs(5), running.serve_task)
+            .await
+            .is_err()
+        {
+            common::log_warn!(
+                "MCP server did not shut down within 5s; aborting serve task to free the port"
+            );
+            abort.abort();
         }
     }
 }

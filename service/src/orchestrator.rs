@@ -8,6 +8,7 @@ use tokio::sync::{RwLock, mpsc};
 
 use futures_util::StreamExt;
 
+use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
 use common::ai::{
     ChatCompletionRequest, Message, Provider, Tool, Usage, create_ai_client,
     get_system_prompt_with_tools, parse_manual_tool_call,
@@ -77,6 +78,14 @@ impl OrchestratorManager {
     // client is resuming from local storage.
     //
 
+    //
+    // Returns Ok(()) once the session is fully live (MCP connected, tools
+    // loaded, task spawned). On any setup failure it returns Err with a
+    // user-facing message and registers no session, so the caller can report
+    // the real reason on the session/new response instead of leaving a dead
+    // session that fails later prompts with an opaque error.
+    //
+
     pub async fn create_session(
         &self,
         client_id: &str,
@@ -85,20 +94,11 @@ impl OrchestratorManager {
         history: Vec<(String, String)>,
         service_config: &Arc<RwLock<ServiceConfig>>,
         publish_channel: &Channel,
-    ) {
+    ) -> Result<(), String> {
         let config = service_config.read().await;
 
         if !config.is_mcp_server_enabled() {
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_error_response(
-                    Value::Null,
-                    -32000,
-                    "MCP server is not enabled. Go to Settings > MCP Server to enable it before using the Orchestrator.",
-                ),
-            ).await;
-            return;
+            return Err("MCP server is not enabled. Go to Settings > MCP Server to enable it before using the Orchestrator.".to_string());
         }
 
         let mcp_port = config.get_mcp_server_port();
@@ -109,16 +109,7 @@ impl OrchestratorManager {
         {
             Some(def) => def,
             None => {
-                let _ = send_to_client(
-                    publish_channel,
-                    client_id,
-                    acp_error_response(
-                        Value::Null,
-                        -32000,
-                        "No model selected for Orchestrator. Go to Settings > LLM Providers > Feature Selection to configure.",
-                    ),
-                ).await;
-                return;
+                return Err("No model selected for Orchestrator. Go to Settings > LLM Providers > Feature Selection to configure.".to_string());
             }
         };
 
@@ -127,16 +118,7 @@ impl OrchestratorManager {
             .unwrap_or(true);
 
         if model_def.api_key.is_empty() && provider_needs_key {
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_error_response(
-                    Value::Null,
-                    -32000,
-                    "No API key configured for the selected model. Go to Settings > LLM Providers to configure.",
-                ),
-            ).await;
-            return;
+            return Err("No API key configured for the selected model. Go to Settings > LLM Providers to configure.".to_string());
         }
 
         let max_tokens: u32 = config
@@ -157,23 +139,110 @@ impl OrchestratorManager {
         ) {
             Ok(c) => c,
             Err(e) => {
-                let _ = send_to_client(
-                    publish_channel,
-                    client_id,
-                    acp_error_response(
-                        Value::Null,
-                        -32000,
-                        &format!("Failed to create AI client: {}", e),
-                    ),
-                )
-                .await;
-                return;
+                return Err(format!("Failed to create AI client: {}", e));
             }
         };
 
+        let model = model_def.model.clone();
+        let session_id_owned = session_id.to_string();
+
         //
-        // If this client already has a session, stop it before installing
-        // the new one. One session per client.
+        // Connect to the MCP server and load its tools up front, before the
+        // session is registered. Doing this synchronously means a failure
+        // (server not listening, backend unreachable) is reported straight
+        // back on session/new with a real message, instead of being
+        // discovered later by the detached task — which used to leave a
+        // registered-but-dead session that failed every prompt with the
+        // opaque "channel closed". Bounded by a timeout so a hung server
+        // can't stall session creation indefinitely.
+        //
+
+        let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
+        common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
+
+        let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
+
+        let mcp_service = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            ().serve(transport),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                common::log_error!("Failed to initialize MCP client: {}", e);
+                return Err(format!(
+                    "Could not connect to the MCP server at {mcp_url}. Make sure the MCP server is enabled and running (Settings > MCP Server). ({e})"
+                ));
+            }
+            Err(_) => {
+                common::log_error!("Timed out connecting to MCP server at {}", mcp_url);
+                return Err(format!(
+                    "Timed out connecting to the MCP server at {mcp_url}. Make sure the MCP server is enabled and running (Settings > MCP Server)."
+                ));
+            }
+        };
+
+        let peer = mcp_service.peer().clone();
+
+        let mcp_tools =
+            match tokio::time::timeout(std::time::Duration::from_secs(15), peer.list_all_tools())
+                .await
+            {
+                Ok(Ok(t)) => t,
+                Ok(Err(e)) => {
+                    common::log_error!("Failed to list MCP tools: {}", e);
+                    return Err(format!(
+                        "Connected to the MCP server but failed to load its tools: {e}"
+                    ));
+                }
+                Err(_) => {
+                    common::log_error!("Timed out listing MCP tools");
+                    return Err(
+                        "Connected to the MCP server but timed out loading its tools.".to_string(),
+                    );
+                }
+            };
+
+        common::log_info!(
+            "Orchestrator fetched {} tools from MCP server",
+            mcp_tools.len()
+        );
+
+        let mut tools = convert_mcp_tools(mcp_tools);
+        tools.extend(get_local_tool_definitions());
+
+        let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
+
+        common::log_info!(
+            "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
+            common::short_id(client_id),
+            common::short_id(&session_id_owned),
+            provider,
+            model,
+            max_tokens,
+            tools.len(),
+            history.len()
+        );
+
+        //
+        // Build the initial conversation: system prompt + any resumed turns.
+        //
+
+        let mut conversation_history: Vec<Message> = Vec::new();
+        conversation_history.push(Message::system(&system_prompt));
+        for (role, text) in history {
+            match role.as_str() {
+                "user" => conversation_history.push(Message::user(&text)),
+                "assistant" => conversation_history.push(Message::assistant(&text)),
+                _ => {}
+            }
+        }
+
+        //
+        // MCP setup succeeded — now replace any prior session for this client
+        // (one session per client). Done after setup so a failed create never
+        // tears down a still-working session.
         //
 
         {
@@ -182,9 +251,6 @@ impl OrchestratorManager {
                 prev.stop();
             }
         }
-
-        let model = model_def.model.clone();
-        let session_id_owned = session_id.to_string();
 
         let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, String)>(32);
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -198,82 +264,15 @@ impl OrchestratorManager {
 
         //
         // The session task is detached: dropping a JoinHandle does not abort
-        // the task; it exits via the stop flag / prompt channel closing.
+        // the task; it exits via the stop flag / prompt channel closing. It
+        // owns the connected MCP service (keeping the connection alive) and
+        // the seeded conversation history.
         //
         tokio::spawn(async move {
             macro_rules! send_msg {
                 ($msg:expr) => {{
                     let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
                 }};
-            }
-
-            let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
-            common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
-
-            let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
-
-            let mcp_service = match ().serve(transport).await {
-                Ok(s) => s,
-                Err(e) => {
-                    common::log_error!("Failed to initialize MCP client: {}", e);
-                    send_msg!(acp_error_response(
-                        Value::Null,
-                        -32000,
-                        &format!("Failed to initialize MCP client: {}", e),
-                    ));
-                    return;
-                }
-            };
-
-            let peer = mcp_service.peer().clone();
-
-            let mcp_tools = match peer.list_all_tools().await {
-                Ok(t) => t,
-                Err(e) => {
-                    common::log_error!("Failed to list MCP tools: {}", e);
-                    send_msg!(acp_error_response(
-                        Value::Null,
-                        -32000,
-                        &format!("Failed to list MCP tools: {}", e),
-                    ));
-                    return;
-                }
-            };
-
-            common::log_info!(
-                "Orchestrator fetched {} tools from MCP server",
-                mcp_tools.len()
-            );
-
-            let mut tools = convert_mcp_tools(mcp_tools);
-            tools.extend(get_local_tool_definitions());
-
-            let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
-
-            common::log_info!(
-                "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
-                common::short_id(&client_id_owned),
-                common::short_id(&sid),
-                provider,
-                model,
-                max_tokens,
-                tools.len(),
-                history.len()
-            );
-
-            let mut conversation_history: Vec<Message> = Vec::new();
-            conversation_history.push(Message::system(&system_prompt));
-
-            //
-            // Seed with client-supplied history (resume).
-            //
-
-            for (role, text) in history {
-                match role.as_str() {
-                    "user" => conversation_history.push(Message::user(&text)),
-                    "assistant" => conversation_history.push(Message::assistant(&text)),
-                    _ => {}
-                }
             }
 
             while let Some((prompt_id, prompt)) = prompt_rx.recv().await {
@@ -542,6 +541,8 @@ impl OrchestratorManager {
             let mut sessions = self.sessions.write().await;
             sessions.insert(client_id.to_string(), session);
         }
+
+        Ok(())
     }
 
     pub async fn send_prompt(
@@ -557,14 +558,20 @@ impl OrchestratorManager {
             Some(session) if session.session_id == session_id => {
                 *session.current_prompt_id.write().await = prompt_id.clone();
                 if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
+                    //
+                    // The session is registered but its task has exited, so
+                    // the channel is closed. Treat it as a lost session
+                    // (ERR_ORCHESTRATOR_SESSION_NOT_FOUND) so the client recreates rather
+                    // than surfacing an opaque "channel closed".
+                    //
                     common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
                     let _ = send_to_client(
                         publish_channel,
                         client_id,
                         acp_error_response(
                             prompt_id_to_json_rpc_id(&prompt_id),
-                            -32000,
-                            &format!("Failed to send prompt: {}", e),
+                            ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
+                            "Orchestrator session is no longer active.",
                         ),
                     )
                     .await;
@@ -576,7 +583,7 @@ impl OrchestratorManager {
                     client_id,
                     acp_error_response(
                         prompt_id_to_json_rpc_id(&prompt_id),
-                        -32000,
+                        ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
                         "No active Orchestrator session for this client.",
                     ),
                 )
