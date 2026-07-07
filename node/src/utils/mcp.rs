@@ -45,6 +45,7 @@ pub async fn fetch_mcp_server_tools(server: &McpServer) -> Vec<AgentTool> {
 
     let mut cmd = TokioCommand::new(program);
     cmd.args(args);
+    crate::utils::silence_tokio_command(&mut cmd);
 
     //
     // Set working directory to the server's context path if available.

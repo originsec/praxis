@@ -629,6 +629,7 @@ fn spawn_child(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true);
+    crate::utils::silence_tokio_command(&mut cmd);
 
     if !cwd.is_empty() {
         cmd.current_dir(cwd);

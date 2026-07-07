@@ -21,6 +21,22 @@ pub fn silent_command(program: &str) -> Command {
 }
 
 //
+// Apply the "no console window" creation flag to a tokio Command. Used for
+// stdio child processes we spawn asynchronously (MCP servers, ACP agents),
+// which would otherwise flash a terminal window on Windows. No-op on other
+// platforms.
+//
+
+#[cfg(windows)]
+pub fn silence_tokio_command(cmd: &mut tokio::process::Command) {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub fn silence_tokio_command(_cmd: &mut tokio::process::Command) {}
+
+//
 // Find all instances of an executable in PATH using which (Unix) or where
 // (Windows). Returns a Vec of all paths found.
 // Useful when 'where' on Windows returns multiple results.
