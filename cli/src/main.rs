@@ -276,8 +276,12 @@ fn select_session_interactive() -> Result<Option<session_store::StoredSession>> 
 }
 
 async fn run_status(rabbitmq_url: &str, timeout: u64) -> Result<()> {
-    let mut cli_state = state::CliState::load()?;
-    let client_id = cli_state.get_or_create_client_id()?;
+    //
+    // Ephemeral client id so --status never joins the TUI's RabbitMQ
+    // consumer group (shared ids load-balance ACP responses and hang
+    // session creation).
+    //
+    let client_id = ephemeral_client_id("status");
     let short_id = output::format_short_id(&client_id);
 
     let client = client::Client::connect(rabbitmq_url, timeout, client_id).await?;
@@ -298,12 +302,22 @@ async fn run_command_string(rabbitmq_url: &str, timeout: u64, command_string: &s
 }
 
 async fn run_command(rabbitmq_url: &str, timeout: u64, command: Commands) -> Result<()> {
-    let mut cli_state = state::CliState::load()?;
-    let client_id = cli_state.get_or_create_client_id()?;
+    //
+    // Non-interactive commands use a one-shot client id. Reusing the
+    // persistent TUI id attaches a second consumer to Client_<id>, and
+    // RabbitMQ round-robins replies — session/new responses land on the
+    // wrong process and the other side sits on "connecting…".
+    //
+    let client_id = ephemeral_client_id("cmd");
     let client = client::Client::connect(rabbitmq_url, timeout, client_id).await?;
     let result = command.execute(&client).await;
     client.disconnect().await;
     result
+}
+
+fn ephemeral_client_id(prefix: &str) -> String {
+    let uid = uuid::Uuid::new_v4().to_string();
+    format!("cli_{}_{}", prefix, &uid[..8])
 }
 
 async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {

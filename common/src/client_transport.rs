@@ -26,9 +26,10 @@ pub struct ClientTransport {
 }
 
 impl ClientTransport {
-    /// Connect to RabbitMQ and set up the client's queues: declare and purge
-    /// the client-specific direct queue, declare the broadcast fanout
-    /// exchange, and bind a private auto-delete queue to it.
+    /// Connect to RabbitMQ and set up the client's queues: declare the
+    /// client-specific direct queue (purging only when no other consumer
+    /// is attached), declare the broadcast fanout exchange, and bind a
+    /// private auto-delete queue to it.
     pub async fn connect(url: &str, client_id: &str) -> Result<Self> {
         let connection = Connection::connect(url, ConnectionProperties::default())
             .await
@@ -41,7 +42,7 @@ impl ClientTransport {
 
         let client_queue = client_queue_name(client_id);
 
-        channel
+        let declared = channel
             .queue_declare(
                 client_queue.as_str().into(),
                 QueueDeclareOptions::default(),
@@ -49,9 +50,22 @@ impl ClientTransport {
             )
             .await?;
 
-        channel
-            .queue_purge(client_queue.as_str().into(), QueuePurgeOptions::default())
-            .await?;
+        //
+        // Only purge when we are the sole/intended owner. Purging while
+        // another process already consumes this queue drops in-flight
+        // ACP replies (session/new, etc.) out from under that process.
+        //
+        if declared.consumer_count() == 0 {
+            channel
+                .queue_purge(client_queue.as_str().into(), QueuePurgeOptions::default())
+                .await?;
+        } else {
+            tracing::warn!(
+                "Client queue {} already has {} consumer(s); skipping purge to avoid dropping their replies",
+                client_queue,
+                declared.consumer_count()
+            );
+        }
 
         channel
             .exchange_declare(
@@ -98,12 +112,16 @@ impl ClientTransport {
     /// Spawn the consumer loop over the direct and broadcast queues. Each
     /// delivery's payload is passed to the matching handler and acked.
     /// `label` namespaces the consumer tags (e.g. "tui", "mcp").
-    pub fn start_consuming<D, DFut, B, BFut>(
+    ///
+    /// The direct-queue consumer is exclusive so a second process cannot
+    /// silently share the queue and steal ACP responses. Fails the connect
+    /// path if another consumer already owns the queue.
+    pub async fn start_consuming<D, DFut, B, BFut>(
         &self,
         label: &str,
         on_direct: D,
         on_broadcast: B,
-    ) -> tokio::task::JoinHandle<()>
+    ) -> Result<tokio::task::JoinHandle<()>>
     where
         D: Fn(Vec<u8>) -> DFut + Send + 'static,
         DFut: Future<Output = ()> + Send,
@@ -115,41 +133,38 @@ impl ClientTransport {
         let broadcast_queue = self.broadcast_queue.clone();
         let label = label.to_string();
 
-        tokio::spawn(async move {
-            let direct_tag = format!("{}_direct_{}", label, uuid::Uuid::new_v4());
-            let mut direct_consumer = match channel
-                .basic_consume(
-                    client_queue.as_str().into(),
-                    direct_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
+        let direct_tag = format!("{}_direct_{}", label, uuid::Uuid::new_v4());
+        let mut direct_consumer = channel
+            .basic_consume(
+                client_queue.as_str().into(),
+                direct_tag.as_str().into(),
+                BasicConsumeOptions {
+                    exclusive: true,
+                    ..BasicConsumeOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to create exclusive consumer on {} (another process may already be using this client id): {}",
+                    client_queue,
+                    e
                 )
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("Failed to create direct consumer: {}", e);
-                    return;
-                }
-            };
+            })?;
 
-            let broadcast_tag = format!("{}_broadcast_{}", label, uuid::Uuid::new_v4());
-            let mut broadcast_consumer = match channel
-                .basic_consume(
-                    broadcast_queue.as_str().into(),
-                    broadcast_tag.as_str().into(),
-                    BasicConsumeOptions::default(),
-                    FieldTable::default(),
-                )
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("Failed to create broadcast consumer: {}", e);
-                    return;
-                }
-            };
+        let broadcast_tag = format!("{}_broadcast_{}", label, uuid::Uuid::new_v4());
+        let mut broadcast_consumer = channel
+            .basic_consume(
+                broadcast_queue.as_str().into(),
+                broadcast_tag.as_str().into(),
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| anyhow!("Failed to create broadcast consumer: {}", e))?;
 
+        Ok(tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(delivery_result) = direct_consumer.next() => {
@@ -166,6 +181,6 @@ impl ClientTransport {
                     }
                 }
             }
-        })
+        }))
     }
 }

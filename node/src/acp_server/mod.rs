@@ -318,10 +318,21 @@ impl NodeAcpServer {
             truncate_id(client_id),
             common::truncate_str(&json_rpc, 400),
         );
-        let _ = self.outbound.try_send(OutboundFrame {
+        if let Err(e) = self.outbound.try_send(OutboundFrame {
             client_id: client_id.to_string(),
             json_rpc,
-        });
+        }) {
+            //
+            // try_send fails when the forwarder is dead (closed) or the
+            // 1024-slot buffer is full. Either way the client never sees
+            // the response and sits on "connecting…" — surface it.
+            //
+            tracing::error!(
+                "ACP[node] dropped outbound frame to {}: {}",
+                truncate_id(client_id),
+                e
+            );
+        }
     }
 }
 

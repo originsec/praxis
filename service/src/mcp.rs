@@ -72,17 +72,19 @@ impl ServiceMcpClient {
 
         let direct_state = Arc::clone(&state);
         let broadcast_state = Arc::clone(&state);
-        transport.start_consuming(
-            "mcp",
-            move |data| {
-                let state = Arc::clone(&direct_state);
-                async move { Self::handle_direct_message(&state, &data).await }
-            },
-            move |data| {
-                let state = Arc::clone(&broadcast_state);
-                async move { Self::handle_broadcast_message(&state, &data).await }
-            },
-        );
+        transport
+            .start_consuming(
+                "mcp",
+                move |data| {
+                    let state = Arc::clone(&direct_state);
+                    async move { Self::handle_direct_message(&state, &data).await }
+                },
+                move |data| {
+                    let state = Arc::clone(&broadcast_state);
+                    async move { Self::handle_broadcast_message(&state, &data).await }
+                },
+            )
+            .await?;
 
         let client = Self {
             channel: transport.channel().clone(),
