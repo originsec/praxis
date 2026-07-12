@@ -1,6 +1,5 @@
 //
-// Rule form overlay. Same opencode-style header + bar block style as
-// other forms.
+// Rule form overlay. Split-view on Rules tab; full overlay elsewhere.
 //
 
 use common::TargetDirection;
@@ -10,6 +9,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
+use crate::app::App;
 use crate::app::intercept::{FormMode, RuleForm, RuleFormField};
 use crate::ui::chrome;
 use crate::ui::theme::{
@@ -17,12 +17,12 @@ use crate::ui::theme::{
     TEXT_BRIGHT,
 };
 
-pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
+pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
     let chunks = Layout::vertical([
-        Constraint::Length(1), // title
-        Constraint::Length(1), // divider
-        Constraint::Min(1),    // fields
-        Constraint::Length(1), // hints
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
     ])
     .split(area);
 
@@ -62,6 +62,40 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
             lines.push(Line::from(""));
         }
         render_field(&mut lines, form, *field);
+    }
+
+    if form.focus == RuleFormField::Regex {
+        let samples = app.intercept.regex_test_samples(&form.regex, 5);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "RECENT MATCHES",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        )));
+        if samples.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (no matches in current traffic buffer)",
+                Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+            )));
+        } else {
+            for url in samples {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", url),
+                    Style::default().fg(MUTED),
+                )));
+            }
+        }
+    }
+
+    if matches!(
+        form.focus,
+        RuleFormField::ScopeNode | RuleFormField::ScopeAgent
+    ) {
+        lines.push(Line::from(Span::styled(
+            "  (\u{2190}\u{2192}/space) cycle known values",
+            Style::default().fg(DIM),
+        )));
     }
 
     if let Some(ref err) = form.last_error {

@@ -6,7 +6,7 @@ use common::{
     ClientRegistration, ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
     InterceptedTrafficEntry, LuaAgentScriptInfo, OperationDefinitionInfo, RuleScope,
     SemanticOpUpdate, SystemState, TargetDirection, TargetSpec, TerminalOutput, TrafficLogFilters,
-    TrafficMatchWithDetails, TriggerConfig,
+    TrafficMatchWithDetails, TrafficSearchFilters, TriggerConfig,
     mcp::{build_notification_frame, build_request_frame},
     publish_json, publish_terminal_command,
 };
@@ -89,6 +89,7 @@ struct ClientState {
     // a time; a newer request overwrites the older sender.
     //
     pending_traffic_log: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
+    pending_traffic_search: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
     pending_traffic_matches: Option<oneshot::Sender<(Vec<TrafficMatchWithDetails>, usize)>>,
     pending_traffic_clear: Option<oneshot::Sender<usize>>,
     pending_rules_list: Option<oneshot::Sender<Vec<InterceptRule>>>,
@@ -340,6 +341,14 @@ impl Client {
                 total_count,
             } => {
                 if let Some(tx) = state.pending_traffic_log.take() {
+                    let _ = tx.send((entries, total_count));
+                }
+            }
+            ClientDirectMessage::TrafficSearchResponse {
+                entries,
+                total_count,
+            } => {
+                if let Some(tx) = state.pending_traffic_search.take() {
                     let _ = tx.send((entries, total_count));
                 }
             }
@@ -1350,6 +1359,18 @@ impl Client {
             filters,
         };
         self.request("traffic log", |s| &mut s.pending_traffic_log, message)
+            .await
+    }
+
+    pub async fn request_traffic_search(
+        &self,
+        filters: TrafficSearchFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+        let message = ClientSignalMessage::TrafficSearchRequest {
+            client_id: self.client_id.clone(),
+            filters,
+        };
+        self.request("traffic search", |s| &mut s.pending_traffic_search, message)
             .await
     }
 

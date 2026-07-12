@@ -1,7 +1,7 @@
 //
 // Body rendering: produces Vec<Line<'static>> suitable for a ratatui
 // Paragraph. Pretty-prints JSON with light colouring, falling back to
-// plain text.
+// plain text or hex dump.
 //
 
 use ratatui::style::{Modifier, Style};
@@ -12,6 +12,26 @@ use crate::ui::theme::{DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTE
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyMode {
     Pretty,
+    Raw,
+    Hex,
+}
+
+impl BodyMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Pretty => Self::Raw,
+            Self::Raw => Self::Hex,
+            Self::Hex => Self::Pretty,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pretty => "pretty",
+            Self::Raw => "raw",
+            Self::Hex => "hex",
+        }
+    }
 }
 
 pub fn render_body(bytes: &[u8], mode: BodyMode) -> Vec<Line<'static>> {
@@ -24,6 +44,8 @@ pub fn render_body(bytes: &[u8], mode: BodyMode) -> Vec<Line<'static>> {
 
     match mode {
         BodyMode::Pretty => render_pretty(bytes),
+        BodyMode::Raw => render_raw(bytes),
+        BodyMode::Hex => render_hex(bytes),
     }
 }
 
@@ -38,13 +60,47 @@ fn render_pretty(bytes: &[u8]) -> Vec<Line<'static>> {
         return pretty.lines().map(highlight_json_line).collect();
     }
 
-    //
-    // Not JSON — fall through to a plain-text render so the user still
-    // sees something useful.
-    //
     text.lines()
         .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(TEXT))))
         .collect()
+}
+
+fn render_raw(bytes: &[u8]) -> Vec<Line<'static>> {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s
+            .lines()
+            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(TEXT))))
+            .collect(),
+        Err(_) => render_binary_summary(bytes.len()),
+    }
+}
+
+fn render_hex(bytes: &[u8]) -> Vec<Line<'static>> {
+    const WIDTH: usize = 16;
+    let mut lines = Vec::new();
+    for (offset, chunk) in bytes.chunks(WIDTH).enumerate() {
+        let hex: String = chunk
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ascii: String = chunk
+            .iter()
+            .map(|&b| {
+                if b.is_ascii_graphic() || b == b' ' {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
+            .collect();
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:08x}  ", offset * WIDTH), Style::default().fg(MUTED)),
+            Span::styled(format!("{:<48}", hex), Style::default().fg(TEXT)),
+            Span::styled(format!("  {}", ascii), Style::default().fg(DIM)),
+        ]));
+    }
+    lines
 }
 
 fn render_binary_summary(len: usize) -> Vec<Line<'static>> {
@@ -54,20 +110,11 @@ fn render_binary_summary(len: usize) -> Vec<Line<'static>> {
     ))]
 }
 
-//
-// Produce a single colorized line for a pretty-printed JSON string.
-// This is a minimal highlighter — it matches keys before the colon,
-// string values, numeric values, and punctuation.
-//
-
 fn highlight_json_line(line: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let bytes = line.as_bytes();
     let mut i = 0;
 
-    //
-    // Leading whitespace (indentation) preserved as plain text.
-    //
     while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
         i += 1;
     }
@@ -77,9 +124,6 @@ fn highlight_json_line(line: &str) -> Line<'static> {
 
     let rest = &line[i..];
 
-    //
-    // Key:value — detect if the line starts with "..." followed by :.
-    //
     let is_key_line = rest.starts_with('"')
         && rest[1..]
             .find('"')
@@ -90,16 +134,10 @@ fn highlight_json_line(line: &str) -> Line<'static> {
             .unwrap_or(false);
 
     if is_key_line {
-        //
-        // Key span.
-        //
         let close = rest[1..].find('"').unwrap();
         let key = &rest[..close + 2];
         spans.push(Span::styled(key.to_string(), Style::default().fg(JSON_KEY)));
         let after_key = &rest[close + 2..];
-        //
-        // Colon + separator.
-        //
         let colon_start = after_key.find(':').unwrap_or(0);
         spans.push(Span::styled(
             after_key[..colon_start].to_string(),

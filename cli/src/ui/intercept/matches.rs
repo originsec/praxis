@@ -4,7 +4,7 @@
 //
 
 use chrono::Local;
-use common::TrafficMatchWithDetails;
+use common::TrafficDirection;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -12,11 +12,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::app::App;
-use crate::app::intercept::InterceptState;
+use crate::app::intercept::{InterceptState, SummaryStatus};
 use crate::ui::chrome;
 use crate::ui::common::focused_titled_panel;
 use crate::ui::intercept::body_lines;
-use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_DONE, TEXT, TEXT_BRIGHT};
+use crate::ui::theme::{
+    ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_DONE, STATUS_FAIL, STATUS_RUNNING, TEXT,
+    TEXT_BRIGHT,
+};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
@@ -45,12 +48,22 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
     };
     let mut spans = vec![];
     spans.extend(chrome::pill_two_tone("rule", &label, ACCENT));
+    spans.push(Span::raw("  "));
+    spans.extend(chrome::pill_two_tone(
+        "loaded",
+        &format!(
+            "{}/{}",
+            app.intercept.matches.len(),
+            app.intercept.match_total
+        ),
+        MUTED,
+    ));
     spans.push(Span::raw("    "));
     spans.push(Span::styled("f", Style::default().fg(TEXT_BRIGHT)));
     spans.push(Span::styled(" cycle", Style::default().fg(MUTED)));
     spans.push(Span::raw("    "));
-    spans.push(Span::styled("esc", Style::default().fg(TEXT_BRIGHT)));
-    spans.push(Span::styled(" clear", Style::default().fg(MUTED)));
+    spans.push(Span::styled("o", Style::default().fg(TEXT_BRIGHT)));
+    spans.push(Span::styled(" traffic", Style::default().fg(MUTED)));
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -59,14 +72,18 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
     let header = Row::new(vec![
         Cell::from("Time"),
         Cell::from("Rule"),
+        Cell::from("Agent"),
+        Cell::from("Dir"),
         Cell::from("URL"),
         Cell::from("Sum"),
     ])
     .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
     let widths = [
-        Constraint::Length(12),
-        Constraint::Length(18),
-        Constraint::Min(20),
+        Constraint::Length(11),
+        Constraint::Length(14),
+        Constraint::Length(10),
+        Constraint::Length(4),
+        Constraint::Min(14),
         Constraint::Length(4),
     ];
 
@@ -80,16 +97,17 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
                 .with_timezone(&Local)
                 .format("%H:%M:%S%.3f")
                 .to_string();
-            let sum = if m.match_info.summary.is_some() {
-                Span::styled(
-                    "\u{2713}",
-                    Style::default()
-                        .fg(STATUS_DONE)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                Span::styled("\u{00b7}", Style::default().fg(DIM))
+            let sum = summary_glyph(app.intercept.summary_status(m));
+            let dir = match m.traffic.direction {
+                TrafficDirection::Send => "\u{2191}",
+                TrafficDirection::Receive => "\u{2193}",
             };
+            let preview = m
+                .match_info
+                .summary
+                .as_deref()
+                .map(|s| truncate_first_line(s, 24))
+                .unwrap_or_default();
             Row::new(vec![
                 Cell::from(Span::styled(ts, Style::default().fg(MUTED))),
                 Cell::from(Span::styled(
@@ -97,7 +115,16 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 )),
                 Cell::from(Span::styled(
-                    truncate(&m.traffic.url, 80),
+                    m.traffic.agent_short_name.clone(),
+                    Style::default().fg(TEXT_BRIGHT),
+                )),
+                Cell::from(Span::styled(dir.to_string(), Style::default().fg(DIM))),
+                Cell::from(Span::styled(
+                    if preview.is_empty() {
+                        truncate(&m.traffic.url, 40)
+                    } else {
+                        format!("{} — {}", truncate(&m.traffic.url, 28), preview)
+                    },
                     Style::default().fg(TEXT_BRIGHT),
                 )),
                 Cell::from(sum),
@@ -118,13 +145,41 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
 
     let mut state = TableState::default();
     if !filtered.is_empty() {
-        state.select(Some(app.intercept.match_selected.min(filtered.len() - 1)));
+        state.select(Some(
+            app.intercept.match_selected.min(filtered.len() - 1),
+        ));
     }
     f.render_stateful_widget(table, area, &mut state);
 }
 
+fn summary_glyph(status: SummaryStatus) -> Span<'static> {
+    match status {
+        SummaryStatus::Ready => Span::styled(
+            "\u{2713}",
+            Style::default()
+                .fg(STATUS_DONE)
+                .add_modifier(Modifier::BOLD),
+        ),
+        SummaryStatus::Pending => Span::styled(
+            "\u{25cb}",
+            Style::default().fg(STATUS_RUNNING),
+        ),
+        SummaryStatus::NotConfigured => Span::styled("\u{00b7}", Style::default().fg(DIM)),
+    }
+}
+
 fn render_detail(f: &mut Frame, area: Rect, app: &App) {
-    let block = focused_titled_panel(" Match detail ", app.intercept.match_detail_focus);
+    let filtered_len = app.intercept.filtered_matches_len();
+    let title = if filtered_len == 0 {
+        " Match detail ".to_string()
+    } else {
+        format!(
+            " Match {} / {} ",
+            app.intercept.match_selected + 1,
+            filtered_len
+        )
+    };
+    let block = focused_titled_panel(&title, app.intercept.match_detail_focus);
 
     let Some(m) = app
         .intercept
@@ -153,7 +208,7 @@ fn render_detail(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(para, area);
 }
 
-fn detail_lines(state: &InterceptState, m: &TrafficMatchWithDetails) -> Vec<Line<'static>> {
+fn detail_lines(state: &InterceptState, m: &common::TrafficMatchWithDetails) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     out.push(Line::from(vec![
         Span::styled("rule: ", Style::default().fg(MUTED)),
@@ -166,55 +221,105 @@ fn detail_lines(state: &InterceptState, m: &TrafficMatchWithDetails) -> Vec<Line
         Span::styled("url:  ", Style::default().fg(MUTED)),
         Span::styled(m.traffic.url.clone(), Style::default().fg(TEXT_BRIGHT)),
     ]));
+    out.push(Line::from(vec![
+        Span::styled("agent:", Style::default().fg(MUTED)),
+        Span::styled(
+            format!(" {} ", m.traffic.agent_short_name),
+            Style::default().fg(TEXT_BRIGHT),
+        ),
+        Span::styled("dir:", Style::default().fg(MUTED)),
+        Span::styled(
+            format!(" {:?} ", m.traffic.direction).to_lowercase(),
+            Style::default().fg(DIM),
+        ),
+    ]));
     if let Some(s) = m.traffic.response_status {
         out.push(Line::from(vec![
             Span::styled("stat: ", Style::default().fg(MUTED)),
             Span::styled(s.to_string(), Style::default().fg(TEXT_BRIGHT)),
         ]));
     }
+    out.push(Line::from(Span::styled(
+        "  (o) open in Traffic tab",
+        Style::default().fg(DIM),
+    )));
     out.push(Line::raw(""));
 
-    if let Some(ref summary) = m.match_info.summary {
-        out.push(Line::from(Span::styled(
-            "AI SUMMARY",
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        )));
-        for line in summary.lines() {
-            out.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(TEXT),
-            )));
+    match state.summary_status(m) {
+        SummaryStatus::Ready => {
+            if let Some(ref summary) = m.match_info.summary {
+                out.push(Line::from(Span::styled(
+                    "AI SUMMARY",
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                for line in summary.lines() {
+                    out.push(Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(TEXT),
+                    )));
+                }
+                out.push(Line::raw(""));
+            }
         }
-        out.push(Line::raw(""));
-    } else {
-        out.push(Line::from(Span::styled(
-            "(summary pending or not requested)",
-            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-        )));
-        out.push(Line::raw(""));
+        SummaryStatus::Pending => {
+            out.push(Line::from(Span::styled(
+                "AI SUMMARY (generating…)",
+                Style::default().fg(STATUS_RUNNING),
+            )));
+            out.push(Line::raw(""));
+        }
+        SummaryStatus::NotConfigured => {
+            out.push(Line::from(Span::styled(
+                "(no summarization configured for this rule)",
+                Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+            )));
+            out.push(Line::raw(""));
+        }
     }
 
     if let Some(body) = state.request_body_for(&m.traffic) {
         out.push(Line::from(Span::styled(
-            format!("REQUEST BODY ({} bytes)", body.len()),
+            format!(
+                "REQUEST BODY ({} bytes, {})",
+                body.len(),
+                state.body_mode.label()
+            ),
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
         )));
         out.extend(body_lines(body, state.body_mode));
         out.push(Line::raw(""));
+    } else if m.traffic.id.is_some() && state.body_needs_fetch(&m.traffic) {
+        out.push(Line::from(Span::styled(
+            "REQUEST BODY (fetching…)",
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
+        )));
+        out.push(Line::raw(""));
     }
+
     if let Some(body) = state.response_body_for(&m.traffic) {
         out.push(Line::from(Span::styled(
-            format!("RESPONSE BODY ({} bytes)", body.len()),
+            format!(
+                "RESPONSE BODY ({} bytes, {})",
+                body.len(),
+                state.body_mode.label()
+            ),
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
         )));
         out.extend(body_lines(body, state.body_mode));
+    } else if m.traffic.id.is_some() && state.body_needs_fetch(&m.traffic) {
+        out.push(Line::from(Span::styled(
+            "RESPONSE BODY (fetching…)",
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
+        )));
     }
+    let _ = STATUS_FAIL;
+    let _ = OK;
     out
 }
 
@@ -227,6 +332,10 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
+fn truncate_first_line(s: &str, max: usize) -> String {
+    truncate(s.lines().next().unwrap_or(s), max)
+}
+
 pub fn hints(_app: &App) -> Line<'static> {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
@@ -234,14 +343,19 @@ pub fn hints(_app: &App) -> Line<'static> {
         Span::styled("f", key),
         Span::styled(" cycle rule", label),
         Span::raw("    "),
+        Span::styled("o", key),
+        Span::styled(" open traffic", label),
+        Span::raw("    "),
+        Span::styled("^n", key),
+        Span::styled(" new rule", label),
+        Span::raw("    "),
+        Span::styled("b", key),
+        Span::styled(" body", label),
+        Span::raw("    "),
         Span::styled("r", key),
         Span::styled(" refresh", label),
         Span::raw("    "),
-        Span::styled("\u{21B5}", key),
-        Span::styled(" expand", label),
+        Span::styled("y", key),
+        Span::styled(" copy", label),
     ])
-}
-
-fn _unused() {
-    let _ = OK;
 }
