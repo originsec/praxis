@@ -112,27 +112,6 @@ pub fn rules_list_area(body: Rect, split_form: bool) -> Rect {
     }
 }
 
-/// First data row in a `titled_panel` / `focused_titled_panel` table (title + header).
-pub fn table_data_start(table_area: Rect) -> u16 {
-    table_area.y.saturating_add(2)
-}
-
-pub fn table_row_at(table_area: Rect, mouse_row: u16) -> Option<usize> {
-    let start = table_data_start(table_area);
-    if mouse_row >= start && mouse_row < table_area.y.saturating_add(table_area.height) {
-        Some((mouse_row - start) as usize)
-    } else {
-        None
-    }
-}
-
-pub fn point_in(rect: Rect, col: u16, row: u16) -> bool {
-    col >= rect.x
-        && col < rect.x.saturating_add(rect.width)
-        && row >= rect.y
-        && row < rect.y.saturating_add(rect.height)
-}
-
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let banner = show_banner(app);
 

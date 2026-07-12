@@ -13,6 +13,26 @@ use ratatui::widgets::Paragraph;
 
 pub use executions::execution_detail_section_at_row;
 
+pub fn tab_at_column(rel_col: u16, exec_count: usize, lib_count: usize, trig_count: usize) -> Option<OpsTab> {
+    let specs = [
+        (OpsTab::Executions, "Executions", exec_count),
+        (OpsTab::Library, "Library", lib_count),
+        (OpsTab::Triggers, "Triggers", trig_count),
+    ];
+    let mut x = 0u16;
+    for (i, (tab, label, n)) in specs.iter().enumerate() {
+        let w = chrome::tab_width(label, Some(*n));
+        if rel_col >= x && rel_col < x + w {
+            return Some(*tab);
+        }
+        x += w;
+        if i + 1 < specs.len() {
+            x += chrome::tab_sep_width();
+        }
+    }
+    None
+}
+
 pub(super) const CHAIN_COLOR: Color = Color::Rgb(95, 195, 195);
 pub(super) const OP_COLOR: Color = Color::Rgb(180, 130, 215);
 

@@ -32,6 +32,65 @@ const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
 const SYSTEM_BAR: Color = SECONDARY;
 
+pub struct OrchChrome {
+    pub tabs: Rect,
+    pub meta: Rect,
+    pub input: Rect,
+}
+
+/// Layout below the window header — must match `render`.
+pub fn chrome_layout(area: Rect, state: &OrchestratorState) -> OrchChrome {
+    let show_tabs = state.sessions.len() > 1;
+    let no_sessions = state.sessions.is_empty();
+    let input_lines = if no_sessions {
+        1
+    } else {
+        input_content_rows(state)
+    };
+    let input_height = (input_lines + 2).max(3);
+    let chunks = Layout::vertical([
+        Constraint::Length(if show_tabs { 1 } else { 0 }),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(input_height),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+    OrchChrome {
+        tabs: chunks[0],
+        meta: chunks[5],
+        input: chunks[3],
+    }
+}
+
+pub fn tab_at_column(rel_col: u16, state: &OrchestratorState) -> Option<usize> {
+    let mut x = 0u16;
+    for (i, session) in state.sessions.iter().enumerate() {
+        if i > 0 {
+            x += chrome::tab_sep_width();
+        }
+        let mut w = 0u16;
+        if state.active_session_index == Some(i) {
+            w += 2; // "◆ "
+            let label = if session.is_streaming {
+                format!("{} {}", spinner_char(), session.label)
+            } else {
+                session.label.clone()
+            };
+            w += label.chars().count() as u16;
+        } else {
+            w += session.label.chars().count() as u16;
+        }
+        if rel_col >= x && rel_col < x + w {
+            return Some(i);
+        }
+        x += w;
+    }
+    None
+}
+
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let session = state.active_session();
     let show_tabs = state.sessions.len() > 1;

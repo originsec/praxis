@@ -20,7 +20,18 @@ use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
 use crate::ui::theme::{ACCENT, MUTED, STATUS_FAIL, TEXT_BRIGHT};
 
-const EDITOR_HEIGHT: u16 = 9;
+pub const EDITOR_HEIGHT: u16 = 9;
+
+/// Results table area — left pane when a row is expanded.
+pub fn results_table_area(results_area: ratatui::layout::Rect, row_expanded: bool, has_rows: bool) -> ratatui::layout::Rect {
+    use ratatui::layout::{Constraint, Layout};
+    if row_expanded && has_rows {
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(results_area)[0]
+    } else {
+        results_area
+    }
+}
 
 pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     let show_error = state.last_error.is_some();

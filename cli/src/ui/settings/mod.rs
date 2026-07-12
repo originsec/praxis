@@ -18,6 +18,36 @@ use ratatui::widgets::Paragraph;
 
 pub(super) const EDIT_FG: Color = Color::Rgb(225, 228, 232);
 
+pub fn tab_at_column(rel_col: u16) -> Option<SettingsTab> {
+    let specs = [
+        (SettingsTab::Llm, "LLM"),
+        (SettingsTab::Agents, "Agents"),
+        (SettingsTab::Intercept, "Intercept"),
+        (SettingsTab::Service, "Service"),
+        (SettingsTab::About, "About"),
+    ];
+    let mut x = 0u16;
+    for (i, (tab, label)) in specs.iter().enumerate() {
+        let w = chrome::tab_width(label, None);
+        if rel_col >= x && rel_col < x + w {
+            return Some(*tab);
+        }
+        x += w;
+        if i + 1 < specs.len() {
+            x += chrome::tab_sep_width();
+        }
+    }
+    None
+}
+
+pub fn content_area(body: Rect) -> Rect {
+    Rect {
+        x: body.x + 2,
+        width: body.width.saturating_sub(4),
+        ..body
+    }
+}
+
 pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs

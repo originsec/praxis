@@ -1146,33 +1146,18 @@ impl App {
             ])
             .split(content_area);
             let tabs_area = settings_chunks[0];
-            let settings_content = settings_chunks[2];
 
-            //
-            // Tab clicks. Match the rendered tab positions:
-            // "  LLM  |  Agents  |  Intercept  |  Service  |  About "
-            //
             if mouse.row == tabs_area.y {
-                let rel = mouse.column.saturating_sub(tabs_area.x) as usize;
-                //
-                // Positions from render_tabs spans:
-                // "  " (2) + " LLM " (5) + "  \u{2502}  " (5) + " Agents " (8)
-                //   + "  \u{2502}  " (5) + " Intercept " (11) + "  \u{2502}  " (5)
-                //   + " Service " (9) + "  \u{2502}  " (5) + " About " (7).
-                //
-                if rel >= 2 && rel < 7 {
-                    self.switch_settings_tab(SettingsTab::Llm).await;
-                } else if rel >= 12 && rel < 20 {
-                    self.switch_settings_tab(SettingsTab::Agents).await;
-                } else if rel >= 25 && rel < 36 {
-                    self.switch_settings_tab(SettingsTab::Intercept).await;
-                } else if rel >= 41 && rel < 50 {
-                    self.switch_settings_tab(SettingsTab::Service).await;
-                } else if rel >= 55 && rel < 62 {
-                    self.switch_settings_tab(SettingsTab::About).await;
+                let rel = mouse.column.saturating_sub(tabs_area.x);
+                if let Some(tab) = crate::ui::settings::tab_at_column(rel)
+                {
+                    self.switch_settings_tab(tab).await;
                 }
                 return;
             }
+
+            let settings_content =
+                crate::ui::settings::content_area(settings_chunks[2]);
 
             //
             // Content area clicks — select the clicked field/toggle.

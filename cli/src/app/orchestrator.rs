@@ -1124,109 +1124,55 @@ impl App {
         content_area: Rect,
     ) {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let active_session = self.orchestrator.active_session();
-            let show_tabs = self.orchestrator.sessions.len() > 1;
-            let plan_height = active_session
-                .and_then(|s| s.current_plan.as_ref())
-                .map(|plan| (plan.steps.len() as u16 + 2).min(12))
-                .unwrap_or(0);
-            let plan_spacer = if plan_height > 0 { 1 } else { 0 };
-            let is_streaming = active_session.map(|s| s.is_streaming).unwrap_or(false);
+            let chrome =
+                crate::ui::orchestrator::chrome_layout(content_area, &self.orchestrator);
+            let is_streaming = self
+                .orchestrator
+                .active_session()
+                .map(|s| s.is_streaming)
+                .unwrap_or(false);
 
-            let tab_height = if show_tabs { 1 } else { 0 };
-
-            let orch_chunks = Layout::vertical([
-                Constraint::Length(tab_height),
-                Constraint::Min(1),
-                Constraint::Length(plan_spacer),
-                Constraint::Length(plan_height),
-                Constraint::Length(1),
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
-            .split(content_area);
-
-            //
-            // Tab bar click — switch sessions.
-            //
-
-            if show_tabs && mouse.row == orch_chunks[0].y {
-                let col = mouse.column.saturating_sub(orch_chunks[0].x) as usize;
-                let mut x = 0usize;
-                for (i, session) in self.orchestrator.sessions.iter().enumerate() {
-                    let is_active = self.orchestrator.active_session_index == Some(i);
-                    let label_len = if session.is_streaming {
-                        session.label.len() + 4 // " ● Label "
-                    } else {
-                        session.label.len() + 2 // " Label "
-                    };
-                    let tab_width = if is_active { label_len + 2 } else { label_len }; // brackets
-                    let total_width = tab_width + 1; // trailing space
-                    if col >= x && col < x + total_width {
-                        self.orchestrator.active_session_index = Some(i);
-                        return;
-                    }
-                    x += total_width;
+            if self.orchestrator.sessions.len() > 1 && mouse.row == chrome.tabs.y {
+                let rel = mouse.column.saturating_sub(chrome.tabs.x);
+                if let Some(i) =
+                    crate::ui::orchestrator::tab_at_column(rel, &self.orchestrator)
+                {
+                    self.orchestrator.active_session_index = Some(i);
                 }
                 return;
             }
 
-            let model_area = orch_chunks[4];
-            let _tokens_area = orch_chunks[7];
-
-            //
-            // Model info line click — open model select.
-            //
-            if mouse.row == model_area.y {
-                let padded_x = model_area.x + 1;
-                let padded_w = model_area.width.saturating_sub(2);
-                let rel = mouse.column.saturating_sub(padded_x) as usize;
-
-                let (provider, model) = active_session
-                    .map(|s| (s.provider.as_deref(), s.model.as_deref()))
-                    .unwrap_or((None, None));
-                let model_text = match (provider, model) {
-                    (Some(p), Some(m)) => format!("{} / {}", p, m),
-                    _ => "No session".to_string(),
-                };
-                let full_line = format!("^e/^!e tools  ^w save   {} ", model_text);
-                let full_len = full_line.len();
-
-                let line_start = if (padded_w as usize) > full_len {
-                    padded_w as usize - full_len
-                } else {
-                    0
-                };
-
-                if rel >= line_start {
-                    let line_rel = rel - line_start;
-                    if line_rel < 14 {
+            if mouse.row == chrome.meta.y {
+                // Matches render_meta right column: "^e/^!e tools  ^!w save"
+                let right_width = 22u16;
+                let meta_chunks = Layout::horizontal([
+                    Constraint::Min(1),
+                    Constraint::Length(right_width),
+                ])
+                .split(chrome.meta);
+                let right = meta_chunks[1];
+                if crate::ui::common::point_in(meta_chunks[0], mouse.column, mouse.row) {
+                    self.open_model_select().await;
+                    return;
+                }
+                if crate::ui::common::point_in(right, mouse.column, mouse.row) {
+                    let rel = mouse.column.saturating_sub(right.x) as usize;
+                    if rel < 12 {
                         self.cycle_tools_display();
-                    } else if line_rel >= 16 && line_rel < 23 {
+                    } else if rel < 20 {
                         self.open_save_session();
-                    } else if line_rel >= 24 {
-                        self.open_model_select().await;
                     }
+                    return;
                 }
-                return;
             }
 
-            //
-            // Input area click — position cursor.
-            //
-            let input_area = orch_chunks[5];
-            if mouse.row >= input_area.y
-                && mouse.row < input_area.y.saturating_add(input_area.height)
-                && mouse.column >= input_area.x
-                && mouse.column < input_area.x.saturating_add(input_area.width)
-                && !is_streaming
+            if crate::ui::common::point_in(chrome.input, mouse.column, mouse.row) && !is_streaming
             {
-                let text_start = input_area.x + 3;
+                // Left border + padding + prompt "▸ "
+                let text_start = chrome.input.x.saturating_add(4);
                 let click_offset = mouse.column.saturating_sub(text_start) as usize;
                 let len = self.orchestrator.input.len();
                 self.orchestrator.cursor_pos = click_offset.min(len);
-                return;
             }
         }
     }

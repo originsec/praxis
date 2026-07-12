@@ -1040,7 +1040,7 @@ impl App {
                 // accurate.
                 //
                 if mouse.row == tabs_area.y {
-                    let rel = mouse.column.saturating_sub(tabs_area.x) as i32;
+                    let rel = mouse.column.saturating_sub(tabs_area.x);
                     let exec_count =
                         self.operations.operations.len() + self.operations.chain_executions.len();
                     let lib_count = self
@@ -1057,27 +1057,14 @@ impl App {
                             .count();
                     let trig_count = self.operations.triggers.len();
 
-                    //
-                    // Column widths mirror ui::operations::render_tabs:
-                    // leading "  " (2) + " Executions " (12) + "N " (>=2)
-                    // + "  │  " (5) + " Library " (9) + count + sep + ...
-                    //
-                    let exec_start = 2i32;
-                    let exec_width =
-                        (" Executions ".len() + format!("{} ", exec_count).len()) as i32;
-                    let sep = 5i32;
-                    let lib_start = exec_start + exec_width + sep;
-                    let lib_width = (" Library ".len() + format!("{} ", lib_count).len()) as i32;
-                    let trig_start = lib_start + lib_width + sep;
-                    let trig_width = (" Triggers ".len() + format!("{} ", trig_count).len()) as i32;
-
                     let prev_tab = self.operations.tab;
-                    if rel >= exec_start && rel < exec_start + exec_width {
-                        self.operations.tab = OpsTab::Executions;
-                    } else if rel >= lib_start && rel < lib_start + lib_width {
-                        self.operations.tab = OpsTab::Library;
-                    } else if rel >= trig_start && rel < trig_start + trig_width {
-                        self.operations.tab = OpsTab::Triggers;
+                    if let Some(tab) = crate::ui::operations::tab_at_column(
+                        rel,
+                        exec_count,
+                        lib_count,
+                        trig_count,
+                    ) {
+                        self.operations.tab = tab;
                     }
                     if self.operations.tab != prev_tab {
                         self.operations.filter.clear();
@@ -1191,11 +1178,11 @@ impl App {
                 if mouse.column >= list_area.x
                     && mouse.column < list_area.x.saturating_add(list_area.width)
                 {
-                    let list_start_row = list_area.y.saturating_add(2);
-                    if mouse.row >= list_start_row
-                        && mouse.row < list_area.y.saturating_add(list_area.height)
+                    let data_start =
+                        crate::ui::common::table_data_start_margin_header(list_area);
+                    if let Some(clicked_idx) =
+                        crate::ui::common::table_row_at(list_area, data_start, mouse.row)
                     {
-                        let clicked_idx = (mouse.row - list_start_row) as usize;
                         let is_dbl = self.is_double_click(mouse.row, mouse.column);
                         match self.operations.tab {
                             OpsTab::Library => {
@@ -1270,8 +1257,11 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.operations.dragging {
-                    self.operations.split_percent =
-                        crate::ui::common::drag_split_percent(0, self.terminal_width, mouse.column);
+                    self.operations.split_percent = crate::ui::common::drag_split_percent(
+                        main_area.x,
+                        main_area.width,
+                        mouse.column,
+                    );
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

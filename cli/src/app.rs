@@ -2542,56 +2542,11 @@ impl App {
         //
         if mouse.row == status_area.y {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                let col = mouse.column;
-                let node_count = self.nodes.nodes.len();
-                let node_text = if node_count == 1 {
-                    "1 node".to_string()
-                } else {
-                    format!("{} nodes", node_count)
-                };
-                let session_count = self.nodes.sessions.len();
-
-                //
-                // Reconstruct the rendered text exactly as status_bar.rs
-                // writes it. Leading " " + node_text + " " + optional
-                // session segment + separators + labels.
-                //
-                let mut status_text = format!(" {} ", node_text);
-                if session_count > 0 {
-                    status_text.push_str(&format!(" \u{00b7} {} sessions ", session_count));
-                }
-                status_text.push_str(" \u{00b7} ");
-                let labels: [(&str, Window); 6] = [
-                    ("^o orchestrator", Window::Orchestrator),
-                    ("^l nodes", Window::Nodes),
-                    ("^p ops", Window::Operations),
-                    ("^i intercept", Window::Intercept),
-                    ("^g logs", Window::LogQuery),
-                    ("^s settings", Window::Settings),
-                ];
-                let mut label_positions: Vec<(Window, usize, usize)> = Vec::new();
-                for (i, (lbl, win)) in labels.iter().enumerate() {
-                    let start = status_text.chars().count();
-                    status_text.push_str(lbl);
-                    label_positions.push((*win, start, start + lbl.chars().count()));
-                    if i + 1 < labels.len() {
-                        status_text.push_str("  ");
-                    }
-                }
-                status_text.push_str(" \u{00b7} ");
-                let quit_start = status_text.chars().count();
-                status_text.push_str("^q quit");
-                let quit_end = status_text.chars().count();
-
-                //
-                // Column -> character index within status_area.
-                //
-                let rel = col.saturating_sub(status_area.x) as usize;
-
-                for (win, s, e) in &label_positions {
-                    if rel >= *s && rel < *e {
-                        self.active_window = *win;
-                        match *win {
+                let rel = mouse.column.saturating_sub(status_area.x) as usize;
+                match crate::ui::status_bar::hit_test(self, rel) {
+                    Some(crate::ui::status_bar::StatusBarHit::Window(win)) => {
+                        self.active_window = win;
+                        match win {
                             Window::Nodes => self.refresh_node_sessions(),
                             Window::Operations => self.refresh_operations(),
                             Window::Intercept => self.enter_intercept().await,
@@ -2599,12 +2554,12 @@ impl App {
                         }
                         return;
                     }
+                    Some(crate::ui::status_bar::StatusBarHit::Quit) => {
+                        self.should_quit = true;
+                        return;
+                    }
+                    None => return,
                 }
-                if rel >= quit_start && rel < quit_end {
-                    self.should_quit = true;
-                    return;
-                }
-                return;
             }
         }
 

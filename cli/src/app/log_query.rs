@@ -605,7 +605,7 @@ impl crate::app::App {
 
         let show_error = self.log_query.last_error.is_some();
         let chunks = Layout::vertical([
-            Constraint::Length(9),
+            Constraint::Length(crate::ui::log_query::EDITOR_HEIGHT),
             Constraint::Length(if show_error { 1 } else { 0 }),
             Constraint::Min(1),
             Constraint::Length(1),
@@ -615,19 +615,21 @@ impl crate::app::App {
         let results_area = chunks[2];
 
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if mouse.row >= editor_area.y && mouse.row < editor_area.y + editor_area.height {
+            if crate::ui::common::point_in(editor_area, mouse.column, mouse.row) {
                 self.log_query.focus = LogQueryFocus::Editor;
                 return;
             }
-            if mouse.row >= results_area.y && mouse.row < results_area.y + results_area.height {
+            if crate::ui::common::point_in(results_area, mouse.column, mouse.row) {
                 self.log_query.focus = LogQueryFocus::Results;
-                //
-                // Click on a specific row in the results table: inner has
-                // border(1) + header(1) = data starts at +2.
-                //
-                let data_start = results_area.y + 2;
-                if mouse.row >= data_start && !self.log_query.rows.is_empty() {
-                    let clicked = (mouse.row - data_start) as usize;
+                let table_area = crate::ui::log_query::results_table_area(
+                    results_area,
+                    self.log_query.row_expanded,
+                    !self.log_query.rows.is_empty(),
+                );
+                let data_start = crate::ui::common::table_data_start_titled(table_area);
+                if let Some(clicked) =
+                    crate::ui::common::table_row_at(table_area, data_start, mouse.row)
+                {
                     let n = self.log_query.visible_row_count();
                     if clicked < n {
                         self.log_query.selected_row = clicked;

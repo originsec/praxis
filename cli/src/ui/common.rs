@@ -95,6 +95,31 @@ pub fn drag_split_percent(outer_x: u16, outer_width: u16, mouse_col: u16) -> u16
     ((rel * 100) / w).clamp(20, 80) as u16
 }
 
+pub fn point_in(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x
+        && col < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
+/// First data row in a `titled_panel` / `focused_titled_panel` table (title + header).
+pub fn table_data_start_titled(table_area: Rect) -> u16 {
+    table_area.y.saturating_add(2)
+}
+
+/// First data row in a title-less `focused_panel` table whose header uses `bottom_margin(1)`.
+pub fn table_data_start_margin_header(table_area: Rect) -> u16 {
+    table_area.y.saturating_add(3)
+}
+
+pub fn table_row_at(table_area: Rect, data_start: u16, mouse_row: u16) -> Option<usize> {
+    if mouse_row >= data_start && mouse_row < table_area.y.saturating_add(table_area.height) {
+        Some((mouse_row - data_start) as usize)
+    } else {
+        None
+    }
+}
+
 pub fn spinner_char() -> char {
     let frame_idx = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

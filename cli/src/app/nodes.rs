@@ -1377,33 +1377,49 @@ impl App {
                 // Node hint bar clicks.
                 //
                 if mouse.row == hints_area.y {
-                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
-                    if self.nodes.detail_focus {
-                        // " enter session  ^r reset  ^t terminal  ^w sessions(N)"
-                        if rel >= 1 && rel < 16 {
-                            self.start_session_with_selected_agent();
-                            return;
+                    if let Some(action) =
+                        crate::ui::nodes::hint_action_at(self, hints_area.x, mouse.column)
+                    {
+                        match action {
+                            crate::ui::nodes::NodesHintAction::SelectDetail => {
+                                self.nodes.detail_focus = true;
+                                self.nodes.agent_selected = 0;
+                            }
+                            crate::ui::nodes::NodesHintAction::StartSession => {
+                                self.start_session_with_selected_agent();
+                            }
+                            crate::ui::nodes::NodesHintAction::Recon => {
+                                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                                    if let Some(agent) =
+                                        node.discovered_agents.get(self.nodes.agent_selected)
+                                    {
+                                        self.open_recon(
+                                            node.node_id.clone(),
+                                            agent.short_name.clone(),
+                                        );
+                                    }
+                                }
+                            }
+                            crate::ui::nodes::NodesHintAction::Reset => {
+                                self.confirm_reset_node();
+                            }
+                            crate::ui::nodes::NodesHintAction::Remove => {
+                                self.confirm_delete_node();
+                            }
+                            crate::ui::nodes::NodesHintAction::AddRemote => {
+                                self.add_remote_node_form = Some(AddRemoteNodeForm {
+                                    focused_field: AddRemoteNodeForm::URL_FIELD,
+                                    editing_text: true,
+                                    ..AddRemoteNodeForm::default()
+                                });
+                            }
+                            crate::ui::nodes::NodesHintAction::Terminal => {
+                                self.open_terminal();
+                            }
+                            crate::ui::nodes::NodesHintAction::Sessions => {
+                                self.toggle_sessions_list();
+                            }
                         }
-                    } else {
-                        // " enter select  ^r reset  ^t terminal  ^w sessions(N)"
-                        if rel >= 1 && rel < 14 {
-                            self.nodes.detail_focus = true;
-                            self.nodes.agent_selected = 0;
-                            return;
-                        }
-                    }
-                    // "^r reset" and "^t terminal" follow
-                    if rel >= 15 && rel < 24 {
-                        self.confirm_reset_node();
-                        return;
-                    }
-                    if rel >= 24 && rel < 36 {
-                        self.open_terminal();
-                        return;
-                    }
-                    if rel >= 36 {
-                        // "^w sessions(N)"
-                        self.toggle_sessions_list();
                         return;
                     }
                 }
@@ -1411,17 +1427,21 @@ impl App {
                 // List item click. Table has Borders::ALL (1 row top border)
                 // + 1 row header = data starts at y+2.
                 //
-                let list_start_row = list_area.y.saturating_add(2);
-                let list_end_row = list_area
-                    .y
-                    .saturating_add(list_area.height)
-                    .saturating_sub(1);
+                let data_start =
+                    crate::ui::common::table_data_start_margin_header(list_area);
                 if mouse.column >= list_area.x
                     && mouse.column < list_area.x.saturating_add(list_area.width)
-                    && mouse.row >= list_start_row
-                    && mouse.row < list_end_row
                 {
-                    let clicked_idx = (mouse.row - list_start_row) as usize;
+                    let clicked_idx = match crate::ui::common::table_row_at(
+                        list_area,
+                        data_start,
+                        mouse.row,
+                    ) {
+                        Some(i) => i,
+                        None => {
+                            return;
+                        }
+                    };
                     if clicked_idx < self.nodes.nodes.len() {
                         self.nodes.selected = clicked_idx;
                         self.nodes.detail_focus = false;

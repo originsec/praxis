@@ -1,4 +1,10 @@
 use crate::app::{App, Window};
+
+/// Result of a click on the status-bar navigation strip.
+pub enum StatusBarHit {
+    Window(Window),
+    Quit,
+}
 use crate::ui::chrome;
 use crate::ui::theme::{ACCENT, BG, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT};
 use ratatui::Frame;
@@ -103,4 +109,73 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(left_bar, chunks[0]);
     f.render_widget(right_bar, chunks[1]);
+}
+
+/// Hit-test a column relative to the left status-bar chunk. Mirrors `render` exactly.
+pub fn hit_test(app: &App, rel_col: usize) -> Option<StatusBarHit> {
+    let mut col = 0usize;
+
+    // Connection dot + space
+    col += 2;
+    if rel_col < col {
+        return None;
+    }
+
+    let node_count = app.nodes.nodes.len();
+    let node_text = if node_count == 1 {
+        "1 node".to_string()
+    } else {
+        format!("{} nodes", node_count)
+    };
+    col += node_text.chars().count();
+    if rel_col < col {
+        return None;
+    }
+
+    let session_count = app.nodes.sessions.len();
+    if session_count > 0 {
+        col += 3; // " · "
+        let seg = format!("{} sessions", session_count);
+        col += seg.chars().count();
+        if rel_col < col {
+            return None;
+        }
+    }
+
+    col += 4; // "    "
+    if rel_col < col {
+        return None;
+    }
+
+    let nav_pairs: &[(&str, &str, Window)] = &[
+        ("^o", "orchestrator", Window::Orchestrator),
+        ("^l", "nodes", Window::Nodes),
+        ("^p", "ops", Window::Operations),
+        ("^i", "intercept", Window::Intercept),
+        ("^g", "logs", Window::LogQuery),
+        ("^s", "settings", Window::Settings),
+    ];
+    for (i, (k, l, w)) in nav_pairs.iter().enumerate() {
+        if i > 0 {
+            col += 2; // "  "
+            if rel_col < col {
+                return None;
+            }
+        }
+        let item_len = k.len() + 1 + l.len();
+        if rel_col < col + item_len {
+            return Some(StatusBarHit::Window(*w));
+        }
+        col += item_len;
+    }
+
+    col += 3; // mid_dot " · "
+    if rel_col < col {
+        return None;
+    }
+    let quit_len = "^q quit".len();
+    if rel_col < col + quit_len {
+        return Some(StatusBarHit::Quit);
+    }
+    None
 }

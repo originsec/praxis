@@ -1823,9 +1823,9 @@ impl App {
     }
 
     pub(crate) async fn handle_intercept_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
+        use crate::ui::common::{point_in, table_data_start_titled, table_row_at};
         use crate::ui::intercept::{
-            chrome_layout, filter_and_table, filter_split, point_in, rules_list_area, show_banner,
-            table_row_at,
+            chrome_layout, filter_and_table, filter_split, rules_list_area, show_banner,
         };
 
         let chrome = chrome_layout(content_area, show_banner(self));
@@ -1869,7 +1869,9 @@ impl App {
                         }
                         if point_in(panes.left, mouse.column, mouse.row) {
                             self.intercept.detail_focus = false;
-                            if let Some(clicked) = table_row_at(panes.left, mouse.row) {
+                            if let Some(clicked) =
+                                table_row_at(panes.left, table_data_start_titled(panes.left), mouse.row)
+                            {
                                 if clicked < self.intercept.display_rows.len() {
                                     self.intercept.selected = clicked;
                                     self.intercept.detail_scroll = 0;
@@ -1910,7 +1912,9 @@ impl App {
                         }
                         if point_in(panes.left, mouse.column, mouse.row) {
                             self.intercept.match_detail_focus = false;
-                            if let Some(clicked) = table_row_at(panes.left, mouse.row) {
+                            if let Some(clicked) =
+                                table_row_at(panes.left, table_data_start_titled(panes.left), mouse.row)
+                            {
                                 let total = self.intercept.filtered_matches_len();
                                 if clicked < total {
                                     self.intercept.match_selected = clicked;
@@ -1941,7 +1945,9 @@ impl App {
                     let list_body = rules_list_area(chrome.body, split_form);
                     let (_filter, table) = filter_and_table(list_body);
                     if point_in(table, mouse.column, mouse.row) {
-                        if let Some(clicked) = table_row_at(table, mouse.row) {
+                        if let Some(clicked) =
+                            table_row_at(table, table_data_start_titled(table), mouse.row)
+                        {
                             let ids = self.intercept.filtered_rule_ids();
                             if clicked < ids.len() {
                                 self.intercept.rule_selected_id = Some(ids[clicked]);

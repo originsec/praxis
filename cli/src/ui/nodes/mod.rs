@@ -6,7 +6,7 @@ mod terminal;
 
 pub use sessions_list::sessions_list_rect;
 
-use crate::app::NodesState;
+use crate::app::{App, NodesState};
 use crate::ui::recon;
 use crate::ui::theme::{MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
@@ -14,6 +14,99 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+
+pub enum NodesHintAction {
+    SelectDetail,
+    StartSession,
+    Recon,
+    Reset,
+    Remove,
+    AddRemote,
+    Terminal,
+    Sessions,
+}
+
+fn push_region(
+    regions: &mut Vec<(u16, u16, NodesHintAction)>,
+    x: &mut u16,
+    text: &str,
+    action: NodesHintAction,
+) {
+    let w = text.chars().count() as u16;
+    regions.push((*x, *x + w, action));
+    *x += w;
+}
+
+/// Hit-test the nodes hint bar. `base_x` is the hint row's x coordinate.
+pub fn hint_action_at(app: &App, base_x: u16, col: u16) -> Option<NodesHintAction> {
+    let rel = col.saturating_sub(base_x);
+    let mut regions: Vec<(u16, u16, NodesHintAction)> = Vec::new();
+    let mut x = 0u16;
+
+    if app.nodes.detail_focus {
+        let has_session = app
+            .nodes
+            .nodes
+            .get(app.nodes.selected)
+            .map(|n| {
+                n.capabilities.is_empty()
+                    || n.capabilities.contains(&common::NodeCapability::Session)
+            })
+            .unwrap_or(false);
+        if has_session {
+            push_region(&mut regions, &mut x, "\u{21b5}", NodesHintAction::StartSession);
+            push_region(&mut regions, &mut x, " session", NodesHintAction::StartSession);
+            x += 4;
+        }
+        push_region(&mut regions, &mut x, "r", NodesHintAction::Recon);
+        push_region(&mut regions, &mut x, " recon", NodesHintAction::Recon);
+    } else {
+        push_region(&mut regions, &mut x, "\u{21b5}", NodesHintAction::SelectDetail);
+        push_region(&mut regions, &mut x, " select", NodesHintAction::SelectDetail);
+    }
+
+    x += 4;
+    push_region(&mut regions, &mut x, "^r", NodesHintAction::Reset);
+    push_region(&mut regions, &mut x, " reset", NodesHintAction::Reset);
+    x += 4;
+    push_region(&mut regions, &mut x, "^d", NodesHintAction::Remove);
+    push_region(&mut regions, &mut x, " remove", NodesHintAction::Remove);
+    x += 4;
+    push_region(&mut regions, &mut x, "^n", NodesHintAction::AddRemote);
+    push_region(&mut regions, &mut x, " add remote", NodesHintAction::AddRemote);
+
+    let has_terminal = app
+        .nodes
+        .nodes
+        .get(app.nodes.selected)
+        .map(|n| {
+            n.capabilities.is_empty()
+                || n.capabilities.contains(&common::NodeCapability::Terminal)
+        })
+        .unwrap_or(false);
+    if has_terminal {
+        x += 4;
+        push_region(&mut regions, &mut x, "^t", NodesHintAction::Terminal);
+        push_region(&mut regions, &mut x, " terminal", NodesHintAction::Terminal);
+    }
+
+    let session_count = app.nodes.sessions.len();
+    x += 4;
+    push_region(&mut regions, &mut x, "^w", NodesHintAction::Sessions);
+    push_region(
+        &mut regions,
+        &mut x,
+        &format!(" sessions ({})", session_count),
+        NodesHintAction::Sessions,
+    );
+
+    for (start, end, action) in regions {
+        if rel >= start && rel < end {
+            return Some(action);
+        }
+    }
+    None
+}
 
 pub fn render(
     f: &mut Frame,
