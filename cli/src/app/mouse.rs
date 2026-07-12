@@ -10,11 +10,61 @@ use crate::ui::common::{drag_split_percent, table_row_at};
 use crate::ui::hits::{MouseAction, NodesHintAction, OpsHintAction, RowSelectKind};
 
 impl App {
+    fn is_overlay_action(action: &MouseAction) -> bool {
+        matches!(
+            action,
+            MouseAction::ConfirmYes
+                | MouseAction::ConfirmNo
+                | MouseAction::ConfirmDismiss
+                | MouseAction::PopupItem(_)
+                | MouseAction::PopupDismiss
+                | MouseAction::NewOpField(_)
+                | MouseAction::RunOptionsToggle { .. }
+                | MouseAction::RunOptionsRun
+                | MouseAction::RunOptionsCancel
+                | MouseAction::TriggerSave
+                | MouseAction::TriggerCancel
+                | MouseAction::TriggerField { .. }
+                | MouseAction::AddRemoteField(_)
+                | MouseAction::AddRemoteSave
+                | MouseAction::SessionsListRow(_)
+                | MouseAction::SessionsListDismiss
+                | MouseAction::SessionInput { .. }
+                | MouseAction::SessionHint(_)
+                | MouseAction::SessionOptionsRow(_)
+                | MouseAction::SessionOptionsConfirm
+                | MouseAction::SessionOptionsCancel
+                | MouseAction::SettingsContentClick
+                | MouseAction::SettingsModelField(_)
+                | MouseAction::SettingsModelDropdownItem(_)
+                | MouseAction::SettingsModelSave
+                | MouseAction::SettingsModelCancel
+                | MouseAction::SettingsDropdownRow(_)
+                | MouseAction::SettingsDropdownDismiss
+                | MouseAction::ChainSave
+                | MouseAction::ChainCancel
+                | MouseAction::ChainAutoLayout
+                | MouseAction::ChainPalette(_)
+                | MouseAction::ChainEdit(_)
+                | MouseAction::ChainCycleKind
+                | MouseAction::ChainDeleteElement
+                | MouseAction::ChainCycleCondition
+                | MouseAction::ChainDeleteConnection
+                | MouseAction::ChainPickOp
+                | MouseAction::ChainCanvas
+                | MouseAction::ChainEditorDismiss
+        )
+    }
+
     pub(crate) async fn dispatch_mouse_action(
         &mut self,
         mouse: MouseEvent,
         action: MouseAction,
     ) -> bool {
+        if Self::is_overlay_action(&action) {
+            return self.dispatch_overlay_action(mouse, action).await;
+        }
+
         match action {
             MouseAction::SwitchWindow(win) => {
                 self.active_window = win;
@@ -175,6 +225,8 @@ impl App {
             }
 
             MouseAction::SelectRow(sel) => self.dispatch_row_select(mouse, sel).await,
+
+            _ => false,
         }
     }
 
@@ -390,19 +442,21 @@ impl App {
         }
     }
 
-    pub(crate) async fn handle_active_window_mouse_down(
+    pub(crate) async fn handle_hit_layer_mouse(
         &mut self,
         mouse: MouseEvent,
         content_area: Rect,
-        terminal_area: Rect,
+        _terminal_area: Rect,
     ) {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             if let Some(action) = self.hits_lookup(mouse.column, mouse.row) {
                 let _ = self.dispatch_mouse_action(mouse, action).await;
-            } else if self.active_window == Window::Settings {
-                self.handle_settings_content_mouse(mouse, content_area, terminal_area)
-                    .await;
             }
+            return;
+        }
+
+        if self.chain_form.is_some() {
+            self.handle_chain_form_motion(mouse);
             return;
         }
 

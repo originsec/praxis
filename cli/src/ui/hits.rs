@@ -1,7 +1,8 @@
 use ratatui::layout::Rect;
 
 use crate::app::{
-    intercept::InterceptTab, log_query::LogQueryFocus, App, OpsTab, SettingsTab, Window,
+    intercept::InterceptTab, log_query::LogQueryFocus, App, EditTarget, ElementKind,
+    OpsTab, SettingsTab, TriggerFormSection, Window,
 };
 
 /// Clickable target registered during render; looked up by the mouse handler.
@@ -38,6 +39,61 @@ pub enum MouseAction {
     OrchestratorToolsCycle,
     OrchestratorSaveSession,
     OrchestratorInputCursor { text_start: u16 },
+
+    // Confirm / popups
+    ConfirmYes,
+    ConfirmNo,
+    ConfirmDismiss,
+    PopupItem(usize),
+    PopupDismiss,
+
+    // Operations forms
+    NewOpField(usize),
+    RunOptionsToggle { section: u8, index: usize },
+    RunOptionsRun,
+    RunOptionsCancel,
+    TriggerSave,
+    TriggerCancel,
+    TriggerField {
+        section: TriggerFormSection,
+        cursor: usize,
+    },
+
+    // Add remote node
+    AddRemoteField(usize),
+    AddRemoteSave,
+
+    // Nodes overlays
+    SessionsListRow(usize),
+    SessionsListDismiss,
+    SessionInput { text_start: u16 },
+    SessionHint(SessionHintAction),
+    SessionOptionsRow(usize),
+    SessionOptionsConfirm,
+    SessionOptionsCancel,
+
+    // Settings
+    SettingsContentClick,
+    SettingsModelField(usize),
+    SettingsModelDropdownItem(usize),
+    SettingsModelSave,
+    SettingsModelCancel,
+    SettingsDropdownRow(usize),
+    SettingsDropdownDismiss,
+
+    // Chain form
+    ChainSave,
+    ChainCancel,
+    ChainAutoLayout,
+    ChainPalette(ElementKind),
+    ChainEdit(EditTarget),
+    ChainCycleKind,
+    ChainDeleteElement,
+    ChainCycleCondition,
+    ChainDeleteConnection,
+    ChainPickOp,
+    ChainCanvas,
+    ChainEditorDismiss,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +129,13 @@ pub enum OpsHintAction {
     NewTrigger,
     EditTrigger,
     DeleteTrigger,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionHintAction {
+    Send,
+    Pause,
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

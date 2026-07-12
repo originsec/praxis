@@ -403,27 +403,8 @@ impl App {
     // picker happens through this path.
     //
 
-    pub(crate) async fn handle_chain_form_mouse(&mut self, mouse: MouseEvent) {
-        if self
-            .chain_form
-            .as_ref()
-            .and_then(|f| f.editor.as_ref())
-            .is_some()
-        {
-            //
-            // Op picker overlay: any click outside closes it; clicks
-            // inside are handled by the picker (currently keyboard-only).
-            //
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                if let Some(form) = self.chain_form.as_mut() {
-                    form.editor = None;
-                }
-            }
-            return;
-        }
-
+    pub(crate) fn handle_chain_form_motion(&mut self, mouse: MouseEvent) {
         match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => self.canvas_mouse_down(mouse).await,
             MouseEventKind::Drag(MouseButton::Left) => self.canvas_mouse_drag(mouse),
             MouseEventKind::Up(MouseButton::Left) => self.canvas_mouse_up(mouse),
             MouseEventKind::ScrollUp => self.canvas_scroll(0, -2),
@@ -439,110 +420,11 @@ impl App {
         }
     }
 
-    async fn canvas_mouse_down(&mut self, mouse: MouseEvent) {
+    pub(crate) async fn chain_form_canvas_down(&mut self, mouse: MouseEvent) {
         let hit = self.chain_form_hits.borrow().clone();
         let col = mouse.column;
         let row = mouse.row;
 
-        //
-        // Top-bar buttons.
-        //
-        if hit.save_button.contains(col, row) {
-            self.submit_chain_form().await;
-            return;
-        }
-        if hit.cancel_button.contains(col, row) {
-            self.chain_form = None;
-            return;
-        }
-        if hit.auto_layout_button.contains(col, row) {
-            if let Some(form) = self.chain_form.as_mut() {
-                form.positions.clear();
-                auto_layout(form);
-                form.camera_x = 0;
-                form.camera_y = 0;
-            }
-            return;
-        }
-
-        //
-        // Palette buttons: click [+ Kind] to drop a new block.
-        //
-        for (kind, rect) in &hit.palette_buttons {
-            if rect.contains(col, row) {
-                self.add_element_at_centre(*kind);
-                return;
-            }
-        }
-
-        //
-        // Header field cells.
-        //
-        for (target, rect) in &hit.header_fields {
-            if rect.contains(col, row) {
-                if let Some(form) = self.chain_form.as_mut() {
-                    form.editing = Some(target.clone());
-                }
-                return;
-            }
-        }
-
-        //
-        // Property field cells.
-        //
-        for (target, rect) in &hit.property_fields {
-            if rect.contains(col, row) {
-                if let Some(form) = self.chain_form.as_mut() {
-                    form.editing = Some(target.clone());
-                }
-                return;
-            }
-        }
-        if hit.kind_cycle_button.contains(col, row) {
-            self.cycle_selected_kind();
-            return;
-        }
-        if hit.delete_element_button.contains(col, row) {
-            if let Some(form) = self.chain_form.as_mut() {
-                delete_selection(form);
-            }
-            return;
-        }
-        if hit.cycle_condition_button.contains(col, row) {
-            if let Some(form) = self.chain_form.as_mut() {
-                if let Selected::Connection(idx) = form.selected.clone() {
-                    if let Some(conn) = form.connections.get_mut(idx) {
-                        conn.condition = cycle_condition(conn.condition, 1);
-                    }
-                }
-            }
-            return;
-        }
-        if hit.delete_connection_button.contains(col, row) {
-            if let Some(form) = self.chain_form.as_mut() {
-                if let Selected::Connection(idx) = form.selected.clone() {
-                    if idx < form.connections.len() {
-                        form.connections.remove(idx);
-                        form.selected = Selected::None;
-                    }
-                }
-            }
-            return;
-        }
-        if hit.pick_op_button.contains(col, row) {
-            if let Some(form) = self.chain_form.as_mut() {
-                form.editor = Some(ChainFormEditor::PickOpName {
-                    cursor: 0,
-                    filter: String::new(),
-                });
-            }
-            return;
-        }
-
-        //
-        // Canvas hit-test. Order: ports first (small targets), then block
-        // bodies, then connection segments, then empty space (pan start).
-        //
         if hit.canvas.contains(col, row) {
             //
             // Translate viewport pixel to canvas cell.
@@ -786,7 +668,7 @@ impl App {
         None
     }
 
-    fn cycle_selected_kind(&mut self) {
+    pub(crate) fn cycle_selected_kind(&mut self) {
         let Some(form) = self.chain_form.as_mut() else {
             return;
         };
@@ -1045,7 +927,7 @@ pub fn delete_selection(form: &mut ChainForm) {
     }
 }
 
-fn cycle_condition(c: ConditionKind, delta: i32) -> ConditionKind {
+pub(crate) fn cycle_condition(c: ConditionKind, delta: i32) -> ConditionKind {
     let list = [
         ConditionKind::None,
         ConditionKind::OnSuccess,

@@ -7,6 +7,7 @@ pub mod log_query;
 pub mod nodes;
 pub mod operations;
 pub mod orchestrator;
+pub mod overlay_hits;
 pub mod popup;
 pub mod recon;
 pub mod settings;
@@ -14,6 +15,7 @@ pub mod status_bar;
 pub mod theme;
 
 use crate::app::{App, Window};
+use crate::ui::hits::MouseAction;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin};
 use ratatui::style::{Modifier, Style};
@@ -51,13 +53,21 @@ pub fn render(f: &mut Frame, app: &App) {
         Window::Operations => {
             if let Some(ref form) = app.new_op_form {
                 popup::render_new_op_form(f, chunks[2], form);
+                overlay_hits::register_new_op_form_hits(app, chunks[2], form);
             } else if let Some(ref opts) = app.run_options {
                 popup::render_run_options(f, chunks[2], opts);
+                overlay_hits::register_run_options_hits(app, chunks[2], opts);
             } else if let Some(ref tform) = app.trigger_form {
                 popup::render_trigger_form(f, chunks[2], tform);
+                overlay_hits::register_trigger_form_hits(app, chunks[2], tform);
             } else if let Some(ref cform) = app.chain_form {
                 let hit = chain_form::render_chain_form(f, chunks[2], cform);
                 *app.chain_form_hits.borrow_mut() = hit;
+                let hit = app.chain_form_hits.borrow().clone();
+                overlay_hits::register_chain_form_hits(app, &hit);
+                if cform.editor.is_some() {
+                    app.hits_register(chunks[2], MouseAction::ChainEditorDismiss);
+                }
             } else {
                 operations::render(f, chunks[2], app);
             }
@@ -67,25 +77,21 @@ pub fn render(f: &mut Frame, app: &App) {
 
     status_bar::render(f, chunks[3], app);
 
-    //
-    // Render popup overlay on top of everything.
-    //
+    let terminal = f.area();
+
     if let Some(ref p) = app.popup {
         popup::render(f, p);
+        overlay_hits::register_popup_hits(app, terminal, p);
     }
     if let Some(ref form) = app.add_remote_node_form {
-        popup::render_add_remote_node_form(f, f.area(), form);
+        popup::render_add_remote_node_form(f, terminal, form);
+        overlay_hits::register_add_remote_hits(app, terminal, form);
     }
     if let Some(ref confirm) = app.confirm {
         popup::render_confirm(f, confirm);
+        overlay_hits::register_confirm_hits(app, terminal, confirm);
     }
 }
-
-//
-// Top header. Left side: brand sigil + word + version + connection
-// dot. Right side: active window crumb. Borrows opencode's "dot in
-// success-green when connected" idiom.
-//
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect, _app: &App) {
     let version = env!("CARGO_PKG_VERSION");

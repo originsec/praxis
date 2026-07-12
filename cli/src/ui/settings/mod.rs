@@ -8,6 +8,7 @@ mod service;
 use crate::app::{App, SettingsState, SettingsTab};
 use crate::ui::chrome;
 use crate::ui::hits::MouseAction;
+use crate::ui::overlay_hits;
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT,
 };
@@ -52,6 +53,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         ..chunks[2]
     };
 
+    if state.model_form.is_none() && !state.dropdown_open {
+        overlay_hits::register_settings_content_hits(app, content);
+    }
+
     match state.tab {
         SettingsTab::Llm => llm::render_llm(f, content, state),
         SettingsTab::Agents => agents::render_agents(f, content, state),
@@ -62,10 +67,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if state.dropdown_open {
         forms::render_model_dropdown(f, area, state);
+        crate::ui::overlay_hits::register_settings_dropdown_hits(app, area, state);
     }
 
     if let Some(ref form) = state.model_form {
         forms::render_model_form(f, area, form);
+        crate::ui::overlay_hits::register_settings_model_form_hits(app, area, form);
     }
 
     if let Some(ref msg) = state.status_message {

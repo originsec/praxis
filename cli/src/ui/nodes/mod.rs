@@ -29,6 +29,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if let Some(ref opts) = state.session_options {
         session::render_session_options(f, area, opts);
+        let dir_count = if opts.working_dirs.is_empty() {
+            1
+        } else {
+            1 + opts.working_dirs.len()
+        };
+        crate::ui::overlay_hits::register_session_options_hits(app, area, dir_count);
         return;
     }
 
@@ -45,6 +51,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if let Some(session) = state.active_session() {
         session::render_session_chat(f, area, session);
+        crate::ui::overlay_hits::register_session_chat_hits(app, area);
     } else {
         let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
@@ -153,6 +160,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if state.sessions_list_open {
         sessions_list::render(f, area, state);
+        crate::ui::overlay_hits::register_sessions_list_hits(app, area, state.sessions.len());
     }
 }
 
