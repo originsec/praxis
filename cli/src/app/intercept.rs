@@ -1823,39 +1823,19 @@ impl App {
     }
 
     pub(crate) async fn handle_intercept_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
-        use ratatui::layout::{Constraint, Layout};
+        use crate::ui::intercept::{
+            chrome_layout, filter_and_table, filter_split, point_in, rules_list_area, show_banner,
+            table_row_at,
+        };
 
-        let show_banner = !self.intercept.any_intercept_active()
-            && (!self.nodes.nodes.is_empty() || !self.intercept.intercept_statuses.is_empty());
-        let mut constraints = vec![Constraint::Length(1)];
-        if show_banner {
-            constraints.push(Constraint::Length(1));
-        }
-        constraints.extend([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ]);
-        let chunks = Layout::vertical(constraints).split(content_area);
-        let tabs_idx = if show_banner { 2 } else { 1 };
-        let body_idx = if show_banner { 5 } else { 4 };
-        let tabs_area = chunks[tabs_idx];
-        let body_area = chunks[body_idx];
+        let chrome = chrome_layout(content_area, show_banner(self));
 
         //
-        // Tab click.
+        // Tab click — regions computed in render_tabs from chrome::tab_width.
         //
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if mouse.row == tabs_area.y {
-                let rel = mouse.column.saturating_sub(tabs_area.x);
-                //
-                // Labels rendered as:
-                // "  " + " Log " + "<count> " + " │ " + " Matches " + ...
-                // Hit-box by approximate column ranges kept in sync with
-                // ui::intercept::mod::render_tabs.
-                //
+            if mouse.row == chrome.tabs.y {
+                let rel = mouse.column.saturating_sub(chrome.tabs.x);
                 let regions = self.intercept.tab_hit_regions.borrow();
                 if let Some(tab) = crate::ui::intercept::tab_at_column(rel, &regions) {
                     self.intercept.tab = tab;
@@ -1864,53 +1844,32 @@ impl App {
             }
         }
 
+        // Rule form overlay (non-Rules tab) replaces the body — no pane hit-tests.
+        if self.intercept.rule_form.is_some() && self.intercept.tab != InterceptTab::Rules {
+            return;
+        }
+
         //
-        // Per-tab body handling — for Log and Matches we support a
-        // horizontal split drag and pane focus click.
+        // Per-tab body — Traffic and Matches: filter bar + resizable split.
         //
         match self.intercept.tab {
             InterceptTab::Traffic => {
-                let pct = self.intercept.log_split_percent.clamp(20, 80);
-                let split = Layout::horizontal([
-                    Constraint::Percentage(pct),
-                    Constraint::Percentage(100 - pct),
-                ])
-                .split(Rect {
-                    y: body_area.y + 1,
-                    height: body_area.height.saturating_sub(1),
-                    ..body_area
-                });
+                let panes = filter_split(chrome.body, self.intercept.log_split_percent);
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(split[0], mouse.column, mouse.row)
+                        if crate::ui::common::hit_vertical_border(panes.left, mouse.column, mouse.row)
                         {
                             self.intercept.log_dragging = true;
                             return;
                         }
-                        //
-                        // Detail pane click -> focus.
-                        //
-                        if mouse.column >= split[1].x
-                            && mouse.column < split[1].x + split[1].width
-                            && mouse.row >= split[1].y
-                            && mouse.row < split[1].y + split[1].height
-                        {
+                        if point_in(panes.right, mouse.column, mouse.row) {
                             self.intercept.detail_focus = true;
                             self.fetch_body_for_selected().await;
                             return;
                         }
-                        //
-                        // List pane click -> unfocus detail + select row.
-                        //
-                        if mouse.column >= split[0].x
-                            && mouse.column < split[0].x + split[0].width
-                            && mouse.row >= split[0].y
-                            && mouse.row < split[0].y + split[0].height
-                        {
+                        if point_in(panes.left, mouse.column, mouse.row) {
                             self.intercept.detail_focus = false;
-                            let list_start = split[0].y + 2;
-                            if mouse.row >= list_start {
-                                let clicked = (mouse.row - list_start) as usize;
+                            if let Some(clicked) = table_row_at(panes.left, mouse.row) {
                                 if clicked < self.intercept.display_rows.len() {
                                     self.intercept.selected = clicked;
                                     self.intercept.detail_scroll = 0;
@@ -1923,8 +1882,8 @@ impl App {
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.intercept.log_dragging => {
                         self.intercept.log_split_percent = crate::ui::common::drag_split_percent(
-                            body_area.x,
-                            body_area.width,
+                            panes.filter.x,
+                            panes.filter.width,
                             mouse.column,
                         );
                         return;
@@ -1936,41 +1895,22 @@ impl App {
                 }
             }
             InterceptTab::Matches => {
-                let pct = self.intercept.match_split_percent.clamp(20, 80);
-                let split = Layout::horizontal([
-                    Constraint::Percentage(pct),
-                    Constraint::Percentage(100 - pct),
-                ])
-                .split(Rect {
-                    y: body_area.y + 1,
-                    height: body_area.height.saturating_sub(1),
-                    ..body_area
-                });
+                let panes = filter_split(chrome.body, self.intercept.match_split_percent);
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(split[0], mouse.column, mouse.row)
+                        if crate::ui::common::hit_vertical_border(panes.left, mouse.column, mouse.row)
                         {
                             self.intercept.match_dragging = true;
                             return;
                         }
-                        if mouse.column >= split[1].x
-                            && mouse.column < split[1].x + split[1].width
-                            && mouse.row >= split[1].y
-                            && mouse.row < split[1].y + split[1].height
-                        {
+                        if point_in(panes.right, mouse.column, mouse.row) {
                             self.intercept.match_detail_focus = true;
                             self.fetch_body_for_match_selected().await;
                             return;
                         }
-                        if mouse.column >= split[0].x
-                            && mouse.column < split[0].x + split[0].width
-                            && mouse.row >= split[0].y
-                            && mouse.row < split[0].y + split[0].height
-                        {
+                        if point_in(panes.left, mouse.column, mouse.row) {
                             self.intercept.match_detail_focus = false;
-                            let list_start = split[0].y + 2;
-                            if mouse.row >= list_start {
-                                let clicked = (mouse.row - list_start) as usize;
+                            if let Some(clicked) = table_row_at(panes.left, mouse.row) {
                                 let total = self.intercept.filtered_matches_len();
                                 if clicked < total {
                                     self.intercept.match_selected = clicked;
@@ -1983,8 +1923,8 @@ impl App {
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.intercept.match_dragging => {
                         self.intercept.match_split_percent = crate::ui::common::drag_split_percent(
-                            body_area.x,
-                            body_area.width,
+                            panes.filter.x,
+                            panes.filter.width,
                             mouse.column,
                         );
                         return;
@@ -1997,17 +1937,15 @@ impl App {
             }
             InterceptTab::Rules => {
                 if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                    //
-                    // Rules tab layout: filter bar (1) + table. Click a
-                    // row to select it.
-                    //
-                    let table_y = body_area.y + 1;
-                    let header_offset = 2u16; // border + header
-                    if mouse.row >= table_y + header_offset {
-                        let clicked = (mouse.row - (table_y + header_offset)) as usize;
-                        let ids = self.intercept.filtered_rule_ids();
-                        if clicked < ids.len() {
-                            self.intercept.rule_selected_id = Some(ids[clicked]);
+                    let split_form = self.intercept.rule_form.is_some();
+                    let list_body = rules_list_area(chrome.body, split_form);
+                    let (_filter, table) = filter_and_table(list_body);
+                    if point_in(table, mouse.column, mouse.row) {
+                        if let Some(clicked) = table_row_at(table, mouse.row) {
+                            let ids = self.intercept.filtered_rule_ids();
+                            if clicked < ids.len() {
+                                self.intercept.rule_selected_id = Some(ids[clicked]);
+                            }
                         }
                     }
                 }

@@ -36,12 +36,108 @@ pub fn tab_at_column(rel_col: u16, regions: &[(InterceptTab, u16, u16)]) -> Opti
     None
 }
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let show_banner = !app.intercept.any_intercept_active()
-        && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty());
+pub fn show_banner(app: &App) -> bool {
+    !app.intercept.any_intercept_active()
+        && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty())
+}
 
+/// Chrome layout below the window header — shared by render and mouse hit-tests.
+pub struct InterceptChrome {
+    pub tabs: Rect,
+    pub body: Rect,
+}
+
+pub fn chrome_layout(area: Rect, show_banner: bool) -> InterceptChrome {
     let mut constraints = vec![Constraint::Length(1)];
     if show_banner {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.extend([
+        Constraint::Length(1), // status strip
+        Constraint::Length(1), // tab header
+        Constraint::Length(1), // divider
+        Constraint::Min(1),    // tab body
+        Constraint::Length(1), // hints / status
+    ]);
+    let chunks = Layout::vertical(constraints).split(area);
+    let mut idx = 0usize;
+    if show_banner {
+        idx += 1; // banner (render-only)
+    }
+    idx += 1; // status strip (render-only)
+    let tabs = chunks[idx];
+    idx += 2; // divider + body
+    let body = chunks[idx];
+    InterceptChrome { tabs, body }
+}
+
+/// Filter bar + horizontal split used by Traffic and Matches tabs.
+pub struct FilterSplit {
+    pub filter: Rect,
+    pub left: Rect,
+    pub right: Rect,
+}
+
+pub fn filter_split(body: Rect, split_percent: u16) -> FilterSplit {
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(body);
+    let pct = split_percent.clamp(20, 80);
+    let split = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(chunks[1]);
+    FilterSplit {
+        filter: chunks[0],
+        left: split[0],
+        right: split[1],
+    }
+}
+
+/// Filter bar + remaining body (Rules tab; no horizontal split).
+pub fn filter_and_table(body: Rect) -> (Rect, Rect) {
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(body);
+    (chunks[0], chunks[1])
+}
+
+/// Rules tab body: full width, or left pane when the form is split in.
+pub fn rules_list_area(body: Rect, split_form: bool) -> Rect {
+    if split_form {
+        Layout::horizontal([
+            Constraint::Percentage(42),
+            Constraint::Percentage(58),
+        ])
+        .split(body)[0]
+    } else {
+        body
+    }
+}
+
+/// First data row in a `titled_panel` / `focused_titled_panel` table (title + header).
+pub fn table_data_start(table_area: Rect) -> u16 {
+    table_area.y.saturating_add(2)
+}
+
+pub fn table_row_at(table_area: Rect, mouse_row: u16) -> Option<usize> {
+    let start = table_data_start(table_area);
+    if mouse_row >= start && mouse_row < table_area.y.saturating_add(table_area.height) {
+        Some((mouse_row - start) as usize)
+    } else {
+        None
+    }
+}
+
+pub fn point_in(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x
+        && col < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let banner = show_banner(app);
+
+    let mut constraints = vec![Constraint::Length(1)];
+    if banner {
         constraints.push(Constraint::Length(1));
     }
     constraints.extend([
@@ -54,7 +150,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let chunks = Layout::vertical(constraints).split(area);
     let mut idx = 0usize;
-    if show_banner {
+    if banner {
         render_banner(f, chunks[idx], app);
         idx += 1;
     }
