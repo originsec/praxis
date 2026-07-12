@@ -13,12 +13,10 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::app::App;
 use crate::app::intercept::{InterceptState, SummaryStatus};
-use crate::ui::chrome;
 use crate::ui::common::focused_titled_panel;
-use crate::ui::intercept::body_lines;
+use crate::ui::intercept::{body_lines, hints as shared_hints, search_bar};
 use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_DONE, STATUS_FAIL, STATUS_RUNNING, TEXT,
-    TEXT_BRIGHT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
@@ -46,26 +44,18 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
             .map(|r| r.name.clone())
             .unwrap_or_else(|| format!("rule#{}", rid)),
     };
-    let mut spans = vec![];
-    spans.extend(chrome::pill_two_tone("rule", &label, ACCENT));
-    spans.push(Span::raw("  "));
-    spans.extend(chrome::pill_two_tone(
-        "loaded",
-        &format!(
-            "{}/{}",
-            app.intercept.matches.len(),
-            app.intercept.match_total
+    let groups = [
+        search_bar::pill_spans("rule", &label),
+        search_bar::pill_spans(
+            "loaded",
+            &format!(
+                "{}/{}",
+                app.intercept.filtered_matches_len(),
+                app.intercept.match_total
+            ),
         ),
-        MUTED,
-    ));
-    spans.push(Span::raw("    "));
-    spans.push(Span::styled("f", Style::default().fg(TEXT_BRIGHT)));
-    spans.push(Span::styled(" cycle", Style::default().fg(MUTED)));
-    spans.push(Span::raw("    "));
-    spans.push(Span::styled("o", Style::default().fg(TEXT_BRIGHT)));
-    spans.push(Span::styled(" traffic", Style::default().fg(MUTED)));
-
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    ];
+    search_bar::render(f, area, app, &groups);
 }
 
 fn render_list(f: &mut Frame, area: Rect, app: &App) {
@@ -318,8 +308,6 @@ fn detail_lines(state: &InterceptState, m: &common::TrafficMatchWithDetails) -> 
             Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
         )));
     }
-    let _ = STATUS_FAIL;
-    let _ = OK;
     out
 }
 
@@ -339,15 +327,18 @@ fn truncate_first_line(s: &str, max: usize) -> String {
 pub fn hints(_app: &App) -> Line<'static> {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
-    Line::from(vec![
+    shared_hints::line_with_tier(vec![
         Span::styled("f", key),
-        Span::styled(" cycle rule", label),
+        Span::styled(" rule", label),
         Span::raw("    "),
         Span::styled("o", key),
-        Span::styled(" open traffic", label),
+        Span::styled(" traffic", label),
         Span::raw("    "),
         Span::styled("^n", key),
         Span::styled(" new rule", label),
+        Span::raw("    "),
+        Span::styled("^r", key),
+        Span::styled(" resummary", label),
         Span::raw("    "),
         Span::styled("b", key),
         Span::styled(" body", label),

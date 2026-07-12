@@ -92,6 +92,7 @@ struct ClientState {
     pending_traffic_search: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
     pending_traffic_matches: Option<oneshot::Sender<(Vec<TrafficMatchWithDetails>, usize)>>,
     pending_traffic_clear: Option<oneshot::Sender<usize>>,
+    pending_traffic_match_resummarize: Option<oneshot::Sender<Result<(), String>>>,
     pending_rules_list: Option<oneshot::Sender<Vec<InterceptRule>>>,
     pending_rule_op: Option<oneshot::Sender<RuleOpOutcome>>,
     pending_traffic_get: HashMap<i64, oneshot::Sender<Option<InterceptedTrafficEntry>>>,
@@ -368,6 +369,16 @@ impl Client {
             ClientDirectMessage::TrafficGetResponse { id, entry } => {
                 if let Some(tx) = state.pending_traffic_get.remove(&id) {
                     let _ = tx.send(entry);
+                }
+            }
+            ClientDirectMessage::TrafficMatchResummarizeResponse { accepted, message } => {
+                if let Some(tx) = state.pending_traffic_match_resummarize.take() {
+                    let result = if accepted {
+                        Ok(())
+                    } else {
+                        Err(message.unwrap_or_else(|| "Re-summarize rejected".into()))
+                    };
+                    let _ = tx.send(result);
                 }
             }
             ClientDirectMessage::InterceptRuleListResponse { rules } => {
@@ -1400,6 +1411,21 @@ impl Client {
         };
         self.request("traffic clear", |s| &mut s.pending_traffic_clear, message)
             .await
+    }
+
+    pub async fn resummarize_traffic_match(&self, match_id: i64) -> Result<()> {
+        let message = ClientSignalMessage::TrafficMatchResummarize {
+            client_id: self.client_id.clone(),
+            match_id,
+        };
+        let result: Result<(), String> = self
+            .request(
+                "traffic match resummarize",
+                |s| &mut s.pending_traffic_match_resummarize,
+                message,
+            )
+            .await?;
+        result.map_err(|e| anyhow!(e))
     }
 
     pub async fn fetch_traffic_entry(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {

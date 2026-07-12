@@ -13,8 +13,7 @@ use crate::app::App;
 use crate::app::intercept::{FormMode, RuleForm, RuleFormField};
 use crate::ui::chrome;
 use crate::ui::theme::{
-    ACCENT, BG, BG_ELEMENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT,
-    TEXT_BRIGHT,
+    ACCENT, BG_ELEMENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
 };
 
 pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
@@ -114,7 +113,6 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[2]);
 
     render_hints(f, chunks[3]);
-    let _ = (BG, BG_ELEMENT, TEXT);
 }
 
 fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormField) {

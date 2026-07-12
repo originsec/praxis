@@ -15,7 +15,7 @@ use crate::app::App;
 use crate::app::intercept::{DisplayRow, InterceptState};
 use crate::ui::chrome;
 use crate::ui::common::{focused_titled_panel, short_id};
-use crate::ui::intercept::body_lines;
+use crate::ui::intercept::{body_lines, search_bar};
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, PROTO_H2, PROTO_WS, STATUS_2XX, STATUS_3XX, STATUS_4XX,
     STATUS_5XX, TEXT, TEXT_BRIGHT, WARN,
@@ -43,24 +43,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
     let state = &app.intercept;
-    let search_span = if state.search_focused {
-        if state.search_input.is_empty() {
-            Span::styled("\u{2588}", Style::default().fg(ACCENT))
-        } else {
-            Span::styled(
-                format!("{}\u{2588}", state.search_input),
-                Style::default().fg(ACCENT),
-            )
-        }
-    } else if state.search_input.is_empty() {
-        Span::styled(
-            "(/ search  ^\u{21b5} server)",
-            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-        )
-    } else {
-        Span::styled(state.search_input.clone(), Style::default().fg(ACCENT))
-    };
-
     let node_label = match state.node_filter.as_deref() {
         None => "all".to_string(),
         Some(id) => {
@@ -78,33 +60,16 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
         None => "all".to_string(),
         Some(a) => a.to_string(),
     };
-
     let showing = state.display_rows.len();
     let total = state.total_in_service.max(state.buffer.len());
 
-    let mut full = vec![
-        Span::styled("/", Style::default().fg(TEXT_BRIGHT)),
-        Span::raw(" "),
-        search_span,
-        Span::raw("    "),
+    let groups = [
+        search_bar::pill_spans("node", &node_label),
+        search_bar::pill_spans("agent", &agent_label),
+        search_bar::pill_spans("showing", &format!("{}/{}", showing, total)),
+        search_bar::pill_spans("body", state.body_mode.label()),
     ];
-    full.extend(chrome::pill_two_tone("node", &node_label, ACCENT));
-    full.push(Span::raw("  "));
-    full.extend(chrome::pill_two_tone("agent", &agent_label, ACCENT));
-    full.push(Span::raw("  "));
-    full.extend(chrome::pill_two_tone(
-        "showing",
-        &format!("{}/{}", showing, total),
-        MUTED,
-    ));
-    full.push(Span::raw("  "));
-    full.extend(chrome::pill_two_tone(
-        "body",
-        state.body_mode.label(),
-        ACCENT,
-    ));
-
-    f.render_widget(Paragraph::new(Line::from(full)), area);
+    search_bar::render(f, area, app, &groups);
 }
 
 fn render_table(f: &mut Frame, area: Rect, app: &App) {
@@ -114,7 +79,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
         Cell::from("Time"),
         Cell::from("Agent"),
         Cell::from("Method"),
-        Cell::from("Status"),
+        Cell::from("Info"),
         Cell::from("URL"),
     ])
     .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
@@ -523,12 +488,10 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 pub fn hints(app: &App) -> Line<'static> {
+    use crate::ui::intercept::hints as shared;
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
-    Line::from(vec![
-        Span::styled("/", key),
-        Span::styled(" search", label),
-        Span::raw("    "),
+    shared::line_with_tier(vec![
         Span::styled("n", key),
         Span::styled(" node", label),
         Span::raw("    "),

@@ -5,9 +5,11 @@
 //
 
 mod form;
+pub mod hints;
 mod log;
 mod matches;
 mod rules;
+mod search_bar;
 
 use crate::app::App;
 use crate::app::intercept::{InterceptTab, body::BodyMode};
@@ -25,19 +27,11 @@ pub(super) fn body_lines(bytes: &[u8], mode: BodyMode) -> Vec<ratatui::text::Lin
     crate::app::intercept::body::render_body(bytes, mode)
 }
 
-pub fn tab_at_column(rel_col: u16) -> Option<InterceptTab> {
-    let mut x = 0u16;
-    for tab in [
-        InterceptTab::Traffic,
-        InterceptTab::Rules,
-        InterceptTab::Matches,
-    ] {
-        let label = tab.label();
-        let width = (label.len() + 4) as u16;
-        if rel_col >= x && rel_col < x + width {
+pub fn tab_at_column(rel_col: u16, regions: &[(InterceptTab, u16, u16)]) -> Option<InterceptTab> {
+    for &(tab, start, end) in regions {
+        if rel_col >= start && rel_col < end {
             return Some(tab);
         }
-        x += width + 4;
     }
     None
 }
@@ -165,27 +159,34 @@ fn render_status_strip(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
     let count = app.intercept.buffer.len();
-    let rules_count = app.intercept.rules.len();
+    let rules_count = app.intercept.filtered_rule_ids().len();
     let matches_count = app.intercept.filtered_matches_len();
 
+    let tab_specs = [
+        (InterceptTab::Traffic, InterceptTab::Traffic.label(), count),
+        (InterceptTab::Rules, InterceptTab::Rules.label(), rules_count),
+        (InterceptTab::Matches, InterceptTab::Matches.label(), matches_count),
+    ];
+
+    let mut regions: Vec<(InterceptTab, u16, u16)> = Vec::new();
+    let mut x = 0u16;
+    for (i, (tab, label, n)) in tab_specs.iter().enumerate() {
+        let w = chrome::tab_width(label, Some(*n));
+        regions.push((*tab, x, x + w));
+        x += w;
+        if i + 1 < tab_specs.len() {
+            x += chrome::tab_sep_width();
+        }
+    }
+    *app.intercept.tab_hit_regions.borrow_mut() = regions;
+
     let mut spans: Vec<Span> = Vec::new();
-    spans.extend(chrome::tab(
-        InterceptTab::Traffic.label(),
-        Some(count),
-        app.intercept.tab == InterceptTab::Traffic,
-    ));
-    spans.push(chrome::tab_sep());
-    spans.extend(chrome::tab(
-        InterceptTab::Rules.label(),
-        Some(rules_count),
-        app.intercept.tab == InterceptTab::Rules,
-    ));
-    spans.push(chrome::tab_sep());
-    spans.extend(chrome::tab(
-        InterceptTab::Matches.label(),
-        Some(matches_count),
-        app.intercept.tab == InterceptTab::Matches,
-    ));
+    for (i, (tab, label, n)) in tab_specs.iter().enumerate() {
+        if i > 0 {
+            spans.push(chrome::tab_sep());
+        }
+        spans.extend(chrome::tab(label, Some(*n), app.intercept.tab == *tab));
+    }
 
     if app.intercept.paused {
         spans.push(Span::raw("    "));

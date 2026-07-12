@@ -5,7 +5,7 @@
 // broadcast payload strips them.
 //
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
@@ -149,8 +149,6 @@ pub struct InterceptState {
     pub rule_selected_id: Option<i64>,
     pub rule_form: Option<RuleForm>,
     pub rules_loaded: bool,
-    pub rule_filter: String,
-    pub rule_filter_focused: bool,
 
     //
     // Resizable split percentage for the Log tab (list vs detail). 0-100.
@@ -189,6 +187,8 @@ pub struct InterceptState {
     pub group_frame_selected: usize,
     pub status_message: Option<(String, Instant)>,
     pub jump_traffic_id: Option<i64>,
+    pub tab_hit_regions: RefCell<Vec<(InterceptTab, u16, u16)>>,
+    pub resummarize_pending: HashSet<i64>,
 }
 
 impl Default for InterceptState {
@@ -224,8 +224,6 @@ impl Default for InterceptState {
             rule_selected_id: None,
             rule_form: None,
             rules_loaded: false,
-            rule_filter: String::new(),
-            rule_filter_focused: false,
             log_split_percent: 55,
             log_dragging: false,
             match_split_percent: 55,
@@ -240,6 +238,8 @@ impl Default for InterceptState {
             intercept_statuses: HashMap::new(),
             traffic_match_rules: HashMap::new(),
             rule_match_counts: HashMap::new(),
+            tab_hit_regions: RefCell::new(Vec::new()),
+            resummarize_pending: HashSet::new(),
         }
     }
 }
@@ -306,6 +306,11 @@ impl InterceptState {
         let rule = self.rules.iter().find(|r| r.id == m.match_info.rule_id);
         match (&m.match_info.summary, rule.and_then(|r| r.summarization_prompt.as_ref())) {
             (Some(_), _) => SummaryStatus::Ready,
+            (None, Some(_))
+                if self.resummarize_pending.contains(&m.match_info.id) =>
+            {
+                SummaryStatus::Pending
+            }
             (None, Some(_)) => SummaryStatus::Pending,
             (None, None) => SummaryStatus::NotConfigured,
         }
@@ -332,17 +337,63 @@ impl InterceptState {
         out
     }
 
+    pub fn text_matches_search(&self, text: &str) -> bool {
+        if self.search_input.is_empty() {
+            return true;
+        }
+        if let Some(ref re) = self.search_regex
+            && re.is_match(text)
+        {
+            return true;
+        }
+        text.to_lowercase()
+            .contains(&self.search_input.to_lowercase())
+    }
+
+    pub fn rule_passes_search(&self, rule: &InterceptRule) -> bool {
+        self.text_matches_search(&rule.name) || self.text_matches_search(&rule.regex_pattern)
+    }
+
+    pub fn match_passes_search(&self, m: &TrafficMatchWithDetails) -> bool {
+        self.text_matches_search(&m.match_info.rule_name)
+            || self.text_matches_search(&m.traffic.url)
+            || self.text_matches_search(&m.traffic.agent_short_name)
+            || m
+                .match_info
+                .summary
+                .as_ref()
+                .is_some_and(|s| self.text_matches_search(s))
+    }
+
     pub fn filtered_rule_ids(&self) -> Vec<i64> {
-        let filter = self.rule_filter.to_lowercase();
         self.rules
             .iter()
-            .filter(|rule| {
-                filter.is_empty()
-                    || rule.name.to_lowercase().contains(&filter)
-                    || rule.regex_pattern.to_lowercase().contains(&filter)
-            })
+            .filter(|rule| self.rule_passes_search(rule))
             .map(|r| r.id)
             .collect()
+    }
+
+    fn reconcile_rule_selection(&mut self) {
+        let ids = self.filtered_rule_ids();
+        if ids.is_empty() {
+            self.rule_selected_id = None;
+            return;
+        }
+        if let Some(id) = self.rule_selected_id {
+            if ids.contains(&id) {
+                return;
+            }
+        }
+        self.rule_selected_id = Some(ids[0]);
+    }
+
+    fn reconcile_match_selection(&mut self) {
+        let total = self.filtered_matches_len();
+        if total == 0 {
+            self.match_selected = 0;
+        } else if self.match_selected >= total {
+            self.match_selected = total - 1;
+        }
     }
 
     pub fn resolve_jump_traffic_selection(&mut self) {
@@ -468,6 +519,9 @@ impl InterceptState {
     pub fn push_matches(&mut self, incoming: Vec<TrafficMatchWithDetails>) {
         for m in incoming {
             let match_id = m.match_info.id;
+            if m.match_info.summary.is_some() {
+                self.resummarize_pending.remove(&match_id);
+            }
             if let Some(pos) = self
                 .matches
                 .iter()
@@ -480,6 +534,7 @@ impl InterceptState {
             }
         }
         self.rebuild_match_indexes();
+        self.reconcile_match_selection();
     }
 
     pub fn apply_search(&mut self, s: String) {
@@ -487,22 +542,21 @@ impl InterceptState {
         self.search_regex = if self.search_input.is_empty() {
             None
         } else {
-            //
-            // Prefer the user's literal regex when it compiles; fall
-            // back to the escaped form so typing `(` mid-stream doesn't
-            // drop the filter.
-            //
             Regex::new(&format!("(?i){}", self.search_input))
                 .ok()
                 .or_else(|| Regex::new(&format!("(?i){}", regex::escape(&self.search_input))).ok())
         };
         self.display_dirty = true;
+        self.reconcile_rule_selection();
+        self.reconcile_match_selection();
     }
 
     pub fn clear_search(&mut self) {
         self.search_input.clear();
         self.search_regex = None;
         self.display_dirty = true;
+        self.reconcile_rule_selection();
+        self.reconcile_match_selection();
     }
 
     pub fn set_node_filter(&mut self, node_id: Option<String>) {
@@ -716,13 +770,16 @@ impl InterceptState {
     //
 
     pub fn filtered_matches(&self) -> Vec<&TrafficMatchWithDetails> {
+        self.matches
+            .iter()
+            .filter(|m| self.match_passes_structured_filter(m) && self.match_passes_search(m))
+            .collect()
+    }
+
+    fn match_passes_structured_filter(&self, m: &TrafficMatchWithDetails) -> bool {
         match self.match_rule_filter {
-            Some(rid) => self
-                .matches
-                .iter()
-                .filter(|m| m.match_info.rule_id == rid)
-                .collect(),
-            None => self.matches.iter().collect(),
+            Some(rid) => m.match_info.rule_id == rid,
+            None => true,
         }
     }
 
@@ -733,25 +790,17 @@ impl InterceptState {
     //
 
     pub fn filtered_matches_len(&self) -> usize {
-        match self.match_rule_filter {
-            Some(rid) => self
-                .matches
-                .iter()
-                .filter(|m| m.match_info.rule_id == rid)
-                .count(),
-            None => self.matches.len(),
-        }
+        self.matches
+            .iter()
+            .filter(|m| self.match_passes_structured_filter(m) && self.match_passes_search(m))
+            .count()
     }
 
     pub fn filtered_match_at(&self, idx: usize) -> Option<&TrafficMatchWithDetails> {
-        match self.match_rule_filter {
-            Some(rid) => self
-                .matches
-                .iter()
-                .filter(|m| m.match_info.rule_id == rid)
-                .nth(idx),
-            None => self.matches.get(idx),
-        }
+        self.matches
+            .iter()
+            .filter(|m| self.match_passes_structured_filter(m) && self.match_passes_search(m))
+            .nth(idx)
     }
 
     pub fn move_match_selection(&mut self, delta: i32) {
@@ -1166,17 +1215,11 @@ impl App {
     //
 
     pub async fn handle_intercept_key(&mut self, key: KeyEvent) {
-        //
-        // Rule form captures all keys until closed.
-        //
         if self.intercept.rule_form.is_some() {
             self.handle_rule_form_key(key).await;
             return;
         }
 
-        //
-        // Tab navigation (works regardless of focus).
-        //
         match key.code {
             KeyCode::Tab => {
                 self.intercept.tab = self.intercept.tab.next();
@@ -1191,6 +1234,23 @@ impl App {
             _ => {}
         }
 
+        if self.intercept.search_focused {
+            self.handle_intercept_search_key(key).await;
+            return;
+        }
+
+        if key.code == KeyCode::Char('/')
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.intercept.search_focused = true;
+            return;
+        }
+
+        if key.code == KeyCode::Esc {
+            self.handle_intercept_esc().await;
+            return;
+        }
+
         match self.intercept.tab {
             InterceptTab::Traffic => self.handle_intercept_traffic_key(key).await,
             InterceptTab::Rules => self.handle_intercept_rules_key(key).await,
@@ -1198,44 +1258,69 @@ impl App {
         }
     }
 
-    async fn handle_intercept_traffic_key(&mut self, key: KeyEvent) {
-        //
-        // Search input capture.
-        //
-        if self.intercept.search_focused {
-            match key.code {
-                KeyCode::Esc => {
-                    self.intercept.search_focused = false;
-                }
-                KeyCode::Enter => {
-                    self.intercept.search_focused = false;
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        self.search_intercept_traffic_server().await;
-                    }
-                }
-                KeyCode::Backspace => {
-                    let mut s = self.intercept.search_input.clone();
-                    s.pop();
-                    self.intercept.apply_search(s);
-                }
-                KeyCode::Char(c) => {
-                    let mut s = self.intercept.search_input.clone();
-                    s.push(c);
-                    self.intercept.apply_search(s);
-                }
-                _ => {}
+    async fn handle_intercept_search_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.intercept.search_focused = false;
             }
+            KeyCode::Enter => {
+                self.intercept.search_focused = false;
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.intercept.tab == InterceptTab::Traffic
+                {
+                    self.search_intercept_traffic_server().await;
+                }
+            }
+            KeyCode::Backspace => {
+                let mut s = self.intercept.search_input.clone();
+                s.pop();
+                self.intercept.apply_search(s);
+            }
+            KeyCode::Char(c) => {
+                let mut s = self.intercept.search_input.clone();
+                s.push(c);
+                self.intercept.apply_search(s);
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_intercept_esc(&mut self) {
+        if self.intercept.search_focused {
+            self.intercept.search_focused = false;
+            return;
+        }
+        if !self.intercept.search_input.is_empty() {
+            self.intercept.clear_search();
             return;
         }
 
-        match key.code {
-            KeyCode::Esc => {
+        match self.intercept.tab {
+            InterceptTab::Traffic => {
                 if self.intercept.detail_focus {
                     self.intercept.detail_focus = false;
-                } else if !self.intercept.search_input.is_empty() {
-                    self.intercept.clear_search();
+                } else if self.intercept.node_filter.is_some() || self.intercept.agent_filter.is_some()
+                {
+                    self.intercept.set_node_filter(None);
+                    self.intercept.set_agent_filter(None);
+                    self.refresh_intercept_log().await;
                 }
             }
+            InterceptTab::Rules => {}
+            InterceptTab::Matches => {
+                if self.intercept.match_detail_focus {
+                    self.intercept.match_detail_focus = false;
+                } else if self.intercept.match_rule_filter.is_some() {
+                    self.intercept.match_rule_filter = None;
+                    self.intercept.match_selected = 0;
+                    self.intercept.reconcile_match_selection();
+                }
+            }
+        }
+    }
+
+    async fn handle_intercept_traffic_key(&mut self, key: KeyEvent) {
+        match key.code {
             KeyCode::Left => {
                 //
                 // Move from detail back to the list pane. Mirrors the
@@ -1315,9 +1400,6 @@ impl App {
                     self.fetch_body_for_selected().await;
                 }
             }
-            KeyCode::Char('/') => {
-                self.intercept.search_focused = true;
-            }
             KeyCode::Char('n') => {
                 self.cycle_node_filter();
                 self.refresh_intercept_log().await;
@@ -1382,35 +1464,11 @@ impl App {
             (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
                 self.duplicate_selected_rule().await;
             }
-            (KeyCode::Char('/'), _) => {
-                self.intercept.rule_filter_focused = true;
-            }
             (KeyCode::Char('r'), m) if !m.contains(KeyModifiers::CONTROL) => {
-                if self.intercept.rule_filter_focused {
-                    self.intercept.rule_filter.push('r');
-                } else {
-                    self.refresh_intercept_rules().await;
-                }
-            }
-            (KeyCode::Esc, _) => {
-                if self.intercept.rule_filter_focused {
-                    self.intercept.rule_filter_focused = false;
-                } else if !self.intercept.rule_filter.is_empty() {
-                    self.intercept.rule_filter.clear();
-                }
-            }
-            (KeyCode::Backspace, _) if self.intercept.rule_filter_focused => {
-                self.intercept.rule_filter.pop();
-            }
-            (KeyCode::Char(c), m)
-                if self.intercept.rule_filter_focused && !m.contains(KeyModifiers::CONTROL) =>
-            {
-                self.intercept.rule_filter.push(c);
+                self.refresh_intercept_rules().await;
             }
             (KeyCode::Enter, _) => {
-                if self.intercept.rule_filter_focused {
-                    self.intercept.rule_filter_focused = false;
-                } else if let Some(rule) = self.intercept.selected_rule() {
+                if let Some(rule) = self.intercept.selected_rule() {
                     let rid = rule.id;
                     self.intercept.match_rule_filter = Some(rid);
                     self.intercept.tab = InterceptTab::Matches;
@@ -1456,15 +1514,31 @@ impl App {
                     self.fetch_body_for_match_selected().await;
                 }
             }
-            (KeyCode::PageUp, _) => self.intercept.move_match_selection(-10),
-            (KeyCode::PageDown, _) => {
-                let at_end = self.intercept.match_selected + 1
-                    >= self.intercept.filtered_matches_len();
-                if at_end && self.intercept.matches.len() < self.intercept.match_total {
-                    self.load_more_intercept_matches().await;
+            (KeyCode::PageUp, _) => {
+                if self.intercept.match_detail_focus {
+                    self.intercept.match_detail_scroll =
+                        self.intercept.match_detail_scroll.saturating_sub(10);
                 } else {
-                    self.intercept.move_match_selection(10);
-                    self.fetch_body_for_match_selected().await;
+                    self.intercept.move_match_selection(-10);
+                }
+            }
+            (KeyCode::PageDown, _) => {
+                if self.intercept.match_detail_focus {
+                    let max = self.intercept.match_detail_max_scroll.get();
+                    self.intercept.match_detail_scroll = self
+                        .intercept
+                        .match_detail_scroll
+                        .saturating_add(10)
+                        .min(max);
+                } else {
+                    let at_end = self.intercept.match_selected + 1
+                        >= self.intercept.filtered_matches_len();
+                    if at_end && self.intercept.matches.len() < self.intercept.match_total {
+                        self.load_more_intercept_matches().await;
+                    } else {
+                        self.intercept.move_match_selection(10);
+                        self.fetch_body_for_match_selected().await;
+                    }
                 }
             }
             (KeyCode::Enter, _) => {
@@ -1473,12 +1547,8 @@ impl App {
                     self.fetch_body_for_match_selected().await;
                 }
             }
-            (KeyCode::Esc, _) => {
-                if self.intercept.match_detail_focus {
-                    self.intercept.match_detail_focus = false;
-                } else if self.intercept.match_rule_filter.is_some() {
-                    self.intercept.match_rule_filter = None;
-                }
+            (KeyCode::Char('r'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.resummarize_selected_match().await;
             }
             (KeyCode::Char('f'), _) => {
                 self.cycle_match_rule_filter();
@@ -1491,7 +1561,9 @@ impl App {
             (KeyCode::Char('n'), m) if m.contains(KeyModifiers::CONTROL) => {
                 self.create_rule_from_match();
             }
-            (KeyCode::Char('r'), _) => self.refresh_intercept_matches().await,
+            (KeyCode::Char('r'), m) if !m.contains(KeyModifiers::CONTROL) => {
+                self.refresh_intercept_matches().await;
+            }
             (KeyCode::Char('y'), _) => self.copy_intercept_selection(),
             (KeyCode::Char('b'), _) => {
                 self.intercept.body_mode = self.intercept.body_mode.cycle();
@@ -1703,8 +1775,43 @@ impl App {
     // another modal surface.
     //
 
+    pub async fn resummarize_selected_match(&mut self) {
+        let match_id = match self
+            .intercept
+            .filtered_match_at(self.intercept.match_selected)
+        {
+            Some(m) => m.match_info.id,
+            None => return,
+        };
+        match self.client.resummarize_traffic_match(match_id).await {
+            Ok(()) => {
+                self.intercept.resummarize_pending.insert(match_id);
+                if let Some(pos) = self
+                    .intercept
+                    .matches
+                    .iter()
+                    .position(|m| m.match_info.id == match_id)
+                {
+                    self.intercept.matches[pos].match_info.summary = None;
+                }
+                self.intercept.set_status_message("Re-summarizing…");
+            }
+            Err(e) => self.intercept.set_error(format!("Re-summarize: {}", e)),
+        }
+    }
+
     fn cycle_node_filter(&mut self) {
-        let nodes = self.intercept.unique_nodes();
+        let mut nodes: Vec<String> = self
+            .nodes
+            .nodes
+            .iter()
+            .map(|n| n.node_id.clone())
+            .collect();
+        if nodes.is_empty() {
+            nodes = self.intercept.unique_nodes();
+        }
+        nodes.sort();
+        nodes.dedup();
         if nodes.is_empty() {
             return;
         }
@@ -1723,9 +1830,19 @@ impl App {
     }
 
     fn cycle_agent_filter(&mut self) {
-        let agents = self
-            .intercept
-            .unique_agents(self.intercept.node_filter.as_deref());
+        let node_scope = self.intercept.node_filter.as_deref();
+        let mut agents: Vec<String> = self
+            .nodes
+            .nodes
+            .iter()
+            .filter(|n| node_scope.is_none() || node_scope == Some(n.node_id.as_str()))
+            .flat_map(|n| n.discovered_agents.iter().map(|a| a.short_name.clone()))
+            .collect();
+        if agents.is_empty() {
+            agents = self.intercept.unique_agents(node_scope);
+        }
+        agents.sort();
+        agents.dedup();
         if agents.is_empty() {
             return;
         }
@@ -1777,7 +1894,8 @@ impl App {
                 // Hit-box by approximate column ranges kept in sync with
                 // ui::intercept::mod::render_tabs.
                 //
-                if let Some(tab) = crate::ui::intercept::tab_at_column(rel) {
+                let regions = self.intercept.tab_hit_regions.borrow();
+                if let Some(tab) = crate::ui::intercept::tab_at_column(rel, &regions) {
                     self.intercept.tab = tab;
                     return;
                 }

@@ -13,38 +13,14 @@ use ratatui::widgets::{Cell, Row, Table, TableState};
 use crate::app::App;
 use crate::ui::chrome;
 use crate::ui::common::titled_panel;
-use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, TEXT, TEXT_BRIGHT};
+use crate::ui::intercept::{hints as shared_hints, search_bar};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     use ratatui::layout::Layout;
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
 
-    let filter_span = if app.intercept.rule_filter_focused {
-        if app.intercept.rule_filter.is_empty() {
-            Span::styled("\u{2588}", Style::default().fg(ACCENT))
-        } else {
-            Span::styled(
-                format!("{}\u{2588}", app.intercept.rule_filter),
-                Style::default().fg(ACCENT),
-            )
-        }
-    } else if app.intercept.rule_filter.is_empty() {
-        Span::styled(
-            "(/ to filter)",
-            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-        )
-    } else {
-        Span::styled(
-            app.intercept.rule_filter.clone(),
-            Style::default().fg(ACCENT),
-        )
-    };
-    let filter_line = Line::from(vec![
-        Span::styled("/", Style::default().fg(TEXT_BRIGHT)),
-        Span::raw(" "),
-        filter_span,
-    ]);
-    f.render_widget(ratatui::widgets::Paragraph::new(filter_line), chunks[0]);
+    search_bar::render(f, chunks[0], app, &[]);
 
     let block = titled_panel(" Intercept rules ");
 
@@ -163,14 +139,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             empty_area,
         );
     }
-
-    let _ = TEXT;
 }
 
-pub fn hints(app: &App) -> Line<'static> {
+pub fn hints(_app: &App) -> Line<'static> {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
-    let mut spans = vec![
+    shared_hints::line_with_tier(vec![
         Span::styled("^n", key),
         Span::styled(" new", label),
         Span::raw("    "),
@@ -178,24 +152,18 @@ pub fn hints(app: &App) -> Line<'static> {
         Span::styled(" edit", label),
         Span::raw("    "),
         Span::styled("^u", key),
-        Span::styled(" duplicate", label),
+        Span::styled(" dup", label),
         Span::raw("    "),
         Span::styled("^d", key),
-        Span::styled(" delete", label),
+        Span::styled(" del", label),
         Span::raw("    "),
         Span::styled("space", key),
         Span::styled(" toggle", label),
         Span::raw("    "),
         Span::styled("\u{21b5}", key),
         Span::styled(" matches", label),
-    ];
-    if !app.intercept.rule_filter.is_empty() {
-        spans.push(Span::raw("    "));
-        spans.push(Span::styled("filter ", Style::default().fg(DIM)));
-        spans.push(Span::styled(
-            app.intercept.rule_filter.clone(),
-            Style::default().fg(ACCENT),
-        ));
-    }
-    Line::from(spans)
+        Span::raw("    "),
+        Span::styled("r", key),
+        Span::styled(" refresh", label),
+    ])
 }

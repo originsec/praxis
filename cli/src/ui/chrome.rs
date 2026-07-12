@@ -119,6 +119,19 @@ pub fn rubric(title: &str) -> Line<'static> {
 // (counts, badges) follow in DIM.
 //
 
+/// Width in terminal columns for a tab pill (label + optional count).
+pub fn tab_width(label: &str, count: Option<usize>) -> u16 {
+    let mut w = label.len() + 2; // surrounding spaces in " {} "
+    if let Some(n) = count {
+        w += n.to_string().len() + 1;
+    }
+    w as u16
+}
+
+pub fn tab_sep_width() -> u16 {
+    5 // "  ·  "
+}
+
 pub fn tab(label: &str, count: Option<usize>, active: bool) -> Vec<Span<'static>> {
     let label_style = if active {
         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
