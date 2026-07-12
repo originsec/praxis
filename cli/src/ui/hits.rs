@@ -1,8 +1,9 @@
 use ratatui::layout::Rect;
 
 use crate::app::{
-    intercept::InterceptTab, log_query::LogQueryFocus, App, EditTarget, ElementKind,
-    OpsTab, SettingsTab, TriggerFormSection, Window,
+    intercept::{InterceptTab, RuleFormField},
+    log_query::LogQueryFocus,
+    App, EditTarget, ElementKind, OpsTab, ReconTab, SettingsTab, TriggerFormSection, Window,
 };
 use crate::ui::common::point_in;
 
@@ -17,6 +18,9 @@ pub enum MouseAction {
     InterceptMatchDetailFocus,
     InterceptLogSplitDragStart { outer_x: u16, outer_width: u16 },
     InterceptMatchSplitDragStart { outer_x: u16, outer_width: u16 },
+    InterceptRuleField(RuleFormField),
+    InterceptRuleSave,
+    InterceptRuleCancel,
     SelectRow(RowSelect),
 
     OpsTab(OpsTab),
@@ -29,6 +33,13 @@ pub enum MouseAction {
     NodesAgentRow { agents_start: u16 },
     NodesSplitDragStart { outer_x: u16, outer_width: u16 },
     NodesHint(NodesHintAction),
+
+    // Recon overlay (nodes window)
+    ReconTab(ReconTab),
+    ReconLeftPane { left_area: Rect },
+    ReconRightPane,
+    ReconSplitDragStart,
+    ReconHint(ReconHintAction),
 
     SettingsTab(SettingsTab),
 
@@ -93,6 +104,7 @@ pub enum MouseAction {
     ChainCycleCondition,
     ChainDeleteConnection,
     ChainPickOp,
+    ChainPickOpItem(usize),
     ChainCanvas,
     ChainEditorDismiss,
 }
@@ -149,6 +161,14 @@ pub enum NodesHintAction {
     AddRemote,
     Terminal,
     Sessions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReconHintAction {
+    Refresh,
+    Discover,
+    Edit,
+    Close,
 }
 
 #[derive(Clone)]

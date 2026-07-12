@@ -1608,7 +1608,7 @@ impl App {
         }
     }
 
-    async fn submit_rule_form(&mut self) {
+    pub(crate) async fn submit_rule_form(&mut self) {
         let form = match self.intercept.rule_form.as_ref() {
             Some(f) => f,
             None => return,

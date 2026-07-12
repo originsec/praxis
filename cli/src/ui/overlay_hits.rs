@@ -447,3 +447,54 @@ pub fn register_chain_form_hits(app: &App, hit: &ChainFormHitMap) {
     reg(app, &hit.canvas, MouseAction::ChainCanvas);
 }
 
+pub fn register_chain_editor_hits(
+    app: &App,
+    area: Rect,
+    form: &crate::app::ChainForm,
+    editor: &crate::app::ChainFormEditor,
+) {
+    use crate::app::ChainFormEditor;
+
+    let ChainFormEditor::PickOpName { cursor: _, filter } = editor;
+    let popup_w = 60u16.min(area.width.saturating_sub(4));
+    let popup_h = 16u16.min(area.height.saturating_sub(4));
+    let x = area.x + (area.width - popup_w) / 2;
+    let y = area.y + (area.height - popup_h) / 2;
+    let rect = Rect::new(x, y, popup_w, popup_h);
+    // border inset
+    let inner = Rect {
+        x: rect.x + 1,
+        y: rect.y + 1,
+        width: rect.width.saturating_sub(2),
+        height: rect.height.saturating_sub(2),
+    };
+
+    // Backdrop first so outside clicks dismiss; list rows registered after win.
+    app.hits_register(area, MouseAction::ChainEditorDismiss);
+
+    let filtered: Vec<&String> = form
+        .available_op_names
+        .iter()
+        .filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter.to_lowercase()))
+        .collect();
+    // Layout matches render_op_picker: title, filter, blank, then rows.
+    let list_start_y = inner.y + 3;
+    let max_rows = (inner.height as usize).saturating_sub(5);
+    let ChainFormEditor::PickOpName { cursor, .. } = editor;
+    let start = if *cursor >= max_rows && max_rows > 0 {
+        *cursor + 1 - max_rows
+    } else {
+        0
+    };
+    for vis in 0..max_rows {
+        let i = start + vis;
+        if i >= filtered.len() {
+            break;
+        }
+        app.hits_register(
+            Rect::new(inner.x, list_start_y + vis as u16, inner.width, 1),
+            MouseAction::ChainPickOpItem(i),
+        );
+    }
+}
+

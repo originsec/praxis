@@ -15,7 +15,6 @@ pub mod status_bar;
 pub mod theme;
 
 use crate::app::{App, Window};
-use crate::ui::hits::MouseAction;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin};
 use ratatui::style::{Modifier, Style};
@@ -63,10 +62,11 @@ pub fn render(f: &mut Frame, app: &App) {
             } else if let Some(ref cform) = app.chain_form {
                 let hit = chain_form::render_chain_form(f, chunks[2], cform);
                 *app.chain_form_hits.borrow_mut() = hit;
-                let hit = app.chain_form_hits.borrow().clone();
-                overlay_hits::register_chain_form_hits(app, &hit);
-                if cform.editor.is_some() {
-                    app.hits_register(chunks[2], MouseAction::ChainEditorDismiss);
+                if let Some(ref editor) = cform.editor {
+                    overlay_hits::register_chain_editor_hits(app, chunks[2], cform, editor);
+                } else {
+                    let hit = app.chain_form_hits.borrow().clone();
+                    overlay_hits::register_chain_form_hits(app, &hit);
                 }
             } else {
                 operations::render(f, chunks[2], app);

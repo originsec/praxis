@@ -143,6 +143,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             ])
             .split(content);
             rules::render(f, split[0], app);
+            register_rules_hits(app, content);
             form::render(f, split[1], rf, app);
         } else {
             form::render(f, content, rf, app);

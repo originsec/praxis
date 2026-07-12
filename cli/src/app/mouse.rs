@@ -3,8 +3,7 @@ use ratatui::layout::Rect;
 
 
 use crate::app::{
-    log_query::LogQueryFocus, AddRemoteNodeForm, App, ConfirmAction,
-    ConfirmKind, OpsTab, Window,
+    log_query::LogQueryFocus, AddRemoteNodeForm, App, ConfirmAction, ConfirmKind, OpsTab, Window,
 };
 use crate::ui::common::{drag_split_percent, table_row_at};
 use crate::ui::hits::{MouseAction, NodesHintAction, OpsHintAction, RowSelectKind};
@@ -51,8 +50,17 @@ impl App {
                 | MouseAction::ChainCycleCondition
                 | MouseAction::ChainDeleteConnection
                 | MouseAction::ChainPickOp
+                | MouseAction::ChainPickOpItem(_)
                 | MouseAction::ChainCanvas
                 | MouseAction::ChainEditorDismiss
+                | MouseAction::InterceptRuleField(_)
+                | MouseAction::InterceptRuleSave
+                | MouseAction::InterceptRuleCancel
+                | MouseAction::ReconTab(_)
+                | MouseAction::ReconLeftPane { .. }
+                | MouseAction::ReconRightPane
+                | MouseAction::ReconSplitDragStart
+                | MouseAction::ReconHint(_)
         )
     }
 
@@ -226,6 +234,7 @@ impl App {
 
             MouseAction::SelectRow(sel) => self.dispatch_row_select(mouse, sel).await,
 
+            // Overlay / recon actions are handled via is_overlay_action.
             _ => false,
         }
     }
@@ -430,6 +439,20 @@ impl App {
                         main_area.width,
                         mouse.column,
                     );
+                } else if self
+                    .nodes
+                    .recon
+                    .as_ref()
+                    .is_some_and(|r| r.recon_dragging)
+                {
+                    let areas = crate::ui::recon::recon_areas(content_area);
+                    if let Some(recon) = self.nodes.recon.as_mut() {
+                        recon.recon_split_percent = drag_split_percent(
+                            areas.content.x,
+                            areas.content.width,
+                            mouse.column,
+                        );
+                    }
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -437,6 +460,9 @@ impl App {
                 self.intercept.match_dragging = false;
                 self.nodes.dragging = false;
                 self.operations.dragging = false;
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.recon_dragging = false;
+                }
             }
             _ => {}
         }

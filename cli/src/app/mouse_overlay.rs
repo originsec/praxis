@@ -3,8 +3,12 @@
 use crossterm::event::MouseEvent;
 use ratatui::layout::{Constraint, Layout, Rect};
 
-use crate::app::{AddRemoteNodeForm, App, PopupKind, SettingsTab};
-use crate::ui::hits::{MouseAction, SessionHintAction};
+
+use crate::app::{
+    intercept::RuleFormField, AddRemoteNodeForm, App, ChainFormEditor, PopupKind, ReconTab,
+    SettingsTab,
+};
+use crate::ui::hits::{MouseAction, ReconHintAction, SessionHintAction};
 
 impl App {
     pub(crate) async fn dispatch_overlay_action(
@@ -300,6 +304,10 @@ impl App {
                 self.chain_form_canvas_down(mouse).await;
                 true
             }
+            MouseAction::ChainPickOpItem(idx) => {
+                self.dispatch_chain_pick_op_item(mouse, idx);
+                true
+            }
             MouseAction::ChainEditorDismiss => {
                 if let Some(form) = self.chain_form.as_mut() {
                     form.editor = None;
@@ -307,7 +315,177 @@ impl App {
                 true
             }
 
+            MouseAction::InterceptRuleField(field) => {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    form.focus = field;
+                    // Toggle/cycle fields activate on click.
+                    if matches!(
+                        field,
+                        RuleFormField::Direction | RuleFormField::Scope | RuleFormField::Summarize
+                    ) {
+                        form.cycle_current();
+                    }
+                }
+                true
+            }
+            MouseAction::InterceptRuleSave => {
+                self.submit_rule_form().await;
+                true
+            }
+            MouseAction::InterceptRuleCancel => {
+                self.intercept.rule_form = None;
+                true
+            }
+
+            MouseAction::ReconTab(tab) => {
+                self.dispatch_recon_tab(tab);
+                true
+            }
+            MouseAction::ReconLeftPane { left_area } => {
+                self.dispatch_recon_left_pane(mouse, left_area).await;
+                true
+            }
+            MouseAction::ReconRightPane => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.right_pane_focused = true;
+                }
+                true
+            }
+            MouseAction::ReconSplitDragStart => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.recon_dragging = true;
+                }
+                true
+            }
+            MouseAction::ReconHint(hint) => {
+                self.dispatch_recon_hint(hint).await;
+                true
+            }
+
             _ => false,
+        }
+    }
+
+    fn dispatch_chain_pick_op_item(&mut self, mouse: MouseEvent, idx: usize) {
+        let is_dbl = self.is_double_click(mouse.row, mouse.column);
+        let Some(form) = self.chain_form.as_mut() else {
+            return;
+        };
+        let Some(ChainFormEditor::PickOpName {
+            mut cursor,
+            filter,
+        }) = form.editor.take()
+        else {
+            return;
+        };
+        let filtered: Vec<String> = form
+            .available_op_names
+            .iter()
+            .filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter.to_lowercase()))
+            .cloned()
+            .collect();
+        if idx < filtered.len() {
+            cursor = idx;
+            if is_dbl {
+                if let Some(name) = filtered.get(cursor) {
+                    if let Some(el) = form.selected_block_mut() {
+                        el.op_name = name.clone();
+                    }
+                    return; // editor stays None
+                }
+            }
+        }
+        form.editor = Some(ChainFormEditor::PickOpName { cursor, filter });
+    }
+
+    fn dispatch_recon_tab(&mut self, tab: ReconTab) {
+        let Some(recon) = self.nodes.recon.as_mut() else {
+            return;
+        };
+        if recon.active_tab != tab {
+            recon.active_tab = tab;
+            recon.selected_left = 0;
+            recon.selected_right_scroll = 0;
+            recon.right_pane_focused = false;
+            recon.config_content_error = None;
+            recon.session_content_error = None;
+            recon.config_loading = false;
+            recon.session_loading = false;
+        }
+    }
+
+    async fn dispatch_recon_left_pane(&mut self, mouse: MouseEvent, left_area: Rect) {
+        let inner_x = left_area.x.saturating_add(1);
+        let inner_y = left_area.y.saturating_add(1);
+        let inner_w = left_area.width.saturating_sub(2);
+        let inner_h = left_area.height.saturating_sub(2);
+        let in_list = mouse.column >= inner_x
+            && mouse.column < inner_x + inner_w
+            && mouse.row >= inner_y
+            && mouse.row < inner_y + inner_h;
+
+        let mut fetch = false;
+        {
+            let Some(recon) = self.nodes.recon.as_mut() else {
+                return;
+            };
+            recon.right_pane_focused = false;
+            if !in_list {
+                return;
+            }
+            let (lines_per_item, max_items) = match recon.active_tab {
+                ReconTab::Config => (
+                    2usize,
+                    recon
+                        .recon_result
+                        .as_ref()
+                        .map_or(0, |r| r.config.items.len()),
+                ),
+                ReconTab::Tools => (1usize, 3usize),
+                ReconTab::Sessions => (
+                    3usize,
+                    recon
+                        .recon_result
+                        .as_ref()
+                        .map_or(0, |r| r.sessions.items.len()),
+                ),
+            };
+            let visible_items = (inner_h as usize / lines_per_item).max(1);
+            let scroll_offset = if recon.selected_left >= visible_items {
+                recon.selected_left.saturating_sub(visible_items - 1)
+            } else {
+                0
+            };
+            let rel_row = (mouse.row - inner_y) as usize;
+            let item_idx = scroll_offset + rel_row / lines_per_item;
+            if item_idx < max_items && item_idx != recon.selected_left {
+                recon.selected_left = item_idx;
+                recon.selected_right_scroll = 0;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                fetch = true;
+            }
+        }
+        if fetch {
+            self.handle_recon_enter().await;
+        }
+    }
+
+    async fn dispatch_recon_hint(&mut self, hint: ReconHintAction) {
+        match hint {
+            ReconHintAction::Refresh => self.trigger_recon_refresh(false).await,
+            ReconHintAction::Discover => self.trigger_recon_refresh(true).await,
+            ReconHintAction::Edit => {
+                if self
+                    .nodes
+                    .recon
+                    .as_ref()
+                    .is_some_and(|r| r.active_tab == ReconTab::Config)
+                {
+                    self.edit_recon_config_in_editor().await;
+                }
+            }
+            ReconHintAction::Close => self.close_recon(),
         }
     }
 

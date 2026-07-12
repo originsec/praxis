@@ -69,21 +69,6 @@ pub fn focused_panel(focused: bool) -> Block<'static> {
 }
 
 //
-// Hit-test whether the mouse is on the vertical border at the right
-// edge of `left` (i.e. the seam between `left` and its right-hand
-// neighbour). ±1 column tolerance so pixel-perfect clicks aren't
-// needed. Used by the resizable split panes.
-//
-
-pub fn hit_vertical_border(left: Rect, mouse_col: u16, mouse_row: u16) -> bool {
-    let border_x = left.x.saturating_add(left.width);
-    mouse_col + 1 >= border_x
-        && mouse_col <= border_x + 1
-        && mouse_row >= left.y
-        && mouse_row < left.y + left.height
-}
-
-//
 // Map a mouse column to a split percentage for a horizontal two-pane
 // drag. `outer_x` and `outer_width` describe the parent area the
 // split sits inside. Clamped to [20, 80] so neither pane collapses.

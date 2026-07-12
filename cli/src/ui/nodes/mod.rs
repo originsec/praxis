@@ -39,7 +39,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ref recon) = state.recon {
-        recon::render_recon(f, area, recon);
+        recon::render_recon(f, area, app, recon);
         return;
     }
 

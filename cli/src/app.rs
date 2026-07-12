@@ -28,7 +28,7 @@ use common::{
     ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, REMOTE_NODE_KINDS, SystemState,
 };
 use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use std::cell::{Cell, RefCell};
@@ -1872,251 +1872,9 @@ impl App {
         }
     }
 
-    async fn handle_recon_mouse(&mut self, mouse: MouseEvent) {
-        if self.nodes.recon.is_none() {
-            return;
-        }
-
-        //
-        // Mirror the main render layout so hit-testing lines up with what
-        // the user sees. ui::mod::render does:
-        //   inner = f.area().inner(Margin{1,2})
-        //   chunks = Layout::vertical([1,1,Min,1]).split(inner)
-        //   nodes::render gets chunks[2], which is then passed straight
-        //   to recon::render_recon.
-        //
-
-        let term_w = self.terminal_width;
-        let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
-        let terminal_area = Rect::new(0, 0, term_w, term_h);
-        let inner_area = terminal_area.inner(Margin {
-            vertical: 1,
-            horizontal: 2,
-        });
-        let main_chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(inner_area);
-        let recon_area = main_chunks[2];
-
-        let areas = crate::ui::recon::recon_areas(recon_area);
-        let tabs_area = areas.tabs;
-        let content_area = areas.content;
-
-        let Some(split_percent) = self.nodes.recon.as_ref().map(|r| r.recon_split_percent) else {
-            return;
-        };
-        let left_pct = split_percent.min(80).max(20);
-        let right_pct = 100u16.saturating_sub(left_pct);
-        let pane_chunks = Layout::horizontal([
-            Constraint::Percentage(left_pct),
-            Constraint::Percentage(right_pct),
-        ])
-        .split(content_area);
-        let left_area = pane_chunks[0];
-        let right_area = pane_chunks[1];
-
-        match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                let Some(recon) = self.nodes.recon.as_mut() else {
-                    return;
-                };
-                if recon.right_pane_focused {
-                    recon.selected_right_scroll = recon.selected_right_scroll.saturating_sub(3);
-                } else {
-                    recon.selected_left = recon.selected_left.saturating_sub(3);
-                    recon.config_content_error = None;
-                    recon.session_content_error = None;
-                    recon.selected_right_scroll = 0;
-                }
-            }
-            MouseEventKind::ScrollDown => {
-                let Some(recon) = self.nodes.recon.as_mut() else {
-                    return;
-                };
-                let left_max = match recon.active_tab {
-                    ReconTab::Config => recon
-                        .recon_result
-                        .as_ref()
-                        .map_or(0, |r| r.config.items.len().saturating_sub(1)),
-                    ReconTab::Tools => 2,
-                    ReconTab::Sessions => recon
-                        .recon_result
-                        .as_ref()
-                        .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
-                };
-                if recon.right_pane_focused {
-                    let max = recon.right_pane_max_scroll.get();
-                    recon.selected_right_scroll =
-                        recon.selected_right_scroll.saturating_add(3).min(max);
-                } else {
-                    recon.selected_left = (recon.selected_left + 3).min(left_max);
-                    recon.config_content_error = None;
-                    recon.session_content_error = None;
-                    recon.selected_right_scroll = 0;
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                //
-                // Tab bar click. Hit-test before the panes since the tab
-                // row sits above content_area.
-                //
-                if mouse.row == tabs_area.y
-                    && mouse.column >= tabs_area.x
-                    && mouse.column < tabs_area.x + tabs_area.width
-                {
-                    let counts = {
-                        let Some(recon) = self.nodes.recon.as_ref() else {
-                            return;
-                        };
-                        [
-                            recon
-                                .recon_result
-                                .as_ref()
-                                .map_or(0, |r| r.config.items.len()),
-                            recon.recon_result.as_ref().map_or(0, |r| {
-                                r.tools.mcp_servers.len()
-                                    + r.tools.skills.len()
-                                    + r.tools.internal_tools.len()
-                            }),
-                            recon
-                                .recon_result
-                                .as_ref()
-                                .map_or(0, |r| r.sessions.items.len()),
-                        ]
-                    };
-                    if let Some(new_tab) =
-                        crate::ui::recon::tab_at(tabs_area.x, mouse.column, counts)
-                    {
-                        let Some(recon) = self.nodes.recon.as_mut() else {
-                            return;
-                        };
-                        if recon.active_tab != new_tab {
-                            recon.active_tab = new_tab;
-                            recon.selected_left = 0;
-                            recon.selected_right_scroll = 0;
-                            recon.right_pane_focused = false;
-                            recon.config_content_error = None;
-                            recon.session_content_error = None;
-                            recon.config_loading = false;
-                            recon.session_loading = false;
-                        }
-                        return;
-                    }
-                }
-
-                if crate::ui::common::hit_vertical_border(left_area, mouse.column, mouse.row) {
-                    if let Some(recon) = self.nodes.recon.as_mut() {
-                        recon.recon_dragging = true;
-                    }
-                    return;
-                }
-
-                //
-                // Click in the left pane: focus it, and if the click
-                // landed on a list row, select that item and fetch its
-                // content (matching the Up/Down keyboard behaviour).
-                //
-                if mouse.column >= left_area.x
-                    && mouse.column < left_area.x + left_area.width
-                    && mouse.row >= left_area.y
-                    && mouse.row < left_area.y + left_area.height
-                {
-                    let inner_x = left_area.x.saturating_add(1);
-                    let inner_y = left_area.y.saturating_add(1);
-                    let inner_w = left_area.width.saturating_sub(2);
-                    let inner_h = left_area.height.saturating_sub(2);
-                    let in_list = mouse.column >= inner_x
-                        && mouse.column < inner_x + inner_w
-                        && mouse.row >= inner_y
-                        && mouse.row < inner_y + inner_h;
-
-                    let mut fetch = false;
-                    {
-                        let Some(recon) = self.nodes.recon.as_mut() else {
-                            return;
-                        };
-                        recon.right_pane_focused = false;
-
-                        if in_list {
-                            let (lines_per_item, max_items) = match recon.active_tab {
-                                ReconTab::Config => (
-                                    2usize,
-                                    recon
-                                        .recon_result
-                                        .as_ref()
-                                        .map_or(0, |r| r.config.items.len()),
-                                ),
-                                ReconTab::Tools => (1usize, 3usize),
-                                ReconTab::Sessions => (
-                                    3usize,
-                                    recon
-                                        .recon_result
-                                        .as_ref()
-                                        .map_or(0, |r| r.sessions.items.len()),
-                                ),
-                            };
-                            let visible_items = (inner_h as usize / lines_per_item).max(1);
-                            let scroll_offset = if recon.selected_left >= visible_items {
-                                recon.selected_left.saturating_sub(visible_items - 1)
-                            } else {
-                                0
-                            };
-                            let rel_row = (mouse.row - inner_y) as usize;
-                            let item_idx = scroll_offset + rel_row / lines_per_item;
-                            if item_idx < max_items && item_idx != recon.selected_left {
-                                recon.selected_left = item_idx;
-                                recon.selected_right_scroll = 0;
-                                recon.config_content_error = None;
-                                recon.session_content_error = None;
-                                fetch = true;
-                            }
-                        }
-                    }
-                    if fetch {
-                        self.handle_recon_enter().await;
-                    }
-                    return;
-                }
-
-                if mouse.column >= right_area.x
-                    && mouse.column < right_area.x + right_area.width
-                    && mouse.row >= right_area.y
-                    && mouse.row < right_area.y + right_area.height
-                {
-                    if let Some(recon) = self.nodes.recon.as_mut() {
-                        recon.right_pane_focused = true;
-                    }
-                    return;
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                let Some(recon) = self.nodes.recon.as_mut() else {
-                    return;
-                };
-                if recon.recon_dragging {
-                    recon.recon_split_percent = crate::ui::common::drag_split_percent(
-                        content_area.x,
-                        content_area.width,
-                        mouse.column,
-                    );
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                if let Some(recon) = self.nodes.recon.as_mut() {
-                    recon.recon_dragging = false;
-                }
-            }
-            _ => {}
-        }
-    }
-
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
         //
-        // Terminal mode: forward scroll as escape sequences.
+        // Terminal mode: scroll only (no HitLayer targets while in PTY view).
         //
 
         if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
@@ -2132,11 +1890,6 @@ impl App {
                     _ => {}
                 }
             }
-            return;
-        }
-
-        if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
-            self.handle_recon_mouse(mouse).await;
             return;
         }
 
@@ -2176,6 +1929,19 @@ impl App {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_sub(3);
                     }
+                    Window::Nodes if self.nodes.recon.is_some() => {
+                        if let Some(recon) = self.nodes.recon.as_mut() {
+                            if recon.right_pane_focused {
+                                recon.selected_right_scroll =
+                                    recon.selected_right_scroll.saturating_sub(3);
+                            } else {
+                                recon.selected_left = recon.selected_left.saturating_sub(3);
+                                recon.config_content_error = None;
+                                recon.session_content_error = None;
+                                recon.selected_right_scroll = 0;
+                            }
+                        }
+                    }
                     Window::Nodes if self.nodes.active_session().is_some() => {
                         if let Some(session) = self.nodes.active_session_mut() {
                             let max = session.max_scroll.get();
@@ -2212,6 +1978,31 @@ impl App {
                         let max = self.operations.exec_detail_max_scroll.get();
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_add(3).min(max);
+                    }
+                    Window::Nodes if self.nodes.recon.is_some() => {
+                        if let Some(recon) = self.nodes.recon.as_mut() {
+                            let left_max = match recon.active_tab {
+                                ReconTab::Config => recon
+                                    .recon_result
+                                    .as_ref()
+                                    .map_or(0, |r| r.config.items.len().saturating_sub(1)),
+                                ReconTab::Tools => 2,
+                                ReconTab::Sessions => recon
+                                    .recon_result
+                                    .as_ref()
+                                    .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
+                            };
+                            if recon.right_pane_focused {
+                                let max = recon.right_pane_max_scroll.get();
+                                recon.selected_right_scroll =
+                                    recon.selected_right_scroll.saturating_add(3).min(max);
+                            } else {
+                                recon.selected_left = (recon.selected_left + 3).min(left_max);
+                                recon.config_content_error = None;
+                                recon.session_content_error = None;
+                                recon.selected_right_scroll = 0;
+                            }
+                        }
                     }
                     Window::Nodes if self.nodes.active_session().is_some() => {
                         if let Some(session) = self.nodes.active_session_mut() {

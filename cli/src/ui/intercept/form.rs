@@ -52,6 +52,7 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
 
     let fields = form.fields();
     let mut lines: Vec<Line> = Vec::new();
+    let mut field_line_rows: Vec<(RuleFormField, u16)> = Vec::new();
 
     for (idx, field) in fields.iter().enumerate() {
         if idx == 2 {
@@ -60,6 +61,7 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
         if matches!(field, RuleFormField::Summarize) {
             lines.push(Line::from(""));
         }
+        field_line_rows.push((*field, lines.len() as u16));
         render_field(&mut lines, form, *field);
     }
 
@@ -112,7 +114,37 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm, app: &App) {
 
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[2]);
 
+    register_form_hits(app, chunks[2], chunks[3], &field_line_rows);
     render_hints(f, chunks[3]);
+}
+
+fn register_form_hits(
+    app: &App,
+    body: Rect,
+    hints: Rect,
+    field_line_rows: &[(RuleFormField, u16)],
+) {
+    use crate::ui::hits::{HintRegistrar, MouseAction};
+
+    for &(field, row) in field_line_rows {
+        if row < body.height {
+            app.hits_register(
+                Rect::new(body.x, body.y + row, body.width, 1),
+                MouseAction::InterceptRuleField(field),
+            );
+        }
+    }
+    // Match render_hints: "↑↓/tab fields    space/←→ cycle    ^s save    esc cancel"
+    let mut reg = HintRegistrar::new(app, hints);
+    reg.gap(11); // "↑↓/tab fields"
+    reg.gap(4);
+    reg.gap(15); // "space/←→ cycle"
+    reg.gap(4);
+    reg.chip("^s", MouseAction::InterceptRuleSave);
+    reg.chip(" save", MouseAction::InterceptRuleSave);
+    reg.gap(4);
+    reg.chip("esc", MouseAction::InterceptRuleCancel);
+    reg.chip(" cancel", MouseAction::InterceptRuleCancel);
 }
 
 fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormField) {
