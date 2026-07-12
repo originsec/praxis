@@ -2,8 +2,10 @@ mod executions;
 mod library;
 mod triggers;
 
-use crate::app::{OperationsState, OpsTab};
+use crate::app::{App, OperationsState, OpsTab};
 use crate::ui::chrome;
+use crate::ui::common::table_data_start_margin_header;
+use crate::ui::hits::{split_border_rect, HintRegistrar, MouseAction, OpsHintAction, RowSelect, RowSelectKind};
 use crate::ui::theme::{ACCENT, BORDER_SUBTLE, DIM, MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -13,30 +15,11 @@ use ratatui::widgets::Paragraph;
 
 pub use executions::execution_detail_section_at_row;
 
-pub fn tab_at_column(rel_col: u16, exec_count: usize, lib_count: usize, trig_count: usize) -> Option<OpsTab> {
-    let specs = [
-        (OpsTab::Executions, "Executions", exec_count),
-        (OpsTab::Library, "Library", lib_count),
-        (OpsTab::Triggers, "Triggers", trig_count),
-    ];
-    let mut x = 0u16;
-    for (i, (tab, label, n)) in specs.iter().enumerate() {
-        let w = chrome::tab_width(label, Some(*n));
-        if rel_col >= x && rel_col < x + w {
-            return Some(*tab);
-        }
-        x += w;
-        if i + 1 < specs.len() {
-            x += chrome::tab_sep_width();
-        }
-    }
-    None
-}
-
 pub(super) const CHAIN_COLOR: Color = Color::Rgb(95, 195, 195);
 pub(super) const OP_COLOR: Color = Color::Rgb(180, 130, 215);
 
-pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.operations;
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
         Constraint::Length(1), // divider
@@ -45,7 +28,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     ])
     .split(area);
 
-    render_tabs(f, chunks[0], state);
+    render_tabs(f, chunks[0], app, state);
     render_divider(f, chunks[1]);
 
     match state.tab {
@@ -54,10 +37,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
         OpsTab::Triggers => triggers::render_triggers(f, chunks[2], state),
     }
 
-    render_hints(f, chunks[3], state);
+    register_content_hits(app, chunks[2], state);
+    render_hints(f, chunks[3], app, state);
 }
 
-fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
+fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
     let lib_count = state.op_definitions.iter().filter(|d| !d.disabled).count()
         + state
             .chain_definitions
@@ -66,6 +50,24 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
             .count();
     let exec_count = state.operations.len() + state.chain_executions.len();
     let trig_count = state.triggers.len();
+
+    let specs = [
+        (OpsTab::Executions, "Executions", exec_count),
+        (OpsTab::Library, "Library", lib_count),
+        (OpsTab::Triggers, "Triggers", trig_count),
+    ];
+    let mut x = 0u16;
+    for (i, (tab, label, n)) in specs.iter().enumerate() {
+        let w = chrome::tab_width(label, Some(*n));
+        app.hits_register(
+            Rect::new(area.x.saturating_add(x), area.y, w, 1),
+            MouseAction::OpsTab(*tab),
+        );
+        x += w;
+        if i + 1 < specs.len() {
+            x += chrome::tab_sep_width();
+        }
+    }
 
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(chrome::tab(
@@ -103,13 +105,30 @@ fn render_divider(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
+fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
     let gap = Span::raw("    ");
+    let mut reg = HintRegistrar::new(app, area);
 
     let hints = match state.tab {
         OpsTab::Library => {
+            reg.chip("^r", MouseAction::OpsHint(OpsHintAction::Execute));
+            reg.chip(" execute", MouseAction::OpsHint(OpsHintAction::Execute));
+            reg.gap(4);
+            reg.chip("^n", MouseAction::OpsHint(OpsHintAction::NewOp));
+            reg.chip(" new op", MouseAction::OpsHint(OpsHintAction::NewOp));
+            reg.gap(4);
+            reg.chip("^!", MouseAction::OpsHint(OpsHintAction::NewChain));
+            reg.chip(" newchain", MouseAction::OpsHint(OpsHintAction::NewChain));
+            reg.gap(4);
+            reg.chip("^e", MouseAction::OpsHint(OpsHintAction::Edit));
+            reg.chip(" edit", MouseAction::OpsHint(OpsHintAction::Edit));
+            reg.gap(4);
+            reg.chip("^d", MouseAction::OpsHint(OpsHintAction::Delete));
+            reg.chip(" delete", MouseAction::OpsHint(OpsHintAction::Delete));
+            reg.gap(4);
+
             let mut spans = vec![
                 Span::styled("^r", key),
                 Span::styled(" execute", label),
@@ -131,6 +150,18 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             Line::from(spans)
         }
         OpsTab::Triggers => {
+            reg.chip("\u{21B5}", MouseAction::OpsHint(OpsHintAction::ToggleTrigger));
+            reg.chip(" toggle", MouseAction::OpsHint(OpsHintAction::ToggleTrigger));
+            reg.gap(4);
+            reg.chip("^n", MouseAction::OpsHint(OpsHintAction::NewTrigger));
+            reg.chip(" new", MouseAction::OpsHint(OpsHintAction::NewTrigger));
+            reg.gap(4);
+            reg.chip("^e", MouseAction::OpsHint(OpsHintAction::EditTrigger));
+            reg.chip(" edit", MouseAction::OpsHint(OpsHintAction::EditTrigger));
+            reg.gap(4);
+            reg.chip("^d", MouseAction::OpsHint(OpsHintAction::DeleteTrigger));
+            reg.chip(" delete", MouseAction::OpsHint(OpsHintAction::DeleteTrigger));
+
             let mut spans = vec![
                 Span::styled("\u{21B5}", key),
                 Span::styled(" toggle", label),
@@ -155,7 +186,6 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             Line::from(spans)
         }
         OpsTab::Executions => {
-            let mut spans: Vec<Span> = Vec::new();
             let sorted = crate::app::App::sorted_exec_static(
                 &state.operations,
                 &state.chain_executions,
@@ -184,11 +214,22 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 })
                 .unwrap_or(false);
 
+            let mut spans: Vec<Span> = Vec::new();
             if selected_active {
+                reg.chip("^c", MouseAction::OpsHint(OpsHintAction::CancelExecution));
+                reg.chip(" cancel", MouseAction::OpsHint(OpsHintAction::CancelExecution));
+                reg.gap(4);
                 spans.push(Span::styled("^c", key));
                 spans.push(Span::styled(" cancel", label));
                 spans.push(gap.clone());
             }
+            reg.chip("^d", MouseAction::OpsHint(OpsHintAction::DeleteExecution));
+            reg.chip(" delete", MouseAction::OpsHint(OpsHintAction::DeleteExecution));
+            reg.gap(4);
+            reg.chip("^x", MouseAction::OpsHint(OpsHintAction::ClearAllExecutions));
+            reg.chip(" clear all", MouseAction::OpsHint(OpsHintAction::ClearAllExecutions));
+            reg.gap(4);
+
             spans.push(Span::styled("^d", key));
             spans.push(Span::styled(" delete", label));
             spans.push(gap.clone());
@@ -201,6 +242,57 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
     };
 
     f.render_widget(Paragraph::new(hints), area);
+}
+
+fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
+    let pct = state.split_percent.clamp(20, 80);
+    let split = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(main_area);
+    let list_area = split[0];
+    let detail_area = split[1];
+    let detail_inner = Rect::new(
+        detail_area.x.saturating_add(1),
+        detail_area.y.saturating_add(1),
+        detail_area.width.saturating_sub(2),
+        detail_area.height.saturating_sub(2),
+    );
+
+    let border_rect = Rect {
+        height: main_area.height,
+        y: main_area.y,
+        ..list_area
+    };
+    app.hits_register(
+        split_border_rect(border_rect),
+        MouseAction::OpsSplitDragStart {
+            outer_x: main_area.x,
+            outer_width: main_area.width,
+        },
+    );
+
+    let row_kind = match state.tab {
+        OpsTab::Library => RowSelectKind::OpsLibrary,
+        OpsTab::Executions => RowSelectKind::OpsExecutions,
+        OpsTab::Triggers => RowSelectKind::OpsTriggers,
+    };
+    app.hits_register(
+        list_area,
+        MouseAction::SelectRow(RowSelect {
+            kind: row_kind,
+            table_area: list_area,
+            data_start: table_data_start_margin_header(list_area),
+        }),
+    );
+    app.hits_register(detail_area, MouseAction::OpsDetailFocus);
+    if state.tab == OpsTab::Executions {
+        app.hits_register(
+            detail_inner,
+            MouseAction::OpsExecDetail { inner: detail_inner },
+        );
+    }
 }
 
 fn append_filter_hint(spans: &mut Vec<Span<'static>>, state: &OperationsState) {

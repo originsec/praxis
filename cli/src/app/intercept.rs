@@ -5,7 +5,7 @@
 // broadcast payload strips them.
 //
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
@@ -187,7 +187,6 @@ pub struct InterceptState {
     pub group_frame_selected: usize,
     pub status_message: Option<(String, Instant)>,
     pub jump_traffic_id: Option<i64>,
-    pub tab_hit_regions: RefCell<Vec<(InterceptTab, u16, u16)>>,
 }
 
 impl Default for InterceptState {
@@ -237,7 +236,6 @@ impl Default for InterceptState {
             intercept_statuses: HashMap::new(),
             traffic_match_rules: HashMap::new(),
             rule_match_counts: HashMap::new(),
-            tab_hit_regions: RefCell::new(Vec::new()),
         }
     }
 }
@@ -1820,143 +1818,6 @@ impl App {
             }
         };
         self.intercept.set_agent_filter(new);
-    }
-
-    pub(crate) async fn handle_intercept_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
-        use crate::ui::common::{point_in, table_data_start_titled, table_row_at};
-        use crate::ui::intercept::{
-            chrome_layout, filter_and_table, filter_split, rules_list_area, show_banner,
-        };
-
-        let chrome = chrome_layout(content_area, show_banner(self));
-
-        //
-        // Tab click — regions computed in render_tabs from chrome::tab_width.
-        //
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if mouse.row == chrome.tabs.y {
-                let rel = mouse.column.saturating_sub(chrome.tabs.x);
-                let regions = self.intercept.tab_hit_regions.borrow();
-                if let Some(tab) = crate::ui::intercept::tab_at_column(rel, &regions) {
-                    self.intercept.tab = tab;
-                    return;
-                }
-            }
-        }
-
-        // Rule form overlay (non-Rules tab) replaces the body — no pane hit-tests.
-        if self.intercept.rule_form.is_some() && self.intercept.tab != InterceptTab::Rules {
-            return;
-        }
-
-        //
-        // Per-tab body — Traffic and Matches: filter bar + resizable split.
-        //
-        match self.intercept.tab {
-            InterceptTab::Traffic => {
-                let panes = filter_split(chrome.body, self.intercept.log_split_percent);
-                match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(panes.left, mouse.column, mouse.row)
-                        {
-                            self.intercept.log_dragging = true;
-                            return;
-                        }
-                        if point_in(panes.right, mouse.column, mouse.row) {
-                            self.intercept.detail_focus = true;
-                            self.fetch_body_for_selected().await;
-                            return;
-                        }
-                        if point_in(panes.left, mouse.column, mouse.row) {
-                            self.intercept.detail_focus = false;
-                            if let Some(clicked) =
-                                table_row_at(panes.left, table_data_start_titled(panes.left), mouse.row)
-                            {
-                                if clicked < self.intercept.display_rows.len() {
-                                    self.intercept.selected = clicked;
-                                    self.intercept.detail_scroll = 0;
-                                    self.intercept.group_frame_selected = 0;
-                                    self.fetch_body_for_selected().await;
-                                }
-                            }
-                            return;
-                        }
-                    }
-                    MouseEventKind::Drag(MouseButton::Left) if self.intercept.log_dragging => {
-                        self.intercept.log_split_percent = crate::ui::common::drag_split_percent(
-                            panes.filter.x,
-                            panes.filter.width,
-                            mouse.column,
-                        );
-                        return;
-                    }
-                    MouseEventKind::Up(MouseButton::Left) => {
-                        self.intercept.log_dragging = false;
-                    }
-                    _ => {}
-                }
-            }
-            InterceptTab::Matches => {
-                let panes = filter_split(chrome.body, self.intercept.match_split_percent);
-                match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if crate::ui::common::hit_vertical_border(panes.left, mouse.column, mouse.row)
-                        {
-                            self.intercept.match_dragging = true;
-                            return;
-                        }
-                        if point_in(panes.right, mouse.column, mouse.row) {
-                            self.intercept.match_detail_focus = true;
-                            self.fetch_body_for_match_selected().await;
-                            return;
-                        }
-                        if point_in(panes.left, mouse.column, mouse.row) {
-                            self.intercept.match_detail_focus = false;
-                            if let Some(clicked) =
-                                table_row_at(panes.left, table_data_start_titled(panes.left), mouse.row)
-                            {
-                                let total = self.intercept.filtered_matches_len();
-                                if clicked < total {
-                                    self.intercept.match_selected = clicked;
-                                    self.intercept.match_detail_scroll = 0;
-                                    self.fetch_body_for_match_selected().await;
-                                }
-                            }
-                            return;
-                        }
-                    }
-                    MouseEventKind::Drag(MouseButton::Left) if self.intercept.match_dragging => {
-                        self.intercept.match_split_percent = crate::ui::common::drag_split_percent(
-                            panes.filter.x,
-                            panes.filter.width,
-                            mouse.column,
-                        );
-                        return;
-                    }
-                    MouseEventKind::Up(MouseButton::Left) => {
-                        self.intercept.match_dragging = false;
-                    }
-                    _ => {}
-                }
-            }
-            InterceptTab::Rules => {
-                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                    let split_form = self.intercept.rule_form.is_some();
-                    let list_body = rules_list_area(chrome.body, split_form);
-                    let (_filter, table) = filter_and_table(list_body);
-                    if point_in(table, mouse.column, mouse.row) {
-                        if let Some(clicked) =
-                            table_row_at(table, table_data_start_titled(table), mouse.row)
-                        {
-                            let ids = self.intercept.filtered_rule_ids();
-                            if clicked < ids.len() {
-                                self.intercept.rule_selected_id = Some(ids[clicked]);
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     fn cycle_match_rule_filter(&mut self) {

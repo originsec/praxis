@@ -1,4 +1,5 @@
-use crate::app::{ConversationEntry, OrchestratorSessionState, OrchestratorState};
+use crate::app::{App, ConversationEntry, OrchestratorSessionState, OrchestratorState};
+use crate::ui::hits::MouseAction;
 use crate::markdown;
 use crate::ui::chrome;
 use crate::ui::common::spinner_char;
@@ -65,33 +66,8 @@ pub fn chrome_layout(area: Rect, state: &OrchestratorState) -> OrchChrome {
     }
 }
 
-pub fn tab_at_column(rel_col: u16, state: &OrchestratorState) -> Option<usize> {
-    let mut x = 0u16;
-    for (i, session) in state.sessions.iter().enumerate() {
-        if i > 0 {
-            x += chrome::tab_sep_width();
-        }
-        let mut w = 0u16;
-        if state.active_session_index == Some(i) {
-            w += 2; // "◆ "
-            let label = if session.is_streaming {
-                format!("{} {}", spinner_char(), session.label)
-            } else {
-                session.label.clone()
-            };
-            w += label.chars().count() as u16;
-        } else {
-            w += session.label.chars().count() as u16;
-        }
-        if rel_col >= x && rel_col < x + w {
-            return Some(i);
-        }
-        x += w;
-    }
-    None
-}
-
-pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.orchestrator;
     let session = state.active_session();
     let show_tabs = state.sessions.len() > 1;
 
@@ -135,7 +111,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     .split(area);
 
     if show_tabs {
-        render_tab_bar(f, chunks[0], state);
+        render_tab_bar(f, chunks[0], app, state);
     }
 
     if show_welcome {
@@ -166,11 +142,36 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     }
 
     render_input(f, chunks[3], state);
-    render_meta(f, chunks[5], state);
+    render_meta(f, chunks[5], app, state);
     render_status_hints(f, chunks[6], state);
+
+    register_input_hit(app, chunks[3], state);
 }
 
-fn render_tab_bar(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, state: &OrchestratorState) {
+    let mut x = 0u16;
+    for (i, session) in state.sessions.iter().enumerate() {
+        if i > 0 {
+            x += chrome::tab_sep_width();
+        }
+        let mut w = 0u16;
+        if state.active_session_index == Some(i) {
+            w += 2;
+            let label = if session.is_streaming {
+                format!("{} {}", spinner_char(), session.label)
+            } else {
+                session.label.clone()
+            };
+            w += label.chars().count() as u16;
+        } else {
+            w += session.label.chars().count() as u16;
+        }
+        app.hits_register(
+            Rect::new(area.x.saturating_add(x), area.y, w, 1),
+            MouseAction::OrchestratorTab(i),
+        );
+        x += w;
+    }
     let mut spans: Vec<Span> = Vec::new();
 
     for (i, session) in state.sessions.iter().enumerate() {
@@ -774,7 +775,21 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 // keybind shortcuts on the right.
 //
 
-fn render_meta(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+fn register_input_hit(app: &App, area: Rect, state: &OrchestratorState) {
+    let is_streaming = state
+        .active_session()
+        .map(|s| s.is_streaming)
+        .unwrap_or(false);
+    if !is_streaming {
+        let text_start = area.x.saturating_add(4);
+        app.hits_register(
+            area,
+            MouseAction::OrchestratorInputCursor { text_start },
+        );
+    }
+}
+
+fn render_meta(f: &mut Frame, area: Rect, app: &App, state: &OrchestratorState) {
     let session = state.active_session();
 
     let model_text = match session {
@@ -817,6 +832,15 @@ fn render_meta(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let chunks =
         Layout::horizontal([Constraint::Min(1), Constraint::Length(right_width)]).split(area);
+    app.hits_register(chunks[0], MouseAction::OrchestratorModelSelect);
+    app.hits_register(
+        Rect::new(chunks[1].x, chunks[1].y, 12, 1),
+        MouseAction::OrchestratorToolsCycle,
+    );
+    app.hits_register(
+        Rect::new(chunks[1].x.saturating_add(12), chunks[1].y, 8, 1),
+        MouseAction::OrchestratorSaveSession,
+    );
     f.render_widget(Paragraph::new(Line::from(left_spans)), chunks[0]);
     f.render_widget(Paragraph::new(right), chunks[1]);
 }

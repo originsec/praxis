@@ -14,7 +14,8 @@ mod search_bar;
 use crate::app::App;
 use crate::app::intercept::{InterceptTab, body::BodyMode};
 use crate::ui::chrome;
-use crate::ui::common::short_id;
+use crate::ui::common::{short_id, table_data_start_titled};
+use crate::ui::hits::{split_border_rect, MouseAction, RowSelect, RowSelectKind};
 use crate::ui::theme::{ACCENT, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT, WARN};
 use common::InterceptStatus;
 use ratatui::Frame;
@@ -25,15 +26,6 @@ use ratatui::widgets::Paragraph;
 
 pub(super) fn body_lines(bytes: &[u8], mode: BodyMode) -> Vec<ratatui::text::Line<'static>> {
     crate::app::intercept::body::render_body(bytes, mode)
-}
-
-pub fn tab_at_column(rel_col: u16, regions: &[(InterceptTab, u16, u16)]) -> Option<InterceptTab> {
-    for &(tab, start, end) in regions {
-        if rel_col >= start && rel_col < end {
-            return Some(tab);
-        }
-    }
-    None
 }
 
 pub fn show_banner(app: &App) -> bool {
@@ -160,12 +152,75 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     match app.intercept.tab {
-        InterceptTab::Traffic => log::render(f, content, app),
-        InterceptTab::Rules => rules::render(f, content, app),
-        InterceptTab::Matches => matches::render(f, content, app),
+        InterceptTab::Traffic => {
+            log::render(f, content, app);
+            register_traffic_hits(app, content);
+        }
+        InterceptTab::Rules => {
+            rules::render(f, content, app);
+            register_rules_hits(app, content);
+        }
+        InterceptTab::Matches => {
+            matches::render(f, content, app);
+            register_matches_hits(app, content);
+        }
     }
 
     render_hints(f, hints, app);
+}
+
+fn register_traffic_hits(app: &App, body: Rect) {
+    let panes = filter_split(body, app.intercept.log_split_percent);
+    app.hits_register(
+        split_border_rect(panes.left),
+        MouseAction::InterceptLogSplitDragStart {
+            outer_x: panes.filter.x,
+            outer_width: panes.filter.width,
+        },
+    );
+    app.hits_register(panes.right, MouseAction::InterceptLogDetailFocus);
+    app.hits_register(
+        panes.left,
+        MouseAction::SelectRow(RowSelect {
+            kind: RowSelectKind::InterceptLog,
+            table_area: panes.left,
+            data_start: table_data_start_titled(panes.left),
+        }),
+    );
+}
+
+fn register_matches_hits(app: &App, body: Rect) {
+    let panes = filter_split(body, app.intercept.match_split_percent);
+    app.hits_register(
+        split_border_rect(panes.left),
+        MouseAction::InterceptMatchSplitDragStart {
+            outer_x: panes.filter.x,
+            outer_width: panes.filter.width,
+        },
+    );
+    app.hits_register(panes.right, MouseAction::InterceptMatchDetailFocus);
+    app.hits_register(
+        panes.left,
+        MouseAction::SelectRow(RowSelect {
+            kind: RowSelectKind::InterceptMatch,
+            table_area: panes.left,
+            data_start: table_data_start_titled(panes.left),
+        }),
+    );
+}
+
+fn register_rules_hits(app: &App, body: Rect) {
+    let split_form = app.intercept.rule_form.is_some();
+    let list_body = rules_list_area(body, split_form);
+    let (_filter, table) = filter_and_table(list_body);
+    app.hits_register(
+        table,
+        MouseAction::SelectRow(RowSelect {
+            kind: RowSelectKind::InterceptRule,
+            table_area: table,
+            data_start: table_data_start_titled(table),
+        }),
+    );
 }
 
 fn render_banner(f: &mut Frame, area: Rect, app: &App) {
@@ -243,17 +298,18 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
         (InterceptTab::Matches, InterceptTab::Matches.label(), matches_count),
     ];
 
-    let mut regions: Vec<(InterceptTab, u16, u16)> = Vec::new();
     let mut x = 0u16;
     for (i, (tab, label, n)) in tab_specs.iter().enumerate() {
         let w = chrome::tab_width(label, Some(*n));
-        regions.push((*tab, x, x + w));
+        app.hits_register(
+            Rect::new(area.x.saturating_add(x), area.y, w, 1),
+            MouseAction::InterceptTab(*tab),
+        );
         x += w;
         if i + 1 < tab_specs.len() {
             x += chrome::tab_sep_width();
         }
     }
-    *app.intercept.tab_hit_regions.borrow_mut() = regions;
 
     let mut spans: Vec<Span> = Vec::new();
     for (i, (tab, label, n)) in tab_specs.iter().enumerate() {

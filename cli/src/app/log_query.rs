@@ -585,61 +585,6 @@ impl crate::app::App {
         }
     }
 
-    pub(crate) async fn handle_log_query_mouse(
-        &mut self,
-        mouse: crossterm::event::MouseEvent,
-        content_area: ratatui::layout::Rect,
-    ) {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        use ratatui::layout::{Constraint, Layout};
-
-        //
-        // Schema popup click: any click outside dismisses it.
-        //
-        if self.log_query.schema_open {
-            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                self.log_query.schema_open = false;
-            }
-            return;
-        }
-
-        let show_error = self.log_query.last_error.is_some();
-        let chunks = Layout::vertical([
-            Constraint::Length(crate::ui::log_query::EDITOR_HEIGHT),
-            Constraint::Length(if show_error { 1 } else { 0 }),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(content_area);
-        let editor_area = chunks[0];
-        let results_area = chunks[2];
-
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            if crate::ui::common::point_in(editor_area, mouse.column, mouse.row) {
-                self.log_query.focus = LogQueryFocus::Editor;
-                return;
-            }
-            if crate::ui::common::point_in(results_area, mouse.column, mouse.row) {
-                self.log_query.focus = LogQueryFocus::Results;
-                let table_area = crate::ui::log_query::results_table_area(
-                    results_area,
-                    self.log_query.row_expanded,
-                    !self.log_query.rows.is_empty(),
-                );
-                let data_start = crate::ui::common::table_data_start_titled(table_area);
-                if let Some(clicked) =
-                    crate::ui::common::table_row_at(table_area, data_start, mouse.row)
-                {
-                    let n = self.log_query.visible_row_count();
-                    if clicked < n {
-                        self.log_query.selected_row = clicked;
-                    }
-                }
-                return;
-            }
-        }
-    }
-
     pub async fn run_log_query(&mut self) {
         let query = self.log_query.editor.as_text();
         let trimmed = query.trim();

@@ -996,15 +996,12 @@ impl App {
         }
     }
 
-    pub(crate) async fn handle_settings_mouse(
+    pub(crate) async fn handle_settings_overlay_mouse(
         &mut self,
         mouse: MouseEvent,
         content_area: Rect,
         terminal_area: Rect,
     ) {
-        //
-        // Settings model edit form popup.
-        //
         if self.settings.model_form.is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                 if let Some(ref mut form) = self.settings.model_form {
@@ -1136,25 +1133,22 @@ impl App {
             }
             return;
         }
+    }
 
+    pub(crate) async fn handle_settings_content_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        content_area: Rect,
+        _terminal_area: Rect,
+    ) {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             let settings_chunks = Layout::vertical([
-                Constraint::Length(1), // tabs
-                Constraint::Length(1), // spacer
-                Constraint::Min(1),    // content
-                Constraint::Length(1), // status
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
             ])
             .split(content_area);
-            let tabs_area = settings_chunks[0];
-
-            if mouse.row == tabs_area.y {
-                let rel = mouse.column.saturating_sub(tabs_area.x);
-                if let Some(tab) = crate::ui::settings::tab_at_column(rel)
-                {
-                    self.switch_settings_tab(tab).await;
-                }
-                return;
-            }
 
             let settings_content =
                 crate::ui::settings::content_area(settings_chunks[2]);

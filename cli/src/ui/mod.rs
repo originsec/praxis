@@ -1,6 +1,7 @@
 pub mod chain_form;
 pub mod chrome;
 pub mod common;
+pub mod hits;
 pub mod intercept;
 pub mod log_query;
 pub mod nodes;
@@ -23,6 +24,8 @@ use theme::{DIM, TEXT_BRIGHT};
 pub use theme::BG;
 
 pub fn render(f: &mut Frame, app: &App) {
+    app.hits_clear();
+
     f.render_widget(Block::default().style(Style::default().bg(BG)), f.area());
 
     let inner = f.area().inner(Margin {
@@ -41,16 +44,10 @@ pub fn render(f: &mut Frame, app: &App) {
     render_header(f, chunks[0], app);
 
     match app.active_window {
-        Window::Orchestrator => orchestrator::render(f, chunks[2], &app.orchestrator),
-        Window::Nodes => nodes::render(
-            f,
-            chunks[2],
-            &app.nodes,
-            &app.operations.operations,
-            &app.operations.chain_executions,
-        ),
+        Window::Orchestrator => orchestrator::render(f, chunks[2], app),
+        Window::Nodes => nodes::render(f, chunks[2], app),
         Window::Intercept => intercept::render(f, chunks[2], app),
-        Window::LogQuery => log_query::render(f, chunks[2], &app.log_query),
+        Window::LogQuery => log_query::render(f, chunks[2], app),
         Window::Operations => {
             if let Some(ref form) = app.new_op_form {
                 popup::render_new_op_form(f, chunks[2], form);
@@ -62,10 +59,10 @@ pub fn render(f: &mut Frame, app: &App) {
                 let hit = chain_form::render_chain_form(f, chunks[2], cform);
                 *app.chain_form_hits.borrow_mut() = hit;
             } else {
-                operations::render(f, chunks[2], &app.operations);
+                operations::render(f, chunks[2], app);
             }
         }
-        Window::Settings => settings::render(f, chunks[2], &app.settings),
+        Window::Settings => settings::render(f, chunks[2], app),
     }
 
     status_bar::render(f, chunks[3], app);

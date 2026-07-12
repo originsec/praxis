@@ -5,8 +5,9 @@ mod intercept;
 mod llm;
 mod service;
 
-use crate::app::{SettingsState, SettingsTab};
+use crate::app::{App, SettingsState, SettingsTab};
 use crate::ui::chrome;
+use crate::ui::hits::MouseAction;
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT,
 };
@@ -18,28 +19,6 @@ use ratatui::widgets::Paragraph;
 
 pub(super) const EDIT_FG: Color = Color::Rgb(225, 228, 232);
 
-pub fn tab_at_column(rel_col: u16) -> Option<SettingsTab> {
-    let specs = [
-        (SettingsTab::Llm, "LLM"),
-        (SettingsTab::Agents, "Agents"),
-        (SettingsTab::Intercept, "Intercept"),
-        (SettingsTab::Service, "Service"),
-        (SettingsTab::About, "About"),
-    ];
-    let mut x = 0u16;
-    for (i, (tab, label)) in specs.iter().enumerate() {
-        let w = chrome::tab_width(label, None);
-        if rel_col >= x && rel_col < x + w {
-            return Some(*tab);
-        }
-        x += w;
-        if i + 1 < specs.len() {
-            x += chrome::tab_sep_width();
-        }
-    }
-    None
-}
-
 pub fn content_area(body: Rect) -> Rect {
     Rect {
         x: body.x + 2,
@@ -48,7 +27,8 @@ pub fn content_area(body: Rect) -> Rect {
     }
 }
 
-pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.settings;
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
         Constraint::Length(1), // divider
@@ -57,7 +37,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     ])
     .split(area);
 
-    render_tabs(f, chunks[0], state);
+    render_tabs(f, chunks[0], app, state);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "\u{2500}".repeat(chunks[1].width as usize),
@@ -108,8 +88,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     }
 }
 
-fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
-    let mut spans: Vec<Span> = Vec::new();
+fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let pairs: &[(SettingsTab, &str)] = &[
         (SettingsTab::Llm, "LLM"),
         (SettingsTab::Agents, "Agents"),
@@ -117,6 +96,20 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
         (SettingsTab::Service, "Service"),
         (SettingsTab::About, "About"),
     ];
+    let mut x = 0u16;
+    for (i, (tab, label)) in pairs.iter().enumerate() {
+        let w = chrome::tab_width(label, None);
+        app.hits_register(
+            Rect::new(area.x.saturating_add(x), area.y, w, 1),
+            MouseAction::SettingsTab(*tab),
+        );
+        x += w;
+        if i + 1 < pairs.len() {
+            x += chrome::tab_sep_width();
+        }
+    }
+
+    let mut spans: Vec<Span> = Vec::new();
     for (i, (tab, label)) in pairs.iter().enumerate() {
         if i > 0 {
             spans.push(chrome::tab_sep());

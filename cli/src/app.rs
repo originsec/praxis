@@ -4,6 +4,7 @@ mod forms;
 mod input;
 pub mod intercept;
 pub mod log_query;
+mod mouse;
 mod nodes;
 mod operations;
 mod orchestrator;
@@ -75,6 +76,7 @@ pub struct App {
     // handler can map clicks to actions without re-deriving the layout.
     //
     pub chain_form_hits: std::cell::RefCell<crate::ui::chain_form::ChainFormHitMap>,
+    pub hit_layer: RefCell<crate::ui::hits::HitLayer>,
 }
 
 pub struct NodesState {
@@ -404,6 +406,7 @@ impl App {
             terminal_resume: Arc::new(tokio::sync::Notify::new()),
             last_click: None,
             chain_form_hits: std::cell::RefCell::new(Default::default()),
+            hit_layer: RefCell::new(Default::default()),
         }
     }
 
@@ -2157,7 +2160,7 @@ impl App {
         ])
         .split(inner_area);
         let content_area = frame_chunks[2];
-        let status_area = frame_chunks[3];
+        let _status_area = frame_chunks[3];
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -2536,81 +2539,29 @@ impl App {
         }
 
         //
-        // Status bar clicks. Reconstruct the exact rendered text (kept
-        // in sync with crate::ui::status_bar::render) so each hit-box
-        // lines up with the label on screen.
+        // Render-authoritative hit layer: status bar + active window body.
+        // Overlay UIs (session chat, settings forms) keep bespoke handlers.
         //
-        if mouse.row == status_area.y {
-            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                let rel = mouse.column.saturating_sub(status_area.x) as usize;
-                match crate::ui::status_bar::hit_test(self, rel) {
-                    Some(crate::ui::status_bar::StatusBarHit::Window(win)) => {
-                        self.active_window = win;
-                        match win {
-                            Window::Nodes => self.refresh_node_sessions(),
-                            Window::Operations => self.refresh_operations(),
-                            Window::Intercept => self.enter_intercept().await,
-                            _ => {}
-                        }
-                        return;
-                    }
-                    Some(crate::ui::status_bar::StatusBarHit::Quit) => {
-                        self.should_quit = true;
-                        return;
-                    }
-                    None => return,
-                }
+        if self.active_window == Window::Nodes {
+            if self.nodes.sessions_list_open
+                || self.nodes.active_session().is_some()
+                || self.nodes.session_options.is_some()
+            {
+                self.handle_nodes_overlay_mouse(mouse, content_area).await;
+                return;
             }
         }
 
-        //
-        // Operations window mouse handling.
-        //
-        if self.active_window == Window::Operations {
-            self.handle_operations_mouse(mouse, content_area).await;
-            return;
-        }
-
-        //
-        // Intercept window mouse handling (tab click, pane resize, row click).
-        //
-        if self.active_window == Window::Intercept {
-            self.handle_intercept_mouse(mouse, content_area).await;
-            return;
-        }
-
-        //
-        // Log Query mouse handling (pane focus, schema close).
-        //
-        if self.active_window == Window::LogQuery {
-            self.handle_log_query_mouse(mouse, content_area).await;
-            return;
-        }
-
-        //
-        // Nodes window mouse handling.
-        //
-        if self.active_window == Window::Nodes {
-            self.handle_nodes_mouse(mouse, content_area).await;
-            return;
-        }
-
-        //
-        // Settings window mouse handling.
-        //
-        if self.active_window == Window::Settings {
-            self.handle_settings_mouse(mouse, content_area, terminal_area)
+        if self.active_window == Window::Settings
+            && (self.settings.model_form.is_some() || self.settings.dropdown_open)
+        {
+            self.handle_settings_overlay_mouse(mouse, content_area, terminal_area)
                 .await;
             return;
         }
 
-        //
-        // Orchestrator window mouse handling.
-        //
-        if self.active_window == Window::Orchestrator {
-            self.handle_orchestrator_mouse(mouse, content_area).await;
-            return;
-        }
+        self.handle_active_window_mouse_down(mouse, content_area, terminal_area)
+            .await;
     }
 
     fn handle_state_update(&mut self, state: SystemState) {

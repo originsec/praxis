@@ -1,11 +1,6 @@
 use crate::app::{App, Window};
-
-/// Result of a click on the status-bar navigation strip.
-pub enum StatusBarHit {
-    Window(Window),
-    Quit,
-}
 use crate::ui::chrome;
+use crate::ui::hits::MouseAction;
 use crate::ui::theme::{ACCENT, BG, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -35,9 +30,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let mut left: Vec<Span> = Vec::new();
 
-    //
-    // Identity sliver: connection dot + node count + (optional) session count.
-    //
     let conn_color = if app.connected { OK } else { STATUS_FAIL };
     left.push(Span::styled("\u{2022} ", Style::default().fg(conn_color)));
 
@@ -63,9 +55,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     left.push(Span::raw("    "));
 
-    //
-    // Window navigation. Active item is highlighted; others stay dim.
-    //
     let nav_pairs: &[(&str, &str, Window)] = &[
         ("^o", "orchestrator", Window::Orchestrator),
         ("^l", "nodes", Window::Nodes),
@@ -104,6 +93,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(right.width() as u16)])
         .split(area);
 
+    register_nav_hits(app, chunks[0]);
+
     let left_bar = Paragraph::new(Line::from(left)).style(Style::default().bg(BG));
     let right_bar = Paragraph::new(right).style(Style::default().bg(BG));
 
@@ -111,15 +102,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(right_bar, chunks[1]);
 }
 
-/// Hit-test a column relative to the left status-bar chunk. Mirrors `render` exactly.
-pub fn hit_test(app: &App, rel_col: usize) -> Option<StatusBarHit> {
-    let mut col = 0usize;
+fn register_nav_hits(app: &App, area: Rect) {
+    let mut col = 0u16;
 
-    // Connection dot + space
-    col += 2;
-    if rel_col < col {
-        return None;
-    }
+    col += 2; // connection dot + space
 
     let node_count = app.nodes.nodes.len();
     let node_text = if node_count == 1 {
@@ -127,25 +113,15 @@ pub fn hit_test(app: &App, rel_col: usize) -> Option<StatusBarHit> {
     } else {
         format!("{} nodes", node_count)
     };
-    col += node_text.chars().count();
-    if rel_col < col {
-        return None;
-    }
+    col += node_text.chars().count() as u16;
 
     let session_count = app.nodes.sessions.len();
     if session_count > 0 {
-        col += 3; // " · "
-        let seg = format!("{} sessions", session_count);
-        col += seg.chars().count();
-        if rel_col < col {
-            return None;
-        }
+        col += 3;
+        col += format!("{} sessions", session_count).chars().count() as u16;
     }
 
-    col += 4; // "    "
-    if rel_col < col {
-        return None;
-    }
+    col += 4;
 
     let nav_pairs: &[(&str, &str, Window)] = &[
         ("^o", "orchestrator", Window::Orchestrator),
@@ -157,25 +133,20 @@ pub fn hit_test(app: &App, rel_col: usize) -> Option<StatusBarHit> {
     ];
     for (i, (k, l, w)) in nav_pairs.iter().enumerate() {
         if i > 0 {
-            col += 2; // "  "
-            if rel_col < col {
-                return None;
-            }
+            col += 2;
         }
-        let item_len = k.len() + 1 + l.len();
-        if rel_col < col + item_len {
-            return Some(StatusBarHit::Window(*w));
-        }
+        let item_len = (k.len() + 1 + l.len()) as u16;
+        app.hits_register(
+            Rect::new(area.x.saturating_add(col), area.y, item_len, 1),
+            MouseAction::SwitchWindow(*w),
+        );
         col += item_len;
     }
 
-    col += 3; // mid_dot " · "
-    if rel_col < col {
-        return None;
-    }
-    let quit_len = "^q quit".len();
-    if rel_col < col + quit_len {
-        return Some(StatusBarHit::Quit);
-    }
-    None
+    col += 3;
+    let quit_len = "^q quit".len() as u16;
+    app.hits_register(
+        Rect::new(area.x.saturating_add(col), area.y, quit_len, 1),
+        MouseAction::Quit,
+    );
 }

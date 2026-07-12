@@ -16,8 +16,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
+use crate::app::{App, LogQueryState};
+use crate::ui::common::table_data_start_titled;
+use crate::ui::hits::{MouseAction, RowSelect, RowSelectKind};
 use crate::ui::theme::{ACCENT, MUTED, STATUS_FAIL, TEXT_BRIGHT};
 
 pub const EDITOR_HEIGHT: u16 = 9;
@@ -33,7 +35,8 @@ pub fn results_table_area(results_area: ratatui::layout::Rect, row_expanded: boo
     }
 }
 
-pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.log_query;
     let show_error = state.last_error.is_some();
 
     let chunks = Layout::vertical([
@@ -60,7 +63,30 @@ pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
 
     if state.schema_open {
         schema::render_popup(f, area, state);
+        app.hits_register(area, MouseAction::LogQuerySchemaDismiss);
+    } else {
+        register_focus_hits(app, chunks[0], chunks[2], state);
     }
+}
+
+fn register_focus_hits(
+    app: &App,
+    editor_area: Rect,
+    results_area: Rect,
+    state: &crate::app::LogQueryState,
+) {
+    app.hits_register(editor_area, MouseAction::LogQueryFocus(LogQueryFocus::Editor));
+    app.hits_register(results_area, MouseAction::LogQueryFocus(LogQueryFocus::Results));
+
+    let table_area = results_table_area(results_area, state.row_expanded, !state.rows.is_empty());
+    app.hits_register(
+        table_area,
+        MouseAction::SelectRow(RowSelect {
+            kind: RowSelectKind::LogQueryResults,
+            table_area,
+            data_start: table_data_start_titled(table_area),
+        }),
+    );
 }
 
 fn render_error(f: &mut Frame, area: Rect, state: &LogQueryState) {

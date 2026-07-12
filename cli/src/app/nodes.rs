@@ -1195,7 +1195,11 @@ impl App {
         }
     }
 
-    pub(crate) async fn handle_nodes_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
+    pub(crate) async fn handle_nodes_overlay_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        content_area: Rect,
+    ) {
         //
         // Sessions list overlay intercepts mouse when open.
         //
@@ -1344,159 +1348,6 @@ impl App {
                 }
             }
             return;
-        }
-
-        let outer =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
-        let hints_area = outer[1];
-        let node_chunks = if self.nodes.split_percent_user_set {
-            Layout::horizontal([
-                Constraint::Percentage(self.nodes.split_percent),
-                Constraint::Percentage(100 - self.nodes.split_percent),
-            ])
-            .split(outer[0])
-        } else {
-            Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(outer[0])
-        };
-        let list_area = node_chunks[0];
-        let detail_area = node_chunks[1];
-
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                //
-                // Pane border drag start — must run before list/detail
-                // hit-tests so a click on the border column isn't eaten
-                // by the neighbouring pane.
-                //
-                if crate::ui::common::hit_vertical_border(list_area, mouse.column, mouse.row) {
-                    self.nodes.dragging = true;
-                    return;
-                }
-
-                //
-                // Node hint bar clicks.
-                //
-                if mouse.row == hints_area.y {
-                    if let Some(action) =
-                        crate::ui::nodes::hint_action_at(self, hints_area.x, mouse.column)
-                    {
-                        match action {
-                            crate::ui::nodes::NodesHintAction::SelectDetail => {
-                                self.nodes.detail_focus = true;
-                                self.nodes.agent_selected = 0;
-                            }
-                            crate::ui::nodes::NodesHintAction::StartSession => {
-                                self.start_session_with_selected_agent();
-                            }
-                            crate::ui::nodes::NodesHintAction::Recon => {
-                                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
-                                    if let Some(agent) =
-                                        node.discovered_agents.get(self.nodes.agent_selected)
-                                    {
-                                        self.open_recon(
-                                            node.node_id.clone(),
-                                            agent.short_name.clone(),
-                                        );
-                                    }
-                                }
-                            }
-                            crate::ui::nodes::NodesHintAction::Reset => {
-                                self.confirm_reset_node();
-                            }
-                            crate::ui::nodes::NodesHintAction::Remove => {
-                                self.confirm_delete_node();
-                            }
-                            crate::ui::nodes::NodesHintAction::AddRemote => {
-                                self.add_remote_node_form = Some(AddRemoteNodeForm {
-                                    focused_field: AddRemoteNodeForm::URL_FIELD,
-                                    editing_text: true,
-                                    ..AddRemoteNodeForm::default()
-                                });
-                            }
-                            crate::ui::nodes::NodesHintAction::Terminal => {
-                                self.open_terminal();
-                            }
-                            crate::ui::nodes::NodesHintAction::Sessions => {
-                                self.toggle_sessions_list();
-                            }
-                        }
-                        return;
-                    }
-                }
-                //
-                // List item click. Table has Borders::ALL (1 row top border)
-                // + 1 row header = data starts at y+2.
-                //
-                let data_start =
-                    crate::ui::common::table_data_start_margin_header(list_area);
-                if mouse.column >= list_area.x
-                    && mouse.column < list_area.x.saturating_add(list_area.width)
-                {
-                    let clicked_idx = match crate::ui::common::table_row_at(
-                        list_area,
-                        data_start,
-                        mouse.row,
-                    ) {
-                        Some(i) => i,
-                        None => {
-                            return;
-                        }
-                    };
-                    if clicked_idx < self.nodes.nodes.len() {
-                        self.nodes.selected = clicked_idx;
-                        self.nodes.detail_focus = false;
-                    }
-                    return;
-                }
-
-                //
-                // Detail pane click — focus detail and check agent clicks.
-                //
-                if mouse.column >= detail_area.x
-                    && mouse.column < detail_area.x.saturating_add(detail_area.width)
-                    && mouse.row >= detail_area.y
-                    && mouse.row < detail_area.y.saturating_add(detail_area.height)
-                {
-                    self.nodes.detail_focus = true;
-                    let is_dbl = self.is_double_click(mouse.row, mouse.column);
-
-                    //
-                    // The detail inner area: border(1) + header(3 lines) +
-                    // blank(1) + "Agents"(1) = agents start at inner.y + 5.
-                    //
-                    let inner_y = detail_area.y.saturating_add(1);
-                    let agents_start = inner_y + 5;
-                    let agent_count = self
-                        .nodes
-                        .nodes
-                        .get(self.nodes.selected)
-                        .map(|n| n.discovered_agents.len())
-                        .unwrap_or(0);
-
-                    if mouse.row >= agents_start && mouse.row < agents_start + agent_count as u16 {
-                        let clicked_agent = (mouse.row - agents_start) as usize;
-                        self.nodes.agent_selected = clicked_agent;
-                        if is_dbl {
-                            self.start_session_with_selected_agent();
-                        }
-                    }
-                    return;
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if self.nodes.dragging {
-                    self.nodes.split_percent = crate::ui::common::drag_split_percent(
-                        list_area.x,
-                        list_area.width + detail_area.width,
-                        mouse.column,
-                    );
-                    self.nodes.split_percent_user_set = true;
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                self.nodes.dragging = false;
-            }
-            _ => {}
         }
     }
 

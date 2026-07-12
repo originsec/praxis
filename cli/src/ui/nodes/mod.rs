@@ -6,7 +6,9 @@ mod terminal;
 
 pub use sessions_list::sessions_list_rect;
 
-use crate::app::{App, NodesState};
+use crate::app::App;
+use crate::ui::common::table_data_start_margin_header;
+use crate::ui::hits::{split_border_rect, HintRegistrar, MouseAction, NodesHintAction, RowSelect, RowSelectKind};
 use crate::ui::recon;
 use crate::ui::theme::{MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
@@ -15,106 +17,11 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-pub enum NodesHintAction {
-    SelectDetail,
-    StartSession,
-    Recon,
-    Reset,
-    Remove,
-    AddRemote,
-    Terminal,
-    Sessions,
-}
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.nodes;
+    let ops = &app.operations.operations;
+    let chains = &app.operations.chain_executions;
 
-fn push_region(
-    regions: &mut Vec<(u16, u16, NodesHintAction)>,
-    x: &mut u16,
-    text: &str,
-    action: NodesHintAction,
-) {
-    let w = text.chars().count() as u16;
-    regions.push((*x, *x + w, action));
-    *x += w;
-}
-
-/// Hit-test the nodes hint bar. `base_x` is the hint row's x coordinate.
-pub fn hint_action_at(app: &App, base_x: u16, col: u16) -> Option<NodesHintAction> {
-    let rel = col.saturating_sub(base_x);
-    let mut regions: Vec<(u16, u16, NodesHintAction)> = Vec::new();
-    let mut x = 0u16;
-
-    if app.nodes.detail_focus {
-        let has_session = app
-            .nodes
-            .nodes
-            .get(app.nodes.selected)
-            .map(|n| {
-                n.capabilities.is_empty()
-                    || n.capabilities.contains(&common::NodeCapability::Session)
-            })
-            .unwrap_or(false);
-        if has_session {
-            push_region(&mut regions, &mut x, "\u{21b5}", NodesHintAction::StartSession);
-            push_region(&mut regions, &mut x, " session", NodesHintAction::StartSession);
-            x += 4;
-        }
-        push_region(&mut regions, &mut x, "r", NodesHintAction::Recon);
-        push_region(&mut regions, &mut x, " recon", NodesHintAction::Recon);
-    } else {
-        push_region(&mut regions, &mut x, "\u{21b5}", NodesHintAction::SelectDetail);
-        push_region(&mut regions, &mut x, " select", NodesHintAction::SelectDetail);
-    }
-
-    x += 4;
-    push_region(&mut regions, &mut x, "^r", NodesHintAction::Reset);
-    push_region(&mut regions, &mut x, " reset", NodesHintAction::Reset);
-    x += 4;
-    push_region(&mut regions, &mut x, "^d", NodesHintAction::Remove);
-    push_region(&mut regions, &mut x, " remove", NodesHintAction::Remove);
-    x += 4;
-    push_region(&mut regions, &mut x, "^n", NodesHintAction::AddRemote);
-    push_region(&mut regions, &mut x, " add remote", NodesHintAction::AddRemote);
-
-    let has_terminal = app
-        .nodes
-        .nodes
-        .get(app.nodes.selected)
-        .map(|n| {
-            n.capabilities.is_empty()
-                || n.capabilities.contains(&common::NodeCapability::Terminal)
-        })
-        .unwrap_or(false);
-    if has_terminal {
-        x += 4;
-        push_region(&mut regions, &mut x, "^t", NodesHintAction::Terminal);
-        push_region(&mut regions, &mut x, " terminal", NodesHintAction::Terminal);
-    }
-
-    let session_count = app.nodes.sessions.len();
-    x += 4;
-    push_region(&mut regions, &mut x, "^w", NodesHintAction::Sessions);
-    push_region(
-        &mut regions,
-        &mut x,
-        &format!(" sessions ({})", session_count),
-        NodesHintAction::Sessions,
-    );
-
-    for (start, end, action) in regions {
-        if rel >= start && rel < end {
-            return Some(action);
-        }
-    }
-    None
-}
-
-pub fn render(
-    f: &mut Frame,
-    area: Rect,
-    state: &NodesState,
-    ops: &[common::SemanticOpUpdate],
-    chains: &[common::ChainExecutionUpdate],
-) {
     if let Some(ref term) = state.terminal {
         terminal::render_terminal(f, area, term);
         return;
@@ -159,6 +66,8 @@ pub fn render(
         list::render_node_list(f, chunks[0], state);
         detail::render_node_detail(f, chunks[1], state, ops, chains);
 
+        register_browse_hits(app, chunks[0], chunks[1], outer[1]);
+
         let has_terminal = state
             .nodes
             .get(state.selected)
@@ -171,6 +80,7 @@ pub fn render(
         let key_style = Style::default().fg(TEXT_BRIGHT);
         let label_style = Style::default().fg(MUTED);
         let mut hint_spans: Vec<Span> = Vec::new();
+        let mut reg = HintRegistrar::new(app, outer[1]);
 
         if state.detail_focus {
             let has_session = state
@@ -182,16 +92,33 @@ pub fn render(
                 })
                 .unwrap_or(false);
             if has_session {
+                reg.chip("\u{21b5}", MouseAction::NodesHint(NodesHintAction::StartSession));
+                reg.chip(" session", MouseAction::NodesHint(NodesHintAction::StartSession));
+                reg.gap(4);
                 hint_spans.push(Span::styled("\u{21B5}", key_style));
                 hint_spans.push(Span::styled(" session", label_style));
                 hint_spans.push(Span::raw("    "));
             }
+            reg.chip("r", MouseAction::NodesHint(NodesHintAction::Recon));
+            reg.chip(" recon", MouseAction::NodesHint(NodesHintAction::Recon));
             hint_spans.push(Span::styled("r", key_style));
             hint_spans.push(Span::styled(" recon", label_style));
         } else {
+            reg.chip("\u{21b5}", MouseAction::NodesHint(NodesHintAction::SelectDetail));
+            reg.chip(" select", MouseAction::NodesHint(NodesHintAction::SelectDetail));
             hint_spans.push(Span::styled("\u{21B5}", key_style));
             hint_spans.push(Span::styled(" select", label_style));
         }
+
+        reg.gap(4);
+        reg.chip("^r", MouseAction::NodesHint(NodesHintAction::Reset));
+        reg.chip(" reset", MouseAction::NodesHint(NodesHintAction::Reset));
+        reg.gap(4);
+        reg.chip("^d", MouseAction::NodesHint(NodesHintAction::Remove));
+        reg.chip(" remove", MouseAction::NodesHint(NodesHintAction::Remove));
+        reg.gap(4);
+        reg.chip("^n", MouseAction::NodesHint(NodesHintAction::AddRemote));
+        reg.chip(" add remote", MouseAction::NodesHint(NodesHintAction::AddRemote));
 
         hint_spans.push(Span::raw("    "));
         hint_spans.push(Span::styled("^r", key_style));
@@ -204,18 +131,22 @@ pub fn render(
         hint_spans.push(Span::styled(" add remote", label_style));
 
         if has_terminal {
+            reg.gap(4);
+            reg.chip("^t", MouseAction::NodesHint(NodesHintAction::Terminal));
+            reg.chip(" terminal", MouseAction::NodesHint(NodesHintAction::Terminal));
             hint_spans.push(Span::raw("    "));
             hint_spans.push(Span::styled("^t", key_style));
             hint_spans.push(Span::styled(" terminal", label_style));
         }
 
         let session_count = state.sessions.len();
+        let sessions_label = format!(" sessions ({})", session_count);
+        reg.gap(4);
+        reg.chip("^w", MouseAction::NodesHint(NodesHintAction::Sessions));
+        reg.chip(&sessions_label, MouseAction::NodesHint(NodesHintAction::Sessions));
         hint_spans.push(Span::raw("    "));
         hint_spans.push(Span::styled("^w", key_style));
-        hint_spans.push(Span::styled(
-            format!(" sessions ({})", session_count),
-            label_style,
-        ));
+        hint_spans.push(Span::styled(sessions_label, label_style));
         let hints = Line::from(hint_spans);
         f.render_widget(Paragraph::new(hints), outer[1]);
     }
@@ -223,4 +154,28 @@ pub fn render(
     if state.sessions_list_open {
         sessions_list::render(f, area, state);
     }
+}
+
+fn register_browse_hits(app: &App, list_area: Rect, detail_area: Rect, _hints_area: Rect) {
+    app.hits_register(
+        split_border_rect(list_area),
+        MouseAction::NodesSplitDragStart {
+            outer_x: list_area.x,
+            outer_width: list_area.width.saturating_add(detail_area.width),
+        },
+    );
+    app.hits_register(
+        list_area,
+        MouseAction::SelectRow(RowSelect {
+            kind: RowSelectKind::NodesList,
+            table_area: list_area,
+            data_start: table_data_start_margin_header(list_area),
+        }),
+    );
+    app.hits_register(detail_area, MouseAction::NodesDetailFocus);
+    let agents_start = detail_area.y.saturating_add(1) + 5;
+    app.hits_register(
+        detail_area,
+        MouseAction::NodesAgentRow { agents_start },
+    );
 }
