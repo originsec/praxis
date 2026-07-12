@@ -11,6 +11,7 @@ pub struct Popup {
     pub selected: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PopupKind {
     CommandPalette,
     ModelSelect,

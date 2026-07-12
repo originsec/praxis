@@ -166,6 +166,25 @@ pub fn modal_panel(f: &mut Frame, area: Rect, title: &str, esc_hint: &str) -> Re
 }
 
 //
+// Geometry-only counterpart of `modal_panel` — the body rect where
+// content is painted after the title + divider. Hit registration uses
+// this so mouse targets match paint without re-deriving the layout.
+//
+pub fn modal_content_rect(area: Rect) -> Rect {
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 1,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    Rect {
+        y: inner.y.saturating_add(2),
+        height: inner.height.saturating_sub(2),
+        ..inner
+    }
+}
+
+//
 // Like `modal_panel`, but takes a pre-styled title line so callers can
 // compose the title with extra spans (counts, badges, secondary suffix
 // in DIM, etc.). Use `modal_title(text)` to build the standard

@@ -4,6 +4,7 @@ use crate::app::{
     intercept::InterceptTab, log_query::LogQueryFocus, App, EditTarget, ElementKind,
     OpsTab, SettingsTab, TriggerFormSection, Window,
 };
+use crate::ui::common::point_in;
 
 /// Clickable target registered during render; looked up by the mouse handler.
 #[derive(Clone)]
@@ -74,7 +75,7 @@ pub enum MouseAction {
 
     // Settings
     SettingsContentClick,
-    SettingsModelField(usize),
+    SettingsModelField { row: usize, body_x: u16 },
     SettingsModelDropdownItem(usize),
     SettingsModelSave,
     SettingsModelCancel,
@@ -175,16 +176,45 @@ impl HitLayer {
     /// Top-most registered hit wins (last registered = on top).
     pub fn hit(&self, col: u16, row: u16) -> Option<&MouseAction> {
         for entry in self.entries.iter().rev() {
-            let r = &entry.rect;
-            if col >= r.x
-                && col < r.x.saturating_add(r.width)
-                && row >= r.y
-                && row < r.y.saturating_add(r.height)
-            {
+            if point_in(entry.rect, col, row) {
                 return Some(&entry.action);
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn later_registration_wins_hit_test() {
+        let mut layer = HitLayer::default();
+        layer.register(Rect::new(0, 0, 10, 10), MouseAction::Quit);
+        layer.register(Rect::new(2, 2, 2, 2), MouseAction::SwitchWindow(Window::Nodes));
+        match layer.hit(3, 3) {
+            Some(MouseAction::SwitchWindow(Window::Nodes)) => {}
+            other => panic!("expected Nodes window hit, got {:?}", other.map(|_| ())),
+        }
+        match layer.hit(0, 0) {
+            Some(MouseAction::Quit) => {}
+            other => panic!("expected Quit hit, got {:?}", other.map(|_| ())),
+        }
+        assert!(layer.hit(20, 20).is_none());
+    }
+
+    #[test]
+    fn empty_and_zero_size_rects_are_ignored() {
+        let mut layer = HitLayer::default();
+        layer.register(Rect::new(0, 0, 0, 5), MouseAction::Quit);
+        layer.register(Rect::new(0, 0, 5, 0), MouseAction::Quit);
+        assert!(layer.hit(0, 0).is_none());
+        layer.clear();
+        layer.register(Rect::new(1, 1, 1, 1), MouseAction::Quit);
+        assert!(matches!(layer.hit(1, 1), Some(MouseAction::Quit)));
+        layer.clear();
+        assert!(layer.hit(1, 1).is_none());
     }
 }
 

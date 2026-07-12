@@ -29,16 +29,16 @@ impl App {
             }
 
             MouseAction::PopupItem(idx) => {
-                let (kind, value) = self.popup.as_ref().map(|popup| {
+                let selection = self.popup.as_ref().and_then(|popup| {
                     let filtered = popup.filtered_items();
-                    let value = filtered.get(idx).map(|(_, item)| item.value.clone());
-                    (popup.kind, value)
+                    let value = filtered.get(idx).map(|(_, item)| item.value.clone())?;
+                    Some((popup.kind, value))
                 });
                 if let Some(p) = self.popup.as_mut() {
                     p.selected = idx;
                 }
                 if self.is_double_click(mouse.row, mouse.column) {
-                    if let (Some(kind), Some(value)) = (kind, value) {
+                    if let Some((kind, value)) = selection {
                         match kind {
                             PopupKind::ModelSelect => {
                                 self.popup = None;
@@ -191,8 +191,8 @@ impl App {
                 self.dispatch_settings_content_click(mouse).await;
                 true
             }
-            MouseAction::SettingsModelField(row) => {
-                self.dispatch_settings_model_field(mouse, row).await;
+            MouseAction::SettingsModelField { row, body_x } => {
+                self.dispatch_settings_model_field(mouse, row, body_x).await;
                 true
             }
             MouseAction::SettingsModelDropdownItem(idx) => {
@@ -421,18 +421,24 @@ impl App {
         }
     }
 
-    pub(crate) async fn dispatch_settings_model_field(&mut self, mouse: MouseEvent, row: usize) {
+    pub(crate) async fn dispatch_settings_model_field(
+        &mut self,
+        mouse: MouseEvent,
+        row: usize,
+        body_x: u16,
+    ) {
         let Some(ref mut form) = self.settings.model_form else {
             return;
         };
         let show_base_url = form.shows_base_url();
         let model_row = if show_base_url { 3 } else { 2 };
-        let rel_col = mouse.column.saturating_sub(2) as usize;
+        let rel_col = mouse.column.saturating_sub(body_x) as usize;
 
         match row {
             0 => {
                 form.focused_field = 0;
                 let providers = crate::app::sorted_providers();
+                // "▸ provider    " is 14 cols; click past label cycles provider.
                 if rel_col > 14 {
                     form.provider_idx = (form.provider_idx + 1) % providers.len();
                     let p = providers[form.provider_idx];

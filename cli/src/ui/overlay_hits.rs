@@ -7,6 +7,7 @@ use crate::app::{
     AddRemoteNodeForm, App, ConfirmKind, NewOpForm, Popup, PopupKind, RunOptions, TriggerForm,
 };
 use crate::ui::chain_form::{ChainFormHitMap, HitRect};
+use crate::ui::chrome;
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::hits::{HintRegistrar, MouseAction, SessionHintAction};
 use crate::ui::nodes::sessions_list_rect;
@@ -19,23 +20,25 @@ pub fn register_confirm_hits(app: &App, terminal: Rect, confirm: &crate::app::Co
         .max(36);
     let height = 7u16;
     let area = centered_rect_fixed(width, height, terminal);
+    let body = chrome::modal_content_rect(area);
 
+    //
+    // Backdrop dismiss first; Yes/No registered later so they sit on top.
+    // Confirm body layout: message, blank, hints (y yes / n no).
+    //
+    app.hits_register(terminal, MouseAction::ConfirmDismiss);
     if is_info {
-        app.hits_register(terminal, MouseAction::ConfirmDismiss);
+        app.hits_register(body, MouseAction::ConfirmDismiss);
     } else {
-        app.hits_register(terminal, MouseAction::ConfirmDismiss);
-        let body = Rect {
-            x: area.x.saturating_add(1),
-            y: area.y.saturating_add(4),
-            width: area.width.saturating_sub(2),
-            height: 1,
-        };
+        let hints_y = body.y.saturating_add(2);
+        // " y " (3) + " yes" (4) = 7
         app.hits_register(
-            Rect::new(body.x.saturating_add(1), body.y, 6, 1),
+            Rect::new(body.x, hints_y, 7, 1),
             MouseAction::ConfirmYes,
         );
+        // + "    " (4) then " n " (3) + " no" (3) = 6
         app.hits_register(
-            Rect::new(body.x.saturating_add(8), body.y, 5, 1),
+            Rect::new(body.x.saturating_add(11), hints_y, 6, 1),
             MouseAction::ConfirmNo,
         );
     }
@@ -43,9 +46,16 @@ pub fn register_confirm_hits(app: &App, terminal: Rect, confirm: &crate::app::Co
 
 pub fn register_popup_hits(app: &App, terminal: Rect, popup: &Popup) {
     let filtered = popup.filtered_items();
-    let item_count = filtered.len().min(if matches!(popup.kind, PopupKind::CommandPalette) { 8 } else { 12 });
+    let item_count =
+        filtered
+            .len()
+            .min(if matches!(popup.kind, PopupKind::CommandPalette) {
+                8
+            } else {
+                12
+            });
 
-    let (list_area, backdrop) = match popup.kind {
+    let (popup_area, list_area) = match popup.kind {
         PopupKind::ModelSelect | PopupKind::SaveSession => {
             let ic = item_count as u16;
             let ph = ic + 5;
@@ -57,34 +67,34 @@ pub fn register_popup_hits(app: &App, terminal: Rect, popup: &Popup) {
             let pw = (max_lw as u16 + 6)
                 .min(terminal.width.saturating_sub(4))
                 .max(36);
-            let x = (terminal.width.saturating_sub(pw)) / 2;
-            let y = (terminal.height.saturating_sub(ph)) / 2;
-            let inner_y = y + 2;
-            (
-                Rect::new(x + 1, inner_y, pw.saturating_sub(2), ic),
-                terminal,
-            )
+            let area = centered_rect_fixed(pw, ph, terminal);
+            let body = chrome::modal_content_rect(area);
+            (area, Rect::new(body.x, body.y, body.width, ic))
         }
         PopupKind::CommandPalette => {
             let ic = item_count as u16;
             let ph = ic + 5;
             let y = terminal.height.saturating_sub(5 + ph);
-            let pw = (terminal.width / 2).max(36).min(terminal.width.saturating_sub(4));
-            let inner_y = y + 2;
-            (
-                Rect::new(3, inner_y, pw.saturating_sub(2), ic),
-                terminal,
-            )
+            let pw = (terminal.width / 2)
+                .max(36)
+                .min(terminal.width.saturating_sub(4));
+            let area = Rect::new(2, y, pw, ph);
+            let body = chrome::modal_content_rect(area);
+            (area, Rect::new(body.x, body.y, body.width, ic))
         }
     };
 
+    //
+    // Backdrop first (below); list rows last so they win the hit test.
+    //
+    app.hits_register(terminal, MouseAction::PopupDismiss);
+    let _ = popup_area;
     for i in 0..item_count {
         app.hits_register(
             Rect::new(list_area.x, list_area.y + i as u16, list_area.width, 1),
             MouseAction::PopupItem(i),
         );
     }
-    app.hits_register(backdrop, MouseAction::PopupDismiss);
 }
 
 pub fn register_new_op_form_hits(app: &App, area: Rect, form: &NewOpForm) {
@@ -195,16 +205,11 @@ pub fn register_trigger_form_hits(app: &App, area: Rect, form: &TriggerForm) {
     reg.chip(" cancel", MouseAction::TriggerCancel);
 }
 
-pub fn register_add_remote_hits(app: &App, terminal: Rect, form: &AddRemoteNodeForm) {
+pub fn register_add_remote_hits(app: &App, terminal: Rect, _form: &AddRemoteNodeForm) {
     let height = (AddRemoteNodeForm::FIELD_COUNT as u16) + 6;
     let width = 60u16.min(terminal.width.saturating_sub(4));
     let popup_area = centered_rect_fixed(width, height, terminal);
-    let body = Rect {
-        x: popup_area.x + 1,
-        y: popup_area.y + 2,
-        width: popup_area.width.saturating_sub(2),
-        height: popup_area.height.saturating_sub(4),
-    };
+    let body = chrome::modal_content_rect(popup_area);
 
     for i in 0..AddRemoteNodeForm::FIELD_COUNT {
         app.hits_register(
@@ -212,8 +217,11 @@ pub fn register_add_remote_hits(app: &App, terminal: Rect, form: &AddRemoteNodeF
             MouseAction::AddRemoteField(i),
         );
     }
+    //
+    // Hints sit on the last content row of the modal body.
+    //
     let hints = Rect {
-        y: popup_area.y + popup_area.height.saturating_sub(2),
+        y: body.y.saturating_add(body.height.saturating_sub(1)),
         height: 1,
         ..body
     };
@@ -240,26 +248,29 @@ pub fn register_sessions_list_hits(app: &App, area: Rect, count: usize) {
 
 pub fn register_session_chat_hits(app: &App, area: Rect) {
     let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(3),
-        Constraint::Length(1),
+        Constraint::Length(1), // header
+        Constraint::Length(1), // spacer
+        Constraint::Min(1),    // messages
+        Constraint::Length(1), // spacer
+        Constraint::Length(3), // input
+        Constraint::Length(1), // hints
     ])
     .split(area);
-    let text_start = chunks[4].x + 5;
+    //
+    // Input: LEFT border (1) + pad (1) + "▸ " (2) → text starts at x+4.
+    //
+    let text_start = chunks[4].x.saturating_add(4);
     app.hits_register(
         chunks[4],
         MouseAction::SessionInput { text_start },
     );
+    // Match render: "↵ send    ^w suspend    ^c close"
     let mut reg = HintRegistrar::new(app, chunks[5]);
-    reg.gap(2);
     reg.chip("\u{21b5}", MouseAction::SessionHint(SessionHintAction::Send));
     reg.chip(" send", MouseAction::SessionHint(SessionHintAction::Send));
     reg.gap(4);
     reg.chip("^w", MouseAction::SessionHint(SessionHintAction::Pause));
-    reg.chip(" pause", MouseAction::SessionHint(SessionHintAction::Pause));
+    reg.chip(" suspend", MouseAction::SessionHint(SessionHintAction::Pause));
     reg.gap(4);
     reg.chip("^c", MouseAction::SessionHint(SessionHintAction::Close));
     reg.chip(" close", MouseAction::SessionHint(SessionHintAction::Close));
@@ -267,29 +278,30 @@ pub fn register_session_chat_hits(app: &App, area: Rect) {
 
 pub fn register_session_options_hits(app: &App, area: Rect, dir_count: usize) {
     let chunks = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(1), // title
+        Constraint::Length(1), // divider
+        Constraint::Min(1),    // body
+        Constraint::Length(1), // hints
     ])
     .split(area);
-    let inner = Rect {
-        x: chunks[1].x + 2,
-        width: chunks[1].width.saturating_sub(4),
-        ..chunks[1]
-    };
+    let body = chunks[2];
     app.hits_register(
-        Rect::new(inner.x, inner.y, inner.width, 1),
+        Rect::new(body.x, body.y, body.width, 1),
         MouseAction::SessionOptionsRow(0),
     );
     for i in 0..dir_count {
         app.hits_register(
-            Rect::new(inner.x, inner.y + 3 + i as u16, inner.width, 1),
+            Rect::new(body.x, body.y + 3 + i as u16, body.width, 1),
             MouseAction::SessionOptionsRow(3 + i),
         );
     }
-    let mut reg = HintRegistrar::new(app, chunks[2]);
-    reg.gap(27);
-    reg.chip("enter", MouseAction::SessionOptionsConfirm);
+    // Match render: "↑↓ navigate    tab toggle    ↵ start    esc cancel"
+    let mut reg = HintRegistrar::new(app, chunks[3]);
+    reg.gap(11); // "↑↓ navigate"
+    reg.gap(4);
+    reg.gap(10); // "tab toggle"
+    reg.gap(4);
+    reg.chip("\u{21b5}", MouseAction::SessionOptionsConfirm);
     reg.chip(" start", MouseAction::SessionOptionsConfirm);
     reg.gap(4);
     reg.chip("esc", MouseAction::SessionOptionsCancel);
@@ -307,7 +319,11 @@ pub fn register_settings_model_form_hits(
 ) {
     let show_base_url = form.shows_base_url();
     let field_count = if show_base_url { 4u16 } else { 3u16 };
-    let base_lines = field_count + 2 + 2;
+    //
+    // Match render_model_form: base_lines = field_count + 6 (chrome +
+    // fields + blank + hints), plus optional dropdown rows.
+    //
+    let base_lines = field_count + 6;
     let dropdown_extra = if form.model_dropdown_open {
         1 + form.available_models.len() as u16
     } else if form.loading_models {
@@ -317,38 +333,52 @@ pub fn register_settings_model_form_hits(
     };
     let popup_h = (base_lines + dropdown_extra).min(area.height.saturating_sub(4));
     let popup_w = 60u16.min(area.width.saturating_sub(4));
-    let px = (area.width.saturating_sub(popup_w)) / 2;
-    let py = (area.height.saturating_sub(popup_h)) / 2;
-    let inner_x = area.x + px + 1;
-    let inner_y = area.y + py + 1;
+    let px = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let py = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    let popup_area = Rect::new(px, py, popup_w, popup_h);
+    let body = chrome::modal_content_rect(popup_area);
 
-    let model_row = if show_base_url { 3 } else { 2 };
-    let hints_row = model_row + 2;
-    let dropdown_start = hints_row + 2;
+    let model_row = if show_base_url { 3u16 } else { 2 };
+    let hints_row = model_row + 2; // blank after fields, then hints
 
     for row in 0..field_count {
         app.hits_register(
-            Rect::new(inner_x, inner_y + row, popup_w.saturating_sub(2), 1),
-            MouseAction::SettingsModelField(row as usize),
+            Rect::new(body.x, body.y + row, body.width, 1),
+            MouseAction::SettingsModelField {
+                row: row as usize,
+                body_x: body.x,
+            },
         );
     }
+    // "^s save    esc cancel"
     app.hits_register(
-        Rect::new(inner_x.saturating_add(2), inner_y + hints_row, 8, 1),
+        Rect::new(body.x, body.y + hints_row, 7, 1),
         MouseAction::SettingsModelSave,
     );
     app.hits_register(
-        Rect::new(inner_x.saturating_add(11), inner_y + hints_row, 8, 1),
+        Rect::new(body.x.saturating_add(11), body.y + hints_row, 10, 1),
         MouseAction::SettingsModelCancel,
     );
     if form.model_dropdown_open && !form.available_models.is_empty() {
-        for i in 0..form.available_models.len() {
+        // fields + blank + hints [+ loading] + blank → dropdown rows
+        let mut header_lines = field_count + 2; // fields + blank + hints
+        if form.loading_models {
+            header_lines += 1;
+        }
+        header_lines += 1; // blank before dropdown
+        let dropdown_y = body.y + header_lines;
+        let visible_h = body
+            .height
+            .saturating_sub(header_lines)
+            .max(1) as usize;
+        let scroll = form.model_dropdown_scroll as usize;
+        for vis in 0..visible_h {
+            let i = scroll + vis;
+            if i >= form.available_models.len() {
+                break;
+            }
             app.hits_register(
-                Rect::new(
-                    inner_x,
-                    inner_y + dropdown_start + i as u16,
-                    popup_w.saturating_sub(2),
-                    1,
-                ),
+                Rect::new(body.x, dropdown_y + vis as u16, body.width, 1),
                 MouseAction::SettingsModelDropdownItem(i),
             );
         }
@@ -360,27 +390,33 @@ pub fn register_settings_dropdown_hits(app: &App, area: Rect, state: &crate::app
     if item_count == 0 {
         return;
     }
-    let popup_h = (item_count as u16 + 2).min(area.height.saturating_sub(4));
-    let max_name = state
+    // Match render_model_dropdown: height = items + 4 chrome rows.
+    let popup_h = (item_count as u16 + 4).min(area.height.saturating_sub(4));
+    let max_label = state
         .model_definitions
         .iter()
-        .map(|d| d.name.len())
+        .map(|d| {
+            if d.name.is_empty() {
+                d.provider.len() + 2 + d.model.len()
+            } else {
+                d.name.len()
+            }
+        })
         .max()
-        .unwrap_or(20);
-    let popup_w = (max_name as u16 + 6).min(area.width.saturating_sub(4));
+        .unwrap_or(20) as u16;
+    let popup_w = (max_label + 6).max(20).min(area.width.saturating_sub(4));
     let px = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let py = area.y + (area.height.saturating_sub(popup_h)) / 2;
-    let inner_x = px + 1;
-    let inner_y = py + 1;
-    let inner_h = popup_h.saturating_sub(2);
+    let popup_area = Rect::new(px, py, popup_w, popup_h);
+    let body = chrome::modal_content_rect(popup_area);
 
+    app.hits_register(area, MouseAction::SettingsDropdownDismiss);
     for i in 0..item_count {
         app.hits_register(
-            Rect::new(inner_x, inner_y + i as u16, popup_w.saturating_sub(2), 1),
+            Rect::new(body.x, body.y + i as u16, body.width, 1),
             MouseAction::SettingsDropdownRow(i),
         );
     }
-    app.hits_register(area, MouseAction::SettingsDropdownDismiss);
 }
 
 pub fn register_chain_form_hits(app: &App, hit: &ChainFormHitMap) {

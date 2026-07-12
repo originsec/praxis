@@ -35,7 +35,7 @@ impl App {
                 | MouseAction::SessionOptionsConfirm
                 | MouseAction::SessionOptionsCancel
                 | MouseAction::SettingsContentClick
-                | MouseAction::SettingsModelField(_)
+                | MouseAction::SettingsModelField { .. }
                 | MouseAction::SettingsModelDropdownItem(_)
                 | MouseAction::SettingsModelSave
                 | MouseAction::SettingsModelCancel
