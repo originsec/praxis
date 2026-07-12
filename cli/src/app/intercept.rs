@@ -188,7 +188,6 @@ pub struct InterceptState {
     pub status_message: Option<(String, Instant)>,
     pub jump_traffic_id: Option<i64>,
     pub tab_hit_regions: RefCell<Vec<(InterceptTab, u16, u16)>>,
-    pub resummarize_pending: HashSet<i64>,
 }
 
 impl Default for InterceptState {
@@ -239,7 +238,6 @@ impl Default for InterceptState {
             traffic_match_rules: HashMap::new(),
             rule_match_counts: HashMap::new(),
             tab_hit_regions: RefCell::new(Vec::new()),
-            resummarize_pending: HashSet::new(),
         }
     }
 }
@@ -306,11 +304,6 @@ impl InterceptState {
         let rule = self.rules.iter().find(|r| r.id == m.match_info.rule_id);
         match (&m.match_info.summary, rule.and_then(|r| r.summarization_prompt.as_ref())) {
             (Some(_), _) => SummaryStatus::Ready,
-            (None, Some(_))
-                if self.resummarize_pending.contains(&m.match_info.id) =>
-            {
-                SummaryStatus::Pending
-            }
             (None, Some(_)) => SummaryStatus::Pending,
             (None, None) => SummaryStatus::NotConfigured,
         }
@@ -519,9 +512,6 @@ impl InterceptState {
     pub fn push_matches(&mut self, incoming: Vec<TrafficMatchWithDetails>) {
         for m in incoming {
             let match_id = m.match_info.id;
-            if m.match_info.summary.is_some() {
-                self.resummarize_pending.remove(&match_id);
-            }
             if let Some(pos) = self
                 .matches
                 .iter()
@@ -1547,9 +1537,6 @@ impl App {
                     self.fetch_body_for_match_selected().await;
                 }
             }
-            (KeyCode::Char('r'), m) if m.contains(KeyModifiers::CONTROL) => {
-                self.resummarize_selected_match().await;
-            }
             (KeyCode::Char('f'), _) => {
                 self.cycle_match_rule_filter();
                 self.intercept.match_selected = 0;
@@ -1774,31 +1761,6 @@ impl App {
     // list — just cycle + Esc clears. Keeps the UX terse and avoids
     // another modal surface.
     //
-
-    pub async fn resummarize_selected_match(&mut self) {
-        let match_id = match self
-            .intercept
-            .filtered_match_at(self.intercept.match_selected)
-        {
-            Some(m) => m.match_info.id,
-            None => return,
-        };
-        match self.client.resummarize_traffic_match(match_id).await {
-            Ok(()) => {
-                self.intercept.resummarize_pending.insert(match_id);
-                if let Some(pos) = self
-                    .intercept
-                    .matches
-                    .iter()
-                    .position(|m| m.match_info.id == match_id)
-                {
-                    self.intercept.matches[pos].match_info.summary = None;
-                }
-                self.intercept.set_status_message("Re-summarizing…");
-            }
-            Err(e) => self.intercept.set_error(format!("Re-summarize: {}", e)),
-        }
-    }
 
     fn cycle_node_filter(&mut self) {
         let mut nodes: Vec<String> = self

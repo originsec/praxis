@@ -133,10 +133,6 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         ClientSignalMessage::TrafficGetRequest { client_id, id } => {
             handle_traffic_get(ctx, client_id, id).await
         }
-        ClientSignalMessage::TrafficMatchResummarize {
-            client_id,
-            match_id,
-        } => handle_traffic_match_resummarize(ctx, client_id, match_id).await,
 
         //
         // Intercept rules.

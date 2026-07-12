@@ -1844,11 +1844,6 @@ pub enum ClientSignalMessage {
         client_id: String,
         filters: TrafficSearchFilters,
     },
-    /// Re-run LLM summarization for an existing traffic match
-    TrafficMatchResummarize {
-        client_id: String,
-        match_id: i64,
-    },
     /// Create an intercept rule
     InterceptRuleCreate {
         client_id: String,
@@ -2263,11 +2258,6 @@ pub enum ClientDirectMessage {
     TrafficGetResponse {
         id: i64,
         entry: Option<InterceptedTrafficEntry>,
-    },
-    /// Ack for TrafficMatchResummarize (summary arrives via live match broadcast)
-    TrafficMatchResummarizeResponse {
-        accepted: bool,
-        message: Option<String>,
     },
     /// Intercept rules list
     InterceptRuleListResponse {

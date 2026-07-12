@@ -1,25 +1,8 @@
-use common::{ClientDirectMessage, TrafficMatch};
+use common::ClientDirectMessage;
 
 use crate::messaging::send_to_client;
-use crate::semantic_helpers;
 
 use super::ServiceContext;
-
-async fn send_resummarize_response(
-    ctx: &ServiceContext,
-    client_id: &str,
-    accepted: bool,
-    message: Option<String>,
-) {
-    let msg = ClientDirectMessage::TrafficMatchResummarizeResponse { accepted, message };
-    if let Err(e) = send_to_client(&ctx.client_publish_channel, client_id, msg).await {
-        common::log_error!(
-            "Failed to send TrafficMatchResummarizeResponse to client {}: {}",
-            client_id,
-            e
-        );
-    }
-}
 
 pub(super) async fn handle_traffic_log(
     ctx: &ServiceContext,
@@ -162,117 +145,6 @@ pub(super) async fn handle_traffic_get(ctx: &ServiceContext, client_id: String, 
             e
         );
     }
-}
-
-pub(super) async fn handle_traffic_match_resummarize(
-    ctx: &ServiceContext,
-    client_id: String,
-    match_id: i64,
-) {
-    common::log_info!(
-        "Received TrafficMatchResummarize from client {} for match {}",
-        common::short_id(&client_id),
-        match_id
-    );
-
-    let mut matched = match ctx.database.get_match_by_id(match_id).await {
-        Ok(Some(m)) => m,
-        Ok(None) => {
-            send_resummarize_response(ctx, &client_id, false, Some("Match not found".into())).await;
-            return;
-        }
-        Err(e) => {
-            common::log_error!("Failed to load match {}: {}", match_id, e);
-            send_resummarize_response(
-                ctx,
-                &client_id,
-                false,
-                Some(format!("Failed to load match: {}", e)),
-            )
-            .await;
-            return;
-        }
-    };
-
-    let rule = match ctx.database.get_rule(matched.match_info.rule_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            send_resummarize_response(ctx, &client_id, false, Some("Rule not found".into())).await;
-            return;
-        }
-        Err(e) => {
-            common::log_error!("Failed to load rule for match {}: {}", match_id, e);
-            send_resummarize_response(
-                ctx,
-                &client_id,
-                false,
-                Some(format!("Failed to load rule: {}", e)),
-            )
-            .await;
-            return;
-        }
-    };
-
-    let Some(prompt) = rule.summarization_prompt.clone() else {
-        send_resummarize_response(
-            ctx,
-            &client_id,
-            false,
-            Some("Rule has no summarization prompt".into()),
-        )
-        .await;
-        return;
-    };
-
-    if let Err(e) = ctx.database.clear_match_summary(match_id).await {
-        common::log_error!("Failed to clear summary for match {}: {}", match_id, e);
-        send_resummarize_response(
-            ctx,
-            &client_id,
-            false,
-            Some(format!("Failed to clear summary: {}", e)),
-        )
-        .await;
-        return;
-    }
-
-    matched.match_info.summary = None;
-    ctx.intercept_broadcaster.push_match(matched.clone());
-
-    send_resummarize_response(ctx, &client_id, true, None).await;
-
-    let db = ctx.database.clone();
-    let cfg = ctx.service_config.clone();
-    let entry = matched.traffic.clone();
-    let broadcaster = ctx.intercept_broadcaster.clone();
-    let rule_id = rule.id;
-    let rule_name = rule.name.clone();
-    let traffic_id = matched.match_info.traffic_id;
-    let matched_at = matched.match_info.matched_at;
-
-    tokio::spawn(async move {
-        let result = semantic_helpers::summarize_traffic(&cfg, &entry, &prompt).await;
-        if result.success {
-            if let Some(summary) = result.summary {
-                if let Err(e) = db.update_match_summary(match_id, &summary).await {
-                    common::log_error!("Failed to update match summary: {}", e);
-                }
-                broadcaster.push_match(common::TrafficMatchWithDetails {
-                    match_info: TrafficMatch {
-                        id: match_id,
-                        traffic_id,
-                        rule_id,
-                        rule_name,
-                        matched_at,
-                        summary: Some(summary),
-                    },
-                    traffic: entry,
-                });
-            }
-        } else if let Some(err) = result.error {
-            common::log_warn!("Re-summarization failed for match {}: {}", match_id, err);
-        }
-    });
 }
 
 // ---------------------------------------------------------------------------

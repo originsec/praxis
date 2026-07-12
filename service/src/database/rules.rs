@@ -274,27 +274,6 @@ impl Database {
         Ok(())
     }
 
-    /// Clear a traffic match summary (before re-summarization)
-    pub async fn clear_match_summary(&self, match_id: i64) -> Result<()> {
-        self.db_execute(
-            "UPDATE traffic_matches SET summary = NULL WHERE id = $1",
-            db_args![match_id],
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Fetch a single traffic match with joined traffic entry
-    pub async fn get_match_by_id(&self, match_id: i64) -> Result<Option<TrafficMatchWithDetails>> {
-        let sql = "SELECT m.id, m.traffic_id, m.rule_id, r.name, m.matched_at, m.summary,
-                        t.id, t.timestamp, t.node_id, t.agent_short_name, t.intercept_method, t.direction, t.method, t.url, t.host, t.request_headers, t.request_body, t.response_status, t.response_headers, t.response_body
-                 FROM traffic_matches m
-                 JOIN intercepted_traffic t ON m.traffic_id = t.id
-                 JOIN intercept_rules r ON m.rule_id = r.id
-                 WHERE m.id = $1";
-        let row = self.db_fetch_optional(sql, db_args![match_id]).await?;
-        row.map(|row| parse_match_with_traffic_row(&row)).transpose()
-    }
 }
 
 //
