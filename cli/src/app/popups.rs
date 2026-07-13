@@ -42,6 +42,7 @@ pub enum ConfirmKind {
     },
     DeleteTrigger(String), // trigger_id
     DeleteChain(String),   // chain_id
+    DiscardChainForm,
     Info,
 }
 
@@ -235,6 +236,9 @@ impl App {
                 if let Err(e) = result {
                     self.intercept.set_error(format!("Intercept toggle: {}", e));
                 }
+            }
+            ConfirmKind::DiscardChainForm => {
+                self.chain_form = None;
             }
             ConfirmKind::DeleteChain(chain_id) => {
                 if let Err(e) = self.client.delete_chain_def(chain_id).await {

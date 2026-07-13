@@ -12,7 +12,9 @@ mod orchestrator;
 mod popups;
 mod settings;
 
-pub use self::chain_form::{input_port_count, output_port_count};
+pub use self::chain_form::{
+    collect_session_groups, element_issues, input_port_count, output_port_count,
+};
 pub use self::forms::*;
 pub use self::intercept::InterceptState;
 pub use self::log_query::LogQueryState;

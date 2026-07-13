@@ -17,7 +17,7 @@ use crate::ui::chrome;
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::hits::{HintRegistrar, MouseAction};
 use crate::ui::theme::{
-    ACCENT, BG_ELEMENT, BG_MENU, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BG_ELEMENT, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
 };
 
 /// Outer width: fits the standard footer plus optional "shift+↵ newline".
@@ -100,7 +100,7 @@ pub fn form_modal_hit_layout(
 
 pub fn paint_form_lines(f: &mut Frame, content: Rect, lines: Vec<Line<'static>>) {
     f.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(BG_MENU)),
+        Paragraph::new(lines).style(Style::default().bg(BG_ELEMENT)),
         content,
     );
 }
@@ -232,7 +232,7 @@ pub fn form_footer_hints(show_newline: bool) -> Line<'static> {
 
 pub fn paint_form_footer(f: &mut Frame, area: Rect, show_newline: bool) {
     f.render_widget(
-        Paragraph::new(form_footer_hints(show_newline)).style(Style::default().bg(BG_MENU)),
+        Paragraph::new(form_footer_hints(show_newline)).style(Style::default().bg(BG_ELEMENT)),
         area,
     );
 }

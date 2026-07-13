@@ -8,9 +8,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::theme::{ACCENT, BG, BG_ELEMENT, BG_MENU, BORDER_SUBTLE, DIM, MUTED, TEXT, TEXT_BRIGHT};
+use super::theme::{
+    ACCENT, BG, BG_ELEMENT, BORDER, DIM, MUTED, TEXT, TEXT_BRIGHT,
+};
 
 //
 // "Bright key, muted label" hint segment with a leading-muted variant
@@ -169,6 +171,7 @@ pub fn modal_panel(f: &mut Frame, area: Rect, title: &str, esc_hint: &str) -> Re
 // Geometry-only counterpart of `modal_panel` — the body rect where
 // content is painted after the title + divider. Hit registration uses
 // this so mouse targets match paint without re-deriving the layout.
+// Outer `area` is the bordered popup; content sits inside the border.
 //
 pub fn modal_content_rect(area: Rect) -> Rect {
     let inner = Rect {
@@ -192,8 +195,16 @@ pub fn modal_content_rect(area: Rect) -> Rect {
 //
 
 pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hint: &str) -> Rect {
+    //
+    // Elevated panel over the page: clear the footprint, fill with
+    // BG_ELEMENT (one step lighter than canvas/menu greys), and draw an
+    // accent border so the modal does not blend into the chain builder.
+    //
     f.render_widget(Clear, area);
-    let block = Block::default().style(Style::default().bg(BG_MENU));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .style(Style::default().bg(BG_ELEMENT));
     f.render_widget(block, area);
 
     let inner = Rect {
@@ -219,7 +230,7 @@ pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hin
         Layout::horizontal([Constraint::Min(1), Constraint::Length(hint_width)]).split(header[0]);
 
     f.render_widget(
-        Paragraph::new(title).style(Style::default().bg(BG_MENU)),
+        Paragraph::new(title).style(Style::default().bg(BG_ELEMENT)),
         header_chunks[0],
     );
 
@@ -229,7 +240,7 @@ pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hin
                 esc_hint.to_string(),
                 Style::default().fg(MUTED),
             )))
-            .style(Style::default().bg(BG_MENU)),
+            .style(Style::default().bg(BG_ELEMENT)),
             header_chunks[1],
         );
     }
@@ -237,9 +248,9 @@ pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hin
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER_SUBTLE),
+            Style::default().fg(BORDER),
         )))
-        .style(Style::default().bg(BG_MENU)),
+        .style(Style::default().bg(BG_ELEMENT)),
         header[1],
     );
 

@@ -192,18 +192,20 @@ Operations can be combined into chains for complex workflows. A chain is a graph
 
 ### Visual Chain Builder
 
-Praxis includes a visual chain builder using React Flow:
+The shipped chain builder is the **praxis TUI** (Operations → Library → New Chain / Edit). It is a terminal canvas with drag-and-drop blocks, port connections, and a properties modal — not a web/React Flow editor.
 
 1. Go to **Operations** → **Library**
-2. Click **New Chain**
-3. Drag operations onto the canvas
-4. Connect outputs to inputs
-5. Configure session groups
-6. Save the chain
+2. Create a chain (`Ctrl+Shift+N` or the new-chain action) or edit an existing one (`Ctrl+E`)
+3. Add elements from the palette (or keyboard shortcuts) — new nodes auto-wire from the selection
+4. Connect outputs to inputs by dragging ports (forgiving multi-cell hit targets)
+5. Open properties with `Enter` or double-click; assign session groups and block config
+6. Save with `Ctrl+S` (invalid graphs are rejected with a clear error list)
+
+See [CLI usage — chain builder](cli.md#library-tab--chain-builder) for keybindings and interaction details.
 
 ### Chain Structure
 
-Every chain starts with a **Trigger** element. Elements with no outgoing connections are terminal — their output becomes the chain's final output. Between the trigger and terminal elements, you build processing workflows using various block types.
+Every chain starts with a **Trigger** element and must include exactly one **Termination**. Between them, you build processing workflows using various block types. Incomplete blocks show a `!` badge on the canvas.
 
 ### Element Types
 
@@ -211,17 +213,21 @@ Chains support several element types:
 
 **Trigger** - Every chain must start with a trigger. The in-canvas trigger element represents the manual trigger (click "Run" to start the chain). For automated triggers, see [Chain Triggers](#chain-triggers) below.
 
-**Operation** - Executes a semantic operation from your library. Select an existing operation by name. The operation runs against the target agent and its output flows to the next element.
+**Operation** - Executes a semantic operation from your library. Pick an existing operation by name (picker opens when you add an Operation). The operation runs against the target agent and its output flows to the next element.
 
-**Transform** - An LLM-powered transformation step. Takes input from the previous element and applies a prompt to transform it. Useful for extracting specific data, reformatting output, or summarizing information.
+**Transform** - An LLM-powered transformation step. Takes input from the previous element and applies a multi-line prompt to transform it. Useful for extracting specific data, reformatting output, or summarizing information.
 
-**GenericPrompt** - Sends a prompt directly to the agent session (not through an orchestrator). Simpler than an operation — just sends the prompt and captures the response.
+**GenericPrompt** - Sends a multi-line prompt directly to the agent session (not through an orchestrator). Simpler than an operation — just sends the prompt and captures the response.
 
-**Memory Store** - Stores incoming data under a named key for later retrieval. The data passes through unchanged to downstream elements.
+**Memory** - Stores or retrieves data by key (mode is store or retrieve). Store passes data through unchanged; retrieve loads a previously stored key.
 
-**Memory Retrieve** - Retrieves previously stored data by key. Useful for accessing earlier results later in the chain.
+**Loop** - Controls iteration. Configure `max_iterations`. Port `r` (0) is the retry path back into earlier elements; port `x` (1) is the exit when iterations are exhausted.
 
-**Loop** - Controls iteration in the chain. Configure `max_iterations` on the element. On each pass through the loop, if iterations remain, the output fires and routes back to an earlier element creating a cycle. When iterations are exhausted, no output fires — execution stops at that branch.
+**Tool** - Invokes a registered toolkit tool (picker lists known tools; params are JSON).
+
+**Payload** - Emits a stored payload by id.
+
+**Termination** - Explicit end of the chain (exactly one per chain).
 
 ### Conditional Connections
 
@@ -243,29 +249,31 @@ Operation, Transform, and GenericPrompt elements support per-block configuration
 
 ### Building a Chain
 
-1. **Add a Trigger** - Drag a Trigger element onto the canvas. This is your starting point.
+1. **Start from the scaffold** - New chains open with a connected `Trigger → Termination` pair.
 
-2. **Add Processing Elements** - Add Operations, Transforms, GenericPrompts, Memory blocks, or Loops as needed. Connect them by dragging from one element's output handle to another's input handle.
+2. **Add Processing Elements** - Use the palette or shortcuts (`o`/`t`/`g`/`m`/`p`/`k`/`y`). With a block selected, new elements place to the right and auto-wire into the graph. You can also drag ports to rewire freely.
 
-3. **Ensure Terminal Elements** - At least one element must have no outgoing connections. Its output becomes the chain's result.
+3. **Keep a Termination** - Exactly one Termination is required; its output is the chain result when the run reaches it.
 
-4. **Configure Elements** - Double-click each element to configure:
-   - Operations: Select which operation to run
-   - Transforms: Write the transformation prompt
-   - Memory blocks: Set the memory key
-   - Loops: Set max iterations
-   - Set model overrides if needed
+4. **Configure Elements** - Press `Enter` or double-click:
+   - Operations: pick the operation (and optional model)
+   - Transforms / GenericPrompts: multi-line prompt (+ model for transforms)
+   - Memory: store/retrieve mode and key
+   - Loops: max iterations
+   - Tools / Payloads: pick from lists when available
+   - Session group + block config overrides where supported
 
-5. **Assign Session Groups** - Group elements that should share an agent session (see below).
+5. **Assign Session Groups** - In the properties modal for Operations / Transforms / GenericPrompts, use the session group picker (none / new / existing). Elements in the same group share a color tick on the block.
 
 ### Session Groups
 
 Session groups control how agent sessions are managed across chain elements. Elements that interact with agents (Operations, Transforms, GenericPrompts) can be assigned to session groups.
 
 **Assigning Session Groups:**
-1. Select an element in the chain editor
-2. Click "Assign Session Group" or select an existing group
-3. Elements in the same group share a color indicator
+1. Open the element properties modal (`Enter` / double-click)
+2. Under **Session group**, click the group picker
+3. Choose none, create a new group, or reuse an existing group id
+4. Elements in the same group share a color indicator on the canvas
 
 **Same Session Group** - Elements share an agent session:
 - The first element creates the session
@@ -347,7 +355,7 @@ You can cancel a running chain from the Runs tab. Cancellation stops queuing new
 
 ### Chain Triggers
 
-Chains can be executed automatically via triggers. While the in-canvas Trigger element represents manual execution, chain triggers are separate configurations that automate when and how a chain fires. Triggers are managed from two places: the **Triggers** panel at the bottom of the chain builder, and the **Triggers** tab on the Operations page.
+Chains can be executed automatically via triggers. While the in-canvas Trigger element represents manual execution, chain triggers are separate configurations that automate when and how a chain fires. Triggers are managed from the **Triggers** tab on the Operations page (not inside the chain canvas).
 
 #### Trigger Types
 
@@ -364,14 +372,12 @@ Scheduled triggers can be **recurring** (fire repeatedly) or **one-shot** (fire 
 
 #### Creating Triggers
 
-From the chain builder:
+From the Operations **Triggers** tab:
 
-1. Open a saved chain in the chain editor
-2. Expand the **Triggers** panel at the bottom of the editor
-3. Click **Add Trigger**
-4. Select the trigger type and configure its settings
-5. Configure the **Target Spec** (see [Flexible Targeting](#flexible-targeting) below)
-6. Click **Save**
+1. Press `Ctrl+N` (or the new-trigger action) to open the trigger form
+2. Select the target chain, trigger type, and schedule/rule settings
+3. Configure the **Target Spec** (see [Flexible Targeting](#flexible-targeting) below)
+4. Save with `Ctrl+S`
 
 The trigger is immediately active once saved. Each chain can have multiple triggers.
 

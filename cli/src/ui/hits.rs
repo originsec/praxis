@@ -106,8 +106,21 @@ pub enum MouseAction {
     ChainCycleCondition,
     ChainDeleteConnection,
     ChainPickOp,
+    ChainPickModel,
+    ChainPickTool,
+    ChainPickPayload,
+    ChainPickSessionGroup,
+    ChainCycleMemoryMode,
+    ChainToggleSessionYolo,
+    ChainCycleBlockYolo,
+    ChainCycleRequireAll,
     ChainPickOpItem(usize),
     ChainCanvas,
+    //
+    // Absorbs clicks on the properties modal chrome so the canvas under
+    // the modal does not receive them.
+    //
+    ChainPropsSurface,
     ChainEditorDismiss,
 }
 

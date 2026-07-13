@@ -26,7 +26,13 @@ pub fn register_confirm_hits(app: &App, terminal: Rect, confirm: &crate::app::Co
     // Backdrop dismiss first; Yes/No registered later so they sit on top.
     // Confirm body layout: message, blank, hints (y yes / n no).
     //
+    //
+    // Backdrop dismiss first; full confirm panel absorbs clicks so they
+    // do not fall through to the chain builder under the dialog; Yes/No
+    // registered last so they sit on top.
+    //
     app.hits_register(terminal, MouseAction::ConfirmDismiss);
+    app.hits_register(area, MouseAction::ConfirmNo);
     if is_info {
         app.hits_register(body, MouseAction::ConfirmDismiss);
     } else {
@@ -398,6 +404,11 @@ pub fn register_chain_form_hits(app: &App, hit: &ChainFormHitMap) {
         );
     }
 
+    //
+    // Bottom → top. Canvas first so later registrations (header, palette,
+    // and especially the properties modal) win when they overlap.
+    //
+    reg(app, &hit.canvas, MouseAction::ChainCanvas);
     reg(app, &hit.save_button, MouseAction::ChainSave);
     reg(app, &hit.cancel_button, MouseAction::ChainCancel);
     reg(app, &hit.auto_layout_button, MouseAction::ChainAutoLayout);
@@ -407,6 +418,11 @@ pub fn register_chain_form_hits(app: &App, hit: &ChainFormHitMap) {
     for (target, rect) in &hit.header_fields {
         reg(app, rect, MouseAction::ChainEdit(target.clone()));
     }
+    //
+    // Properties modal surface + fields last so they always beat the
+    // canvas under the centered popup.
+    //
+    reg(app, &hit.props_modal_rect, MouseAction::ChainPropsSurface);
     for (target, rect) in &hit.property_fields {
         reg(app, rect, MouseAction::ChainEdit(target.clone()));
     }
@@ -415,7 +431,14 @@ pub fn register_chain_form_hits(app: &App, hit: &ChainFormHitMap) {
     reg(app, &hit.cycle_condition_button, MouseAction::ChainCycleCondition);
     reg(app, &hit.delete_connection_button, MouseAction::ChainDeleteConnection);
     reg(app, &hit.pick_op_button, MouseAction::ChainPickOp);
-    reg(app, &hit.canvas, MouseAction::ChainCanvas);
+    reg(app, &hit.pick_model_button, MouseAction::ChainPickModel);
+    reg(app, &hit.pick_tool_button, MouseAction::ChainPickTool);
+    reg(app, &hit.pick_payload_button, MouseAction::ChainPickPayload);
+    reg(app, &hit.pick_session_group_button, MouseAction::ChainPickSessionGroup);
+    reg(app, &hit.cycle_memory_mode_button, MouseAction::ChainCycleMemoryMode);
+    reg(app, &hit.toggle_session_yolo_button, MouseAction::ChainToggleSessionYolo);
+    reg(app, &hit.cycle_block_yolo_button, MouseAction::ChainCycleBlockYolo);
+    reg(app, &hit.cycle_require_all_button, MouseAction::ChainCycleRequireAll);
 }
 
 pub fn register_chain_editor_hits(
@@ -426,13 +449,39 @@ pub fn register_chain_editor_hits(
 ) {
     use crate::app::ChainFormEditor;
 
-    let ChainFormEditor::PickOpName { cursor: _, filter } = editor;
+    let (cursor, filter, list, has_filter): (usize, String, Vec<String>, bool) = match editor {
+        ChainFormEditor::PickOpName { cursor, filter } => (
+            *cursor,
+            filter.clone(),
+            form.available_op_names.clone(),
+            true,
+        ),
+        ChainFormEditor::PickModel { cursor, filter } => {
+            (*cursor, filter.clone(), form.available_models.clone(), true)
+        }
+        ChainFormEditor::PickTool { cursor, filter } => {
+            (*cursor, filter.clone(), form.available_tools.clone(), true)
+        }
+        ChainFormEditor::PickPayload { cursor, filter } => (
+            *cursor,
+            filter.clone(),
+            form.available_payloads.clone(),
+            true,
+        ),
+        ChainFormEditor::PickSessionGroup { cursor } => {
+            let mut items = vec!["(none)".to_string(), "(new group)".to_string()];
+            for g in crate::app::collect_session_groups(form) {
+                items.push(g.id);
+            }
+            (*cursor, String::new(), items, false)
+        }
+    };
+
     let popup_w = 60u16.min(area.width.saturating_sub(4));
     let popup_h = 16u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width - popup_w) / 2;
     let y = area.y + (area.height - popup_h) / 2;
     let rect = Rect::new(x, y, popup_w, popup_h);
-    // border inset
     let inner = Rect {
         x: rect.x + 1,
         y: rect.y + 1,
@@ -440,20 +489,21 @@ pub fn register_chain_editor_hits(
         height: rect.height.saturating_sub(2),
     };
 
-    // Backdrop first so outside clicks dismiss; list rows registered after win.
     app.hits_register(area, MouseAction::ChainEditorDismiss);
 
-    let filtered: Vec<&String> = form
-        .available_op_names
+    let filtered: Vec<&String> = list
         .iter()
         .filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter.to_lowercase()))
         .collect();
-    // Layout matches render_op_picker: title, filter, blank, then rows.
-    let list_start_y = inner.y + 3;
+    // title (+ optional filter) + blank, then rows — matches render_picker.
+    let list_start_y = if has_filter {
+        inner.y + 3
+    } else {
+        inner.y + 2
+    };
     let max_rows = (inner.height as usize).saturating_sub(5);
-    let ChainFormEditor::PickOpName { cursor, .. } = editor;
-    let start = if *cursor >= max_rows && max_rows > 0 {
-        *cursor + 1 - max_rows
+    let start = if cursor >= max_rows && max_rows > 0 {
+        cursor + 1 - max_rows
     } else {
         0
     };

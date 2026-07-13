@@ -177,15 +177,14 @@ pub enum TriggerFormSection {
 }
 
 //
-// Chain builder form. Now visual: blocks are positioned on a 2D canvas with
-// orthogonal connectors between ports. Header inputs (name, category, etc.)
-// live on a strip above the canvas, a properties strip lives below, and a
-// palette of "add element" buttons sits along the bottom. The struct owns
-// the in-progress chain plus the canvas viewport state (camera, selection,
-// active drag) and the inline-edit target.
+// Chain builder form. Blocks sit on a 2D canvas with orthogonal
+// connectors. Header fields live above the canvas; properties open in a
+// modal (double-click / Enter). Palette buttons add elements along the
+// bottom. The struct owns the in-progress chain, viewport state, pickers,
+// and dirty tracking.
 //
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ElementKind {
     Trigger,
     Operation,
@@ -209,6 +208,20 @@ impl ElementKind {
         ElementKind::Tool,
         ElementKind::Payload,
         ElementKind::Termination,
+    ];
+
+    //
+    // Kinds the properties cycler may change between. Trigger and
+    // Termination stay fixed so the chain remains structurally valid.
+    //
+    pub const BODY: [ElementKind; 7] = [
+        ElementKind::Operation,
+        ElementKind::Transform,
+        ElementKind::GenericPrompt,
+        ElementKind::Memory,
+        ElementKind::Loop,
+        ElementKind::Tool,
+        ElementKind::Payload,
     ];
 
     pub fn label(self) -> &'static str {
@@ -252,16 +265,61 @@ impl ElementKind {
             ElementKind::Termination => "term",
         }
     }
+
+    pub fn is_body(self) -> bool {
+        !matches!(self, ElementKind::Trigger | ElementKind::Termination)
+    }
+
+    pub fn supports_session_group(self) -> bool {
+        matches!(
+            self,
+            ElementKind::Operation | ElementKind::Transform | ElementKind::GenericPrompt
+        )
+    }
+
+    pub fn supports_block_config(self) -> bool {
+        matches!(
+            self,
+            ElementKind::Operation
+                | ElementKind::Transform
+                | ElementKind::GenericPrompt
+                | ElementKind::Tool
+                | ElementKind::Payload
+                | ElementKind::Termination
+        )
+    }
 }
 
-#[derive(Clone)]
+//
+// Session-group fields on a draft element. Empty id means unassigned.
+//
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionGroupDraft {
+    pub id: String,
+    pub color: String,
+    pub yolo_mode: bool,
+    pub working_dir: String,
+}
+
+//
+// Per-block overrides. Empty strings / None mean "inherit default".
+// yolo_mode: None = inherit, Some(true/false) = force.
+// require_all_inputs: None = default true, Some(false) = any-input.
+//
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlockConfigDraft {
+    pub max_runtime: String,
+    pub yolo_mode: Option<bool>,
+    pub working_dir: String,
+    pub require_all_inputs: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ChainElementDraft {
     pub id: String,
     pub kind: ElementKind,
-    //
-    // Per-kind fields. Only those relevant to `kind` are read at submit
-    // time. Stored as strings for simple in-form editing.
-    //
     pub op_name: String,
     pub model_ref: String,
     pub prompt: String,
@@ -271,6 +329,8 @@ pub struct ChainElementDraft {
     pub tool_name: String,
     pub tool_params: String,
     pub payload_id: String,
+    pub session_group: SessionGroupDraft,
+    pub block_config: BlockConfigDraft,
 }
 
 impl ChainElementDraft {
@@ -287,18 +347,20 @@ impl ChainElementDraft {
             tool_name: String::new(),
             tool_params: "{}".to_string(),
             payload_id: String::new(),
+            session_group: SessionGroupDraft::default(),
+            block_config: BlockConfigDraft::default(),
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ConditionKind {
     None,
     OnSuccess,
     OnFailure,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConnectionDraft {
     pub id: String,
     pub from_element: String,
@@ -309,22 +371,19 @@ pub struct ConnectionDraft {
 }
 
 //
-// Overlay kept on the form when the user is picking an op name from the
-// library. Element/connection property editing is a separate modal opened
-// via double-click on the canvas.
+// Overlay pickers stacked above the properties modal / canvas.
 //
 
+#[derive(Clone, Debug)]
 pub enum ChainFormEditor {
     PickOpName { cursor: usize, filter: String },
+    PickModel { cursor: usize, filter: String },
+    PickTool { cursor: usize, filter: String },
+    PickPayload { cursor: usize, filter: String },
+    PickSessionGroup { cursor: usize },
 }
 
-//
-// What the user has clicked. `Selected::None` means clicking a block /
-// connection has not happened yet (or selection was cleared). Double-click
-// opens `props_modal` for the selection; property edits land there.
-//
-
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Selected {
     None,
     Block(String),
@@ -332,36 +391,29 @@ pub enum Selected {
 }
 
 //
-// Active drag state. Updated on each MouseEventKind::Drag and committed on
-// MouseEventKind::Up. The renderer reads this to show a rubber-band line
-// during port-to-port connection drags.
+// Active drag. Block drag may be Pending until the cursor moves past
+// DRAG_THRESHOLD so a simple click does not nudge the block.
 //
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Drag {
     None,
-    //
-    // Dragging a block by its body. `grab_dx/dy` is the offset within the
-    // block where the user grabbed so the block follows the cursor exactly.
-    //
+    PendingBlock {
+        id: String,
+        grab_dx: i32,
+        grab_dy: i32,
+        start_col: u16,
+        start_row: u16,
+    },
     Block {
         id: String,
         grab_dx: i32,
         grab_dy: i32,
     },
-    //
-    // Panning the canvas. `last_col/row` records the previous mouse
-    // position so the delta can be added to camera.
-    //
     Canvas {
         last_col: u16,
         last_row: u16,
     },
-    //
-    // Pulling a connection out of a source port. The renderer draws an
-    // orthogonal rubber-band from the source port to the cursor. On Up,
-    // if the cursor is over an input port, a connection is created.
-    //
     Port {
         from_id: String,
         from_port: u32,
@@ -370,13 +422,7 @@ pub enum Drag {
     },
 }
 
-//
-// Which text field is currently being edited inline. The canvas widgets
-// stay clickable even while editing — clicking another field reseats the
-// edit target, clicking the canvas commits and clears.
-//
-
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum EditTarget {
     HeaderName,
     HeaderCategory,
@@ -386,13 +432,13 @@ pub enum EditTarget {
     ConnectionPort { idx: usize, side: PortSide },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PortSide {
     From,
     To,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlockField {
     OpName,
     ModelRef,
@@ -402,6 +448,10 @@ pub enum BlockField {
     ToolName,
     ToolParams,
     PayloadId,
+    SessionGroupColor,
+    SessionGroupWorkingDir,
+    BlockMaxRuntime,
+    BlockWorkingDir,
 }
 
 pub struct ChainForm {
@@ -412,34 +462,38 @@ pub struct ChainForm {
     pub timeout: String,
     pub elements: Vec<ChainElementDraft>,
     pub connections: Vec<ConnectionDraft>,
-    //
-    // Canvas position per element id. Round-trips through
-    // ChainDefinitionInput.positions so layout is preserved across reloads.
-    //
     pub positions: HashMap<String, (i32, i32)>,
     pub camera_x: i32,
     pub camera_y: i32,
     pub selected: Selected,
     pub drag: Drag,
     pub editing: Option<EditTarget>,
-    //
-    // When true, the properties modal is open for `selected`. Opened by
-    // double-clicking a block or connection on the canvas.
-    //
     pub props_modal: bool,
-    //
-    // Snapshot of currently known op full_names. Used by the operation
-    // picker overlay so the user can pick a real op name rather than typing
-    // it free-form.
-    //
+    pub props_scroll: u16,
     pub available_op_names: Vec<String>,
+    pub available_models: Vec<String>,
+    pub available_tools: Vec<String>,
+    pub available_payloads: Vec<String>,
     pub element_id_seq: u32,
     pub editor: Option<ChainFormEditor>,
     pub error: Option<String>,
+    //
+    // True after any user mutation since open. Esc/Cancel confirm when set.
+    //
+    pub dirty: bool,
+    //
+    // Session-group color palette index for newly created groups.
+    //
+    pub next_sg_color: usize,
 }
 
 impl ChainForm {
-    pub fn new(available_op_names: Vec<String>) -> Self {
+    pub fn new(
+        available_op_names: Vec<String>,
+        available_models: Vec<String>,
+        available_tools: Vec<String>,
+        available_payloads: Vec<String>,
+    ) -> Self {
         Self {
             editing_id: None,
             name: String::new(),
@@ -455,11 +509,22 @@ impl ChainForm {
             drag: Drag::None,
             editing: None,
             props_modal: false,
+            props_scroll: 0,
             available_op_names,
+            available_models,
+            available_tools,
+            available_payloads,
             element_id_seq: 0,
             editor: None,
             error: None,
+            dirty: false,
+            next_sg_color: 0,
         }
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.error = None;
     }
 
     pub fn next_element_id(&mut self, kind: ElementKind) -> String {
@@ -477,6 +542,15 @@ impl ChainForm {
 
     pub fn block_pos(&self, id: &str) -> (i32, i32) {
         self.positions.get(id).copied().unwrap_or((0, 0))
+    }
+
+    pub fn next_session_group_color(&mut self) -> String {
+        const COLORS: &[&str] = &[
+            "#8B5CF6", "#06B6D4", "#F59E0B", "#10B981", "#EF4444", "#3B82F6", "#EC4899",
+        ];
+        let c = COLORS[self.next_sg_color % COLORS.len()].to_string();
+        self.next_sg_color += 1;
+        c
     }
 }
 

@@ -207,7 +207,7 @@ Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 
 Common actions:
 - Create new operations inline (`Ctrl+N` on the Library tab)
-- Create new chains via the chain builder (`Ctrl+Alt+N` on the Library tab, or click `^! newchain` in the hint bar)
+- Create new chains via the chain builder (`Ctrl+Shift+N` on the Library tab, or click `^+n new chain` in the hint bar)
 - Edit an existing op or chain (`Ctrl+E` with the row selected — opens the op form for ops, the chain builder for chains)
 - Run operations and chains with node/agent selection and YOLO mode (`Ctrl+R`)
 - Delete the selected op or chain (`Ctrl+D`)
@@ -215,18 +215,21 @@ Common actions:
 
 #### Library tab — chain builder
 
-The chain builder is a visual canvas with draggable element blocks and
-orthogonal line connectors between ports. It is mouse-first:
+The chain builder is a full-screen TUI canvas with draggable element blocks and
+orthogonal line connectors between ports. It is mouse-first but fully usable
+from the keyboard for core authoring actions.
 
-- **Canvas** — drag a block by its body to move it; drag empty space to pan; the mouse wheel scrolls vertically. Block positions persist in `ChainDefinitionInput.positions` so each chain remembers its layout.
-- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag.
-- **Selection** — single-click a block to select it; click a connector segment to select that connection. The selected item's fields appear in the properties strip below the canvas.
-- **Properties strip** — for blocks: click any field to edit inline; the kind cycler `◂ Kind ▸` changes the element type; `[Delete]` removes the block (and any incident connections). For connections: the condition cycler toggles `any` / `on success` / `on failure`; the port numbers are editable.
-- **Header strip** — `Name`, `Category`, `Timeout`, and `Description` text fields are at the top of the modal; click to edit.
-- **Palette** — the row of `[+ TRG]`, `[+ OP]`, … buttons along the bottom drops a new element of that kind at the centre of the visible canvas.
-- **Save / Cancel** — buttons in the top-right corner of the modal; `Ctrl+S` and `Esc` are keyboard equivalents.
+- **Canvas** — drag a block by its body to move it (drag starts only after a small movement threshold so a plain click does not nudge the block); drag empty space to pan; the mouse wheel scrolls vertically. Block positions persist in `ChainDefinitionInput.positions` so each chain remembers its layout.
+- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Ports and connector segments hit-test with a multi-cell tolerance. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag. Loop outputs are labeled `r` (retry / port 0) and `x` (exit / port 1).
+- **Selection** — single-click a block or connector segment to select it. `Enter` or double-click opens the **properties modal** for that selection.
+- **Properties modal** — for blocks: click fields to edit inline; prompts and tool params accept multi-line input (`Shift+Enter` inserts a newline); pickers for operation / model / tool / payload / session group; kind cycler `◂ Kind ▸` only among body kinds (Trigger and Termination stay fixed); memory mode store/retrieve; session group + per-block config (max runtime, YOLO, working dir, require-all-inputs). For connections: condition cycler toggles `any` / `on success` / `on failure` (also shown as ✓/✗ glyphs on the edge); `c` cycles condition when a connection is selected.
+- **Header strip** — `Name`, `Category`, `Timeout`, and `Description` at the top; click to edit. Incomplete blocks show a `!` badge on the canvas; save rejects invalid graphs with a clear error list.
+- **Palette** — `[+ OP]`, `[+ TXR]`, … buttons along the bottom. New blocks place to the right of the current selection (when one exists) and auto-wire into the graph. New chains pre-select the Trigger so the first add wires in automatically. Adding an Operation opens the op picker immediately. Keyboard (canvas only, not while the properties modal is open): `o` op, `t` transform, `g` generic prompt, `m` memory, `p` loop, `k` tool, `y` payload.
+- **Keyboard selection** — `Tab` / `Shift+Tab` cycle selection through blocks then connections (no mouse required). `Enter` opens properties for the selection. `c` selects the first connection if needed and cycles its condition (`any` / on success / on failure).
+- **Layout** — `Layout` button or `l` re-runs left-to-right auto-layout from triggers.
+- **Save / Cancel** — top-right buttons; `Ctrl+S` saves; `Esc` closes the properties modal first, then cancels the form (confirms if there are unsaved changes). A dirty `*` marker appears in the hint bar while editing.
 
-A newly created chain is seeded with a connected `Trigger → Termination` pair so the graph is valid out of the box; auto-layout (left-to-right BFS from triggers) is applied to existing chains that don't yet have stored positions.
+A newly created chain is seeded with a connected `Trigger → Termination` pair so the graph is valid out of the box; auto-layout is applied to existing chains that don't yet have stored positions.
 
 #### Triggers tab
 

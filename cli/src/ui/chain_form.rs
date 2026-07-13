@@ -7,12 +7,13 @@
 
 use crate::app::{
     BlockField, ChainElementDraft, ChainForm, ChainFormEditor, ConditionKind, ConnectionDraft,
-    Drag, EditTarget, ElementKind, PortSide, Selected, input_port_count, output_port_count,
+    Drag, EditTarget, ElementKind, PortSide, Selected, element_issues, input_port_count,
+    output_port_count,
 };
 use crate::ui::chrome;
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{
-    ACCENT, BG, BG_ELEMENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, ERROR, MUTED, OK,
+    ACCENT, BG, BG_ELEMENT, BG_PANEL, BG_SELECTED, BORDER_SUBTLE, DIM, ERROR, MUTED, OK,
     STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 use ratatui::Frame;
@@ -69,10 +70,23 @@ pub struct ChainFormHitMap {
     pub cycle_condition_button: HitRect,
     pub delete_connection_button: HitRect,
     pub pick_op_button: HitRect,
+    pub pick_model_button: HitRect,
+    pub pick_tool_button: HitRect,
+    pub pick_payload_button: HitRect,
+    pub pick_session_group_button: HitRect,
+    pub cycle_memory_mode_button: HitRect,
+    pub toggle_session_yolo_button: HitRect,
+    pub cycle_block_yolo_button: HitRect,
+    pub cycle_require_all_button: HitRect,
     pub palette_buttons: Vec<(ElementKind, HitRect)>,
     pub auto_layout_button: HitRect,
     pub save_button: HitRect,
     pub cancel_button: HitRect,
+    //
+    // Outer rect of the properties modal when open. Registered as a
+    // click sink so canvas hits underneath cannot steal modal clicks.
+    //
+    pub props_modal_rect: HitRect,
 }
 
 impl ChainFormHitMap {
@@ -118,7 +132,7 @@ pub fn render_chain_form(f: &mut Frame, area: Rect, form: &ChainForm) -> ChainFo
         render_properties_modal(f, area, form, &mut hit);
     }
     if let Some(editor) = form.editor.as_ref() {
-        render_op_picker(f, area, form, editor);
+        render_picker(f, area, form, editor);
     }
 
     hit
@@ -331,9 +345,10 @@ fn render_canvas(f: &mut Frame, area: Rect, form: &ChainForm, hit: &mut ChainFor
     hit.canvas = HitRect::new(inner.x, inner.y, inner.width, inner.height);
 
     //
-    // Fill the canvas background.
+    // Canvas fill is BG_PANEL so elevated modals (BG_ELEMENT + border)
+    // read as a distinct layer above the graph.
     //
-    let bg_style = Style::default().bg(BG_MENU);
+    let bg_style = Style::default().bg(BG_PANEL);
     let buf = f.buffer_mut();
     for y in inner.y..inner.y + inner.height {
         for x in inner.x..inner.x + inner.width {
@@ -483,17 +498,25 @@ fn draw_block(
     );
 
     //
-    // Body: a one-line summary.
+    // Body: a one-line summary. Incomplete blocks get a ! badge.
     //
+    let issues = element_issues(el);
     let summary = element_summary(el);
+    let body = if issues.is_empty() {
+        summary
+    } else {
+        format!("! {}", summary)
+    };
     set_text(
         buf,
         canvas,
         vx + 2,
         vy + 2,
-        &truncate(&summary, (w - 4) as usize),
+        &truncate(&body, (w - 4) as usize),
         Style::default()
-            .fg(if el.kind == ElementKind::Trigger {
+            .fg(if !issues.is_empty() {
+                ERROR
+            } else if el.kind == ElementKind::Trigger {
                 TEXT_BRIGHT
             } else {
                 TEXT
@@ -502,7 +525,21 @@ fn draw_block(
     );
 
     //
-    // Ports.
+    // Session-group color tick on the top-right of agent-facing blocks.
+    //
+    if el.kind.supports_session_group() && !el.session_group.id.is_empty() {
+        set_cell(
+            buf,
+            canvas,
+            vx + w - 2,
+            vy + 1,
+            '\u{25A0}', // ■
+            Style::default().fg(STATUS_RUNNING).bg(bg_color),
+        );
+    }
+
+    //
+    // Ports. Loop labels: port 0 = retry (↻), port 1 = exit (x).
     //
     if input_port_count(el.kind) > 0 {
         let px = vx - 1;
@@ -515,9 +552,6 @@ fn draw_block(
             '\u{25CF}', // ●
             Style::default().fg(border_color),
         );
-        //
-        // Connector stub into block edge.
-        //
         set_cell(
             buf,
             canvas,
@@ -547,6 +581,17 @@ fn draw_block(
             '\u{251C}', // ├
             Style::default().fg(border_color).bg(bg_color),
         );
+        if el.kind == ElementKind::Loop {
+            let label = if port == 0 { "r" } else { "x" };
+            set_text(
+                buf,
+                canvas,
+                px + 1,
+                py,
+                label,
+                Style::default().fg(MUTED),
+            );
+        }
     }
 }
 
@@ -709,11 +754,11 @@ fn draw_connector(
         let ch = path_char((x, y), prev, next);
         if let Some(cell) = buf.cell_mut((vx as u16, vy as u16)) {
             cell.set_char(ch);
-            cell.set_style(Style::default().fg(color).bg(BG_MENU));
+            cell.set_style(Style::default().fg(color).bg(BG_PANEL));
         }
     }
     //
-    // Arrowhead at the end.
+    // Arrowhead at the end; condition glyph near the midpoint of the path.
     //
     if let Some(&(x, y)) = path.last() {
         let vx = x - form.camera_x + canvas.x as i32;
@@ -721,9 +766,27 @@ fn draw_connector(
         if inside(canvas, vx, vy) {
             if let Some(cell) = buf.cell_mut((vx as u16, vy as u16)) {
                 cell.set_char('\u{25B6}'); // ▶
-                cell.set_style(Style::default().fg(color).bg(BG_MENU));
+                cell.set_style(Style::default().fg(color).bg(BG_PANEL));
             }
         }
+    }
+    if !matches!(conn.condition, ConditionKind::None) && path.len() > 2 {
+        let mid = path[path.len() / 2];
+        let vx = mid.0 - form.camera_x + canvas.x as i32;
+        let vy = mid.1 - form.camera_y + canvas.y as i32;
+        let glyph = match conn.condition {
+            ConditionKind::OnSuccess => '\u{2713}', // ✓
+            ConditionKind::OnFailure => '\u{2717}', // ✗
+            ConditionKind::None => ' ',
+        };
+        set_cell(
+            buf,
+            canvas,
+            vx,
+            vy.saturating_sub(1),
+            glyph,
+            Style::default().fg(color).bg(BG_PANEL),
+        );
     }
 }
 
@@ -794,7 +857,7 @@ fn draw_rubberband(
         let ch = path_char((x, y), prev, next);
         if let Some(cell) = buf.cell_mut((vx as u16, vy as u16)) {
             cell.set_char(ch);
-            cell.set_style(Style::default().fg(ACCENT).bg(BG_MENU));
+            cell.set_style(Style::default().fg(ACCENT).bg(BG_PANEL));
         }
     }
     if let Some(&(x, y)) = path.last() {
@@ -803,7 +866,7 @@ fn draw_rubberband(
         if inside(canvas, vx, vy) {
             if let Some(cell) = buf.cell_mut((vx as u16, vy as u16)) {
                 cell.set_char('\u{2715}'); // ✕ tentative end
-                cell.set_style(Style::default().fg(ACCENT).bg(BG_MENU));
+                cell.set_style(Style::default().fg(ACCENT).bg(BG_PANEL));
             }
         }
     }
@@ -830,6 +893,7 @@ fn render_properties_modal(
             let height = (field_rows + 7).min(area.height.saturating_sub(2)).max(8);
             let width = 64u16.min(area.width.saturating_sub(4)).max(40);
             let popup = centered_rect_fixed(width, height, area);
+            hit.props_modal_rect = HitRect::new(popup.x, popup.y, popup.width, popup.height);
             let title = format!("{} properties", el.kind.label());
             let body = chrome::modal_panel(f, popup, &title, "esc");
             let body_chunks =
@@ -844,6 +908,7 @@ fn render_properties_modal(
             let height = 9u16.min(area.height.saturating_sub(2)).max(8);
             let width = 64u16.min(area.width.saturating_sub(4)).max(40);
             let popup = centered_rect_fixed(width, height, area);
+            hit.props_modal_rect = HitRect::new(popup.x, popup.y, popup.width, popup.height);
             let body = chrome::modal_panel(f, popup, "Connection properties", "esc");
             let body_chunks =
                 Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(body);
@@ -855,14 +920,24 @@ fn render_properties_modal(
 }
 
 fn block_prop_field_count(kind: ElementKind) -> u16 {
-    match kind {
-        ElementKind::Operation | ElementKind::Transform | ElementKind::Tool => 2,
-        ElementKind::GenericPrompt
-        | ElementKind::Memory
-        | ElementKind::Loop
-        | ElementKind::Payload => 1,
-        ElementKind::Trigger | ElementKind::Termination => 0,
-    }
+    //
+    // Approximate content rows so the modal is tall enough; scroll handles
+    // overflow for long prompts.
+    //
+    let base = match kind {
+        ElementKind::Operation => 3,
+        ElementKind::Transform => 4,
+        ElementKind::GenericPrompt => 3,
+        ElementKind::Memory => 2,
+        ElementKind::Loop => 1,
+        ElementKind::Tool => 3,
+        ElementKind::Payload => 2,
+        ElementKind::Trigger => 0,
+        ElementKind::Termination => 1,
+    };
+    let sg = if kind.supports_session_group() { 4 } else { 0 };
+    let bc = if kind.supports_block_config() { 4 } else { 0 };
+    base + sg + bc
 }
 
 fn render_props_modal_hints(f: &mut Frame, area: Rect) {
@@ -870,16 +945,19 @@ fn render_props_modal_hints(f: &mut Frame, area: Rect) {
     let label = Style::default().fg(MUTED);
     let line = Line::from(vec![
         Span::styled("click", key),
-        Span::styled(" edit field", label),
-        Span::raw("    "),
+        Span::styled(" edit", label),
+        Span::raw("  "),
+        Span::styled("shift+\u{21B5}", key),
+        Span::styled(" nl", label),
+        Span::raw("  "),
         Span::styled("del", key),
         Span::styled(" remove", label),
-        Span::raw("    "),
+        Span::raw("  "),
         Span::styled("esc", key),
         Span::styled(" done", label),
     ]);
     f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(BG_MENU)),
+        Paragraph::new(line).style(Style::default().bg(BG_ELEMENT)),
         area,
     );
 }
@@ -892,7 +970,7 @@ fn render_block_properties(
     hit: &mut ChainFormHitMap,
 ) {
     //
-    // Row 0: pill + id, [Kind ◂▸], [Delete]
+    // Row 0: pill + id, [Kind ◂▸] (body only), [Delete]
     //
     let mut x = inner.x;
     let pill = format!(" {} ", el.kind.short());
@@ -918,14 +996,16 @@ fn render_block_properties(
         Rect::new(x, inner.y, id_w, 1),
     );
     x += id_w + 2;
-    let kind_cycle_text = format!("\u{25C0} {} \u{25B6}", el.kind.label());
-    let kw = kind_cycle_text.chars().count() as u16;
-    let kind_cycle_rect = HitRect::new(x, inner.y, kw, 1);
-    f.render_widget(
-        Paragraph::new(Span::styled(kind_cycle_text, Style::default().fg(ACCENT))),
-        rect_from(kind_cycle_rect),
-    );
-    hit.kind_cycle_button = kind_cycle_rect;
+    if el.kind.is_body() {
+        let kind_cycle_text = format!("\u{25C0} {} \u{25B6}", el.kind.label());
+        let kw = kind_cycle_text.chars().count() as u16;
+        let kind_cycle_rect = HitRect::new(x, inner.y, kw, 1);
+        f.render_widget(
+            Paragraph::new(Span::styled(kind_cycle_text, Style::default().fg(ACCENT))),
+            rect_from(kind_cycle_rect),
+        );
+        hit.kind_cycle_button = kind_cycle_rect;
+    }
     let del_rect = HitRect::new(inner.x + inner.width.saturating_sub(11), inner.y, 10, 1);
     f.render_widget(
         Paragraph::new(Span::styled("[Delete]", Style::default().fg(ERROR))),
@@ -934,80 +1014,321 @@ fn render_block_properties(
     hit.delete_element_button = del_rect;
 
     //
-    // Row 1+: per-kind fields, each clickable.
+    // Build ordered rows: (optional EditTarget, display line, pick action).
+    // Scroll by form.props_scroll.
     //
-    let mut row = inner.y + 1;
-    let mut fields: Vec<(BlockField, &str, &str)> = Vec::new();
+    let mut rows: Vec<PropRow> = Vec::new();
     match el.kind {
         ElementKind::Operation => {
-            fields.push((BlockField::OpName, "Op", el.op_name.as_str()));
-            fields.push((BlockField::ModelRef, "Model", el.model_ref.as_str()));
+            rows.push(PropRow::field(
+                el,
+                BlockField::OpName,
+                "Op",
+                &el.op_name,
+                Some(PickKind::Op),
+            ));
+            rows.push(PropRow::field(
+                el,
+                BlockField::ModelRef,
+                "Model",
+                &el.model_ref,
+                Some(PickKind::Model),
+            ));
         }
         ElementKind::Transform => {
-            fields.push((BlockField::Prompt, "Prompt", el.prompt.as_str()));
-            fields.push((BlockField::ModelRef, "Model", el.model_ref.as_str()));
+            rows.push(PropRow::multiline(el, BlockField::Prompt, "Prompt", &el.prompt));
+            rows.push(PropRow::field(
+                el,
+                BlockField::ModelRef,
+                "Model",
+                &el.model_ref,
+                Some(PickKind::Model),
+            ));
         }
         ElementKind::GenericPrompt => {
-            fields.push((BlockField::Prompt, "Prompt", el.prompt.as_str()));
+            rows.push(PropRow::multiline(el, BlockField::Prompt, "Prompt", &el.prompt));
         }
         ElementKind::Memory => {
-            fields.push((BlockField::MemoryKey, "Key", el.memory_key.as_str()));
+            let mode = if el.memory_mode == 0 { "store" } else { "retrieve" };
+            rows.push(PropRow::cycle(
+                format!("Mode: \u{25C0} {} \u{25B6}", mode),
+                CycleKind::MemoryMode,
+            ));
+            rows.push(PropRow::field(
+                el,
+                BlockField::MemoryKey,
+                "Key",
+                &el.memory_key,
+                None,
+            ));
         }
         ElementKind::Loop => {
-            fields.push((
+            rows.push(PropRow::field(
+                el,
                 BlockField::MaxIterations,
                 "Max iters",
-                el.max_iterations.as_str(),
+                &el.max_iterations,
+                None,
+            ));
+            rows.push(PropRow::label(
+                "Ports: r = retry (0), x = exit (1)".to_string(),
             ));
         }
         ElementKind::Tool => {
-            fields.push((BlockField::ToolName, "Tool", el.tool_name.as_str()));
-            fields.push((BlockField::ToolParams, "Params", el.tool_params.as_str()));
+            rows.push(PropRow::field(
+                el,
+                BlockField::ToolName,
+                "Tool",
+                &el.tool_name,
+                Some(PickKind::Tool),
+            ));
+            rows.push(PropRow::multiline(
+                el,
+                BlockField::ToolParams,
+                "Params",
+                &el.tool_params,
+            ));
         }
         ElementKind::Payload => {
-            fields.push((BlockField::PayloadId, "Payload", el.payload_id.as_str()));
+            rows.push(PropRow::field(
+                el,
+                BlockField::PayloadId,
+                "Payload",
+                &el.payload_id,
+                Some(PickKind::Payload),
+            ));
         }
-        ElementKind::Trigger | ElementKind::Termination => {}
+        ElementKind::Trigger => {
+            rows.push(PropRow::label("Manual trigger (Run starts the chain)".into()));
+        }
+        ElementKind::Termination => {}
     }
 
-    for (field, label, value) in fields {
+    if el.kind.supports_session_group() {
+        rows.push(PropRow::label("— Session group —".into()));
+        let sg_label = if el.session_group.id.is_empty() {
+            "(none)".to_string()
+        } else {
+            el.session_group.id.clone()
+        };
+        rows.push(PropRow::cycle(
+            format!("Group: {}  [pick]", sg_label),
+            CycleKind::SessionGroup,
+        ));
+        if !el.session_group.id.is_empty() {
+            rows.push(PropRow::field(
+                el,
+                BlockField::SessionGroupColor,
+                "Color",
+                &el.session_group.color,
+                None,
+            ));
+            let yolo = if el.session_group.yolo_mode {
+                "ON"
+            } else {
+                "off"
+            };
+            rows.push(PropRow::cycle(
+                format!("Session YOLO: {}", yolo),
+                CycleKind::SessionYolo,
+            ));
+            rows.push(PropRow::field(
+                el,
+                BlockField::SessionGroupWorkingDir,
+                "SG cwd",
+                &el.session_group.working_dir,
+                None,
+            ));
+        }
+    }
+
+    if el.kind.supports_block_config() {
+        rows.push(PropRow::label("— Block config —".into()));
+        rows.push(PropRow::field(
+            el,
+            BlockField::BlockMaxRuntime,
+            "Max rt (s)",
+            &el.block_config.max_runtime,
+            None,
+        ));
+        let yolo = match el.block_config.yolo_mode {
+            None => "inherit",
+            Some(true) => "ON",
+            Some(false) => "off",
+        };
+        rows.push(PropRow::cycle(
+            format!("Block YOLO: {}", yolo),
+            CycleKind::BlockYolo,
+        ));
+        rows.push(PropRow::field(
+            el,
+            BlockField::BlockWorkingDir,
+            "Work dir",
+            &el.block_config.working_dir,
+            None,
+        ));
+        let req = match el.block_config.require_all_inputs {
+            None | Some(true) => "all inputs",
+            Some(false) => "any input",
+        };
+        rows.push(PropRow::cycle(
+            format!("Merge: {}", req),
+            CycleKind::RequireAll,
+        ));
+    }
+
+    let scroll = form.props_scroll as usize;
+    let visible = rows.into_iter().skip(scroll);
+    let mut row = inner.y + 1;
+    for prop in visible {
         if row >= inner.y + inner.height {
             break;
         }
-        let rect = HitRect::new(inner.x, row, inner.width, 1);
-        let editing = form.editing
-            == Some(EditTarget::BlockProp {
-                id: el.id.clone(),
+        match prop {
+            PropRow::Field {
                 field,
-            });
-        let kind = if matches!(field, BlockField::MaxIterations) {
-            FieldKind::Number
-        } else {
-            FieldKind::Text
-        };
-        let mut line = field_line(&format!("{}:", label), value, editing, kind);
-        if matches!(field, BlockField::OpName) {
-            line.spans.push(Span::styled(
-                "  [pick]",
-                Style::default().fg(OK).add_modifier(Modifier::BOLD),
-            ));
-        }
-        f.render_widget(Paragraph::new(line), rect_from(rect));
-        hit.property_fields.push((
-            EditTarget::BlockProp {
-                id: el.id.clone(),
-                field,
-            },
-            rect,
-        ));
-        if matches!(field, BlockField::OpName) {
-            //
-            // The "[pick]" suffix is its own hit rect on the right side.
-            //
-            let pick_rect = HitRect::new(inner.x + inner.width.saturating_sub(8), row, 8, 1);
-            hit.pick_op_button = pick_rect;
+                label,
+                value,
+                pick,
+                multiline,
+            } => {
+                let editing = form.editing
+                    == Some(EditTarget::BlockProp {
+                        id: el.id.clone(),
+                        field,
+                    });
+                let display = if multiline {
+                    let first = value.lines().next().unwrap_or("");
+                    if value.contains('\n') {
+                        format!("{}…", first)
+                    } else {
+                        first.to_string()
+                    }
+                } else {
+                    value
+                };
+                let kind = if matches!(
+                    field,
+                    BlockField::MaxIterations | BlockField::BlockMaxRuntime
+                ) {
+                    FieldKind::Number
+                } else {
+                    FieldKind::Text
+                };
+                let mut line = field_line(&format!("{}:", label), &display, editing, kind);
+                if pick.is_some() {
+                    line.spans.push(Span::styled(
+                        "  [pick]",
+                        Style::default().fg(OK).add_modifier(Modifier::BOLD),
+                    ));
+                }
+                let rect = HitRect::new(inner.x, row, inner.width, 1);
+                f.render_widget(Paragraph::new(line), rect_from(rect));
+                hit.property_fields.push((
+                    EditTarget::BlockProp {
+                        id: el.id.clone(),
+                        field,
+                    },
+                    rect,
+                ));
+                if let Some(pk) = pick {
+                    let pick_rect =
+                        HitRect::new(inner.x + inner.width.saturating_sub(8), row, 8, 1);
+                    match pk {
+                        PickKind::Op => hit.pick_op_button = pick_rect,
+                        PickKind::Model => hit.pick_model_button = pick_rect,
+                        PickKind::Tool => hit.pick_tool_button = pick_rect,
+                        PickKind::Payload => hit.pick_payload_button = pick_rect,
+                    }
+                }
+            }
+            PropRow::Cycle { text, kind } => {
+                let rect = HitRect::new(inner.x, row, inner.width.min(text.chars().count() as u16 + 2), 1);
+                f.render_widget(
+                    Paragraph::new(Span::styled(text, Style::default().fg(ACCENT))),
+                    rect_from(rect),
+                );
+                match kind {
+                    CycleKind::MemoryMode => hit.cycle_memory_mode_button = rect,
+                    CycleKind::SessionGroup => hit.pick_session_group_button = rect,
+                    CycleKind::SessionYolo => hit.toggle_session_yolo_button = rect,
+                    CycleKind::BlockYolo => hit.cycle_block_yolo_button = rect,
+                    CycleKind::RequireAll => hit.cycle_require_all_button = rect,
+                }
+            }
+            PropRow::Label(text) => {
+                f.render_widget(
+                    Paragraph::new(Span::styled(text, Style::default().fg(MUTED))),
+                    Rect::new(inner.x, row, inner.width, 1),
+                );
+            }
         }
         row += 1;
+    }
+}
+
+enum PickKind {
+    Op,
+    Model,
+    Tool,
+    Payload,
+}
+
+enum CycleKind {
+    MemoryMode,
+    SessionGroup,
+    SessionYolo,
+    BlockYolo,
+    RequireAll,
+}
+
+enum PropRow {
+    Field {
+        field: BlockField,
+        label: String,
+        value: String,
+        pick: Option<PickKind>,
+        multiline: bool,
+    },
+    Cycle {
+        text: String,
+        kind: CycleKind,
+    },
+    Label(String),
+}
+
+impl PropRow {
+    fn field(
+        el: &ChainElementDraft,
+        field: BlockField,
+        label: &str,
+        value: &str,
+        pick: Option<PickKind>,
+    ) -> Self {
+        let _ = el;
+        PropRow::Field {
+            field,
+            label: label.to_string(),
+            value: value.to_string(),
+            pick,
+            multiline: false,
+        }
+    }
+    fn multiline(el: &ChainElementDraft, field: BlockField, label: &str, value: &str) -> Self {
+        let _ = el;
+        PropRow::Field {
+            field,
+            label: label.to_string(),
+            value: value.to_string(),
+            pick: None,
+            multiline: true,
+        }
+    }
+    fn cycle(text: String, kind: CycleKind) -> Self {
+        PropRow::Cycle { text, kind }
+    }
+    fn label(text: String) -> Self {
+        PropRow::Label(text)
     }
 }
 
@@ -1165,30 +1486,71 @@ fn render_hints(f: &mut Frame, area: Rect, form: &ChainForm) {
         ])
     } else {
         Line::from(vec![
-            Span::styled("drag", key),
-            Span::styled(" block / port", lbl),
-            Span::raw("   "),
-            Span::styled("dbl-click", key),
-            Span::styled(" properties", lbl),
-            Span::raw("   "),
-            Span::styled("scroll", key),
-            Span::styled(" pan", lbl),
-            Span::raw("   "),
+            Span::styled("tab", key),
+            Span::styled(" select", lbl),
+            Span::raw("  "),
+            Span::styled("enter", key),
+            Span::styled(" props", lbl),
+            Span::raw("  "),
+            Span::styled("o/t/g/m", key),
+            Span::styled(" add", lbl),
+            Span::raw("  "),
+            Span::styled("c", key),
+            Span::styled(" cond", lbl),
+            Span::raw("  "),
             Span::styled("del", key),
-            Span::styled(" remove", lbl),
-            Span::raw("   "),
+            Span::styled(" rm", lbl),
+            Span::raw("  "),
             Span::styled("^s", key),
             Span::styled(" save", lbl),
-            Span::raw("   "),
+            Span::raw("  "),
             Span::styled("esc", key),
             Span::styled(" cancel", lbl),
+            if form.dirty {
+                Span::styled(" *", Style::default().fg(STATUS_RUNNING))
+            } else {
+                Span::raw("")
+            },
         ])
     };
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn render_op_picker(f: &mut Frame, area: Rect, form: &ChainForm, editor: &ChainFormEditor) {
-    let ChainFormEditor::PickOpName { cursor, filter } = editor;
+fn render_picker(f: &mut Frame, area: Rect, form: &ChainForm, editor: &ChainFormEditor) {
+    let (title, cursor, filter, list): (&str, usize, String, Vec<String>) = match editor {
+        ChainFormEditor::PickOpName { cursor, filter } => (
+            "Pick Operation",
+            *cursor,
+            filter.clone(),
+            form.available_op_names.clone(),
+        ),
+        ChainFormEditor::PickModel { cursor, filter } => (
+            "Pick Model",
+            *cursor,
+            filter.clone(),
+            form.available_models.clone(),
+        ),
+        ChainFormEditor::PickTool { cursor, filter } => (
+            "Pick Tool",
+            *cursor,
+            filter.clone(),
+            form.available_tools.clone(),
+        ),
+        ChainFormEditor::PickPayload { cursor, filter } => (
+            "Pick Payload",
+            *cursor,
+            filter.clone(),
+            form.available_payloads.clone(),
+        ),
+        ChainFormEditor::PickSessionGroup { cursor } => {
+            let mut items = vec!["(none)".to_string(), "(new group)".to_string()];
+            for g in crate::app::collect_session_groups(form) {
+                items.push(g.id);
+            }
+            ("Session Group", *cursor, String::new(), items)
+        }
+    };
+
     let popup_w = 60u16.min(area.width.saturating_sub(4));
     let popup_h = 16u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width - popup_w) / 2;
@@ -1198,35 +1560,36 @@ fn render_op_picker(f: &mut Frame, area: Rect, form: &ChainForm, editor: &ChainF
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
-        .style(Style::default().bg(BG_MENU));
+        .style(Style::default().bg(BG_ELEMENT));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
     let mut lines = vec![Line::from(Span::styled(
-        "Pick Operation",
+        title.to_string(),
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),
     ))];
-    lines.push(Line::from(vec![
-        Span::styled("filter: ", Style::default().fg(MUTED)),
-        Span::styled(filter.clone(), Style::default().fg(ACCENT)),
-        Span::styled("\u{2588}", Style::default().fg(ACCENT)),
-    ]));
+    if !matches!(editor, ChainFormEditor::PickSessionGroup { .. }) {
+        lines.push(Line::from(vec![
+            Span::styled("filter: ", Style::default().fg(MUTED)),
+            Span::styled(filter.clone(), Style::default().fg(ACCENT)),
+            Span::styled("\u{2588}", Style::default().fg(ACCENT)),
+        ]));
+    }
     lines.push(Line::from(""));
-    let filtered: Vec<&String> = form
-        .available_op_names
+    let filtered: Vec<&String> = list
         .iter()
         .filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter.to_lowercase()))
         .collect();
     let max_rows = (inner.height as usize).saturating_sub(5);
-    let start = if *cursor >= max_rows && max_rows > 0 {
-        *cursor + 1 - max_rows
+    let start = if cursor >= max_rows && max_rows > 0 {
+        cursor + 1 - max_rows
     } else {
         0
     };
     for (i, name) in filtered.iter().enumerate().skip(start).take(max_rows) {
-        let selected = i == *cursor;
+        let selected = i == cursor;
         let style = if selected {
             Style::default().fg(TEXT_BRIGHT).bg(BG_SELECTED)
         } else {
@@ -1236,6 +1599,12 @@ fn render_op_picker(f: &mut Frame, area: Rect, form: &ChainForm, editor: &ChainF
             Span::raw(if selected { " \u{276F} " } else { "   " }),
             Span::styled((*name).clone(), style),
         ]));
+    }
+    if filtered.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(no items — type freely in the field)",
+            Style::default().fg(DIM),
+        )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

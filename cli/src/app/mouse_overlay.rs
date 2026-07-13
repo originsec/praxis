@@ -246,7 +246,7 @@ impl App {
                 true
             }
             MouseAction::ChainCancel => {
-                self.chain_form = None;
+                self.request_close_chain_form();
                 true
             }
             MouseAction::ChainAutoLayout => {
@@ -255,6 +255,7 @@ impl App {
                     super::chain_form::auto_layout(form);
                     form.camera_x = 0;
                     form.camera_y = 0;
+                    form.mark_dirty();
                 }
                 true
             }
@@ -265,6 +266,7 @@ impl App {
             MouseAction::ChainEdit(target) => {
                 if let Some(form) = self.chain_form.as_mut() {
                     form.editing = Some(target);
+                    // typing starts on the next key; treat field focus as dirty intent
                 }
                 true
             }
@@ -284,6 +286,7 @@ impl App {
                         if let Some(conn) = form.connections.get_mut(idx) {
                             conn.condition =
                                 super::chain_form::cycle_condition(conn.condition, 1);
+                            form.mark_dirty();
                         }
                     }
                 }
@@ -304,8 +307,92 @@ impl App {
                 }
                 true
             }
+            MouseAction::ChainPickModel => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    form.editor = Some(crate::app::ChainFormEditor::PickModel {
+                        cursor: 0,
+                        filter: String::new(),
+                    });
+                }
+                true
+            }
+            MouseAction::ChainPickTool => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    form.editor = Some(crate::app::ChainFormEditor::PickTool {
+                        cursor: 0,
+                        filter: String::new(),
+                    });
+                }
+                true
+            }
+            MouseAction::ChainPickPayload => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    form.editor = Some(crate::app::ChainFormEditor::PickPayload {
+                        cursor: 0,
+                        filter: String::new(),
+                    });
+                }
+                true
+            }
+            MouseAction::ChainPickSessionGroup => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    form.editor = Some(crate::app::ChainFormEditor::PickSessionGroup { cursor: 0 });
+                }
+                true
+            }
+            MouseAction::ChainCycleMemoryMode => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    if let Some(el) = form.selected_block_mut() {
+                        el.memory_mode = if el.memory_mode == 0 { 1 } else { 0 };
+                        form.mark_dirty();
+                    }
+                }
+                true
+            }
+            MouseAction::ChainToggleSessionYolo => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    if let Some(el) = form.selected_block_mut() {
+                        el.session_group.yolo_mode = !el.session_group.yolo_mode;
+                        form.mark_dirty();
+                    }
+                }
+                true
+            }
+            MouseAction::ChainCycleBlockYolo => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    if let Some(el) = form.selected_block_mut() {
+                        el.block_config.yolo_mode = match el.block_config.yolo_mode {
+                            None => Some(true),
+                            Some(true) => Some(false),
+                            Some(false) => None,
+                        };
+                        form.mark_dirty();
+                    }
+                }
+                true
+            }
+            MouseAction::ChainCycleRequireAll => {
+                if let Some(form) = self.chain_form.as_mut() {
+                    if let Some(el) = form.selected_block_mut() {
+                        el.block_config.require_all_inputs =
+                            match el.block_config.require_all_inputs {
+                                None | Some(true) => Some(false),
+                                Some(false) => None,
+                            };
+                        form.mark_dirty();
+                    }
+                }
+                true
+            }
             MouseAction::ChainCanvas => {
                 self.chain_form_canvas_down(mouse).await;
+                true
+            }
+            MouseAction::ChainPropsSurface => {
+                //
+                // Click on properties modal chrome (title, padding) —
+                // absorb so the canvas underneath does not dismiss or pan.
+                //
                 true
             }
             MouseAction::ChainPickOpItem(idx) => {
@@ -372,31 +459,102 @@ impl App {
         let Some(form) = self.chain_form.as_mut() else {
             return;
         };
-        let Some(ChainFormEditor::PickOpName {
-            mut cursor,
-            filter,
-        }) = form.editor.take()
-        else {
+        let Some(editor) = form.editor.take() else {
             return;
         };
-        let filtered: Vec<String> = form
-            .available_op_names
+
+        if let ChainFormEditor::PickSessionGroup { mut cursor } = editor {
+            let mut items = vec!["(none)".to_string(), "(new group)".to_string()];
+            for g in super::chain_form::collect_session_groups(form) {
+                items.push(g.id);
+            }
+            if idx < items.len() {
+                cursor = idx;
+                match cursor {
+                    0 => {
+                        if let Some(el) = form.selected_block_mut() {
+                            el.session_group = crate::app::SessionGroupDraft::default();
+                            form.mark_dirty();
+                        }
+                        return;
+                    }
+                    1 => {
+                        let color = form.next_session_group_color();
+                        let id = format!("sg_{}", form.element_id_seq + 1);
+                        form.element_id_seq += 1;
+                        if let Some(el) = form.selected_block_mut() {
+                            el.session_group = crate::app::SessionGroupDraft {
+                                id,
+                                color,
+                                yolo_mode: false,
+                                working_dir: String::new(),
+                            };
+                            form.mark_dirty();
+                        }
+                        return;
+                    }
+                    n => {
+                        let groups = super::chain_form::collect_session_groups(form);
+                        if let Some(g) = groups.get(n - 2).cloned() {
+                            if let Some(el) = form.selected_block_mut() {
+                                el.session_group = g;
+                                form.mark_dirty();
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+            form.editor = Some(ChainFormEditor::PickSessionGroup { cursor });
+            let _ = is_dbl;
+            return;
+        }
+
+        let (kind_tag, list, filter) = match editor {
+            ChainFormEditor::PickOpName { filter, .. } => {
+                ("op", form.available_op_names.clone(), filter)
+            }
+            ChainFormEditor::PickModel { filter, .. } => {
+                ("model", form.available_models.clone(), filter)
+            }
+            ChainFormEditor::PickTool { filter, .. } => {
+                ("tool", form.available_tools.clone(), filter)
+            }
+            ChainFormEditor::PickPayload { filter, .. } => {
+                ("payload", form.available_payloads.clone(), filter)
+            }
+            ChainFormEditor::PickSessionGroup { .. } => unreachable!(),
+        };
+        let filtered: Vec<String> = list
             .iter()
             .filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter.to_lowercase()))
             .cloned()
             .collect();
+        let mut cursor = idx.min(filtered.len().saturating_sub(1));
         if idx < filtered.len() {
             cursor = idx;
             if is_dbl {
                 if let Some(name) = filtered.get(cursor) {
                     if let Some(el) = form.selected_block_mut() {
-                        el.op_name = name.clone();
+                        match kind_tag {
+                            "op" => el.op_name = name.clone(),
+                            "model" => el.model_ref = name.clone(),
+                            "tool" => el.tool_name = name.clone(),
+                            "payload" => el.payload_id = name.clone(),
+                            _ => {}
+                        }
+                        form.mark_dirty();
                     }
-                    return; // editor stays None
+                    return;
                 }
             }
         }
-        form.editor = Some(ChainFormEditor::PickOpName { cursor, filter });
+        form.editor = Some(match kind_tag {
+            "model" => ChainFormEditor::PickModel { cursor, filter },
+            "tool" => ChainFormEditor::PickTool { cursor, filter },
+            "payload" => ChainFormEditor::PickPayload { cursor, filter },
+            _ => ChainFormEditor::PickOpName { cursor, filter },
+        });
     }
 
     fn dispatch_recon_tab(&mut self, tab: ReconTab) {

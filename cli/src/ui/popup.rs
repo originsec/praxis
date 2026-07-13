@@ -7,6 +7,7 @@ use crate::ui::theme::{
     ACCENT, BG_ELEMENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, ERROR, MUTED, OK, STATUS_FAIL,
     STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
+// BG_MENU retained for list select items; confirm body uses BG_ELEMENT.
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -56,7 +57,7 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
             Span::raw(" "),
             Span::styled(confirm.message.clone(), Style::default().fg(TEXT_BRIGHT)),
         ]))
-        .style(Style::default().bg(BG_MENU)),
+        .style(Style::default().bg(BG_ELEMENT)),
         body_chunks[0],
     );
 
@@ -75,7 +76,7 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
         ])
     };
     f.render_widget(
-        Paragraph::new(hint_line).style(Style::default().bg(BG_MENU)),
+        Paragraph::new(hint_line).style(Style::default().bg(BG_ELEMENT)),
         body_chunks[2],
     );
 }

@@ -52,8 +52,17 @@ impl App {
                 | MouseAction::ChainCycleCondition
                 | MouseAction::ChainDeleteConnection
                 | MouseAction::ChainPickOp
+                | MouseAction::ChainPickModel
+                | MouseAction::ChainPickTool
+                | MouseAction::ChainPickPayload
+                | MouseAction::ChainPickSessionGroup
+                | MouseAction::ChainCycleMemoryMode
+                | MouseAction::ChainToggleSessionYolo
+                | MouseAction::ChainCycleBlockYolo
+                | MouseAction::ChainCycleRequireAll
                 | MouseAction::ChainPickOpItem(_)
                 | MouseAction::ChainCanvas
+                | MouseAction::ChainPropsSurface
                 | MouseAction::ChainEditorDismiss
                 | MouseAction::InterceptRuleField(_)
                 | MouseAction::InterceptRuleSave
