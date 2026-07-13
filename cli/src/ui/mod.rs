@@ -1,6 +1,7 @@
 pub mod chain_form;
 pub mod chrome;
 pub mod common;
+pub mod form_modal;
 pub mod hits;
 pub mod intercept;
 pub mod log_query;
@@ -50,10 +51,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Window::Intercept => intercept::render(f, chunks[2], app),
         Window::LogQuery => log_query::render(f, chunks[2], app),
         Window::Operations => {
-            if let Some(ref form) = app.new_op_form {
-                popup::render_new_op_form(f, chunks[2], form);
-                overlay_hits::register_new_op_form_hits(app, chunks[2], form);
-            } else if let Some(ref opts) = app.run_options {
+            if let Some(ref opts) = app.run_options {
                 popup::render_run_options(f, chunks[2], opts);
                 overlay_hits::register_run_options_hits(app, chunks[2], opts);
             } else if let Some(ref tform) = app.trigger_form {
@@ -69,7 +67,15 @@ pub fn render(f: &mut Frame, app: &App) {
                     overlay_hits::register_chain_form_hits(app, &hit);
                 }
             } else {
+                //
+                // New-op form is a centered modal over the ops list
+                // (same chrome as settings / intercept rule forms).
+                //
                 operations::render(f, chunks[2], app);
+                if let Some(ref form) = app.new_op_form {
+                    operations::new_op_form::render(f, chunks[2], form);
+                    operations::new_op_form::register_hits(app, chunks[2], form);
+                }
             }
         }
         Window::Settings => settings::render(f, chunks[2], app),

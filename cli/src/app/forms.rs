@@ -310,8 +310,8 @@ pub struct ConnectionDraft {
 
 //
 // Overlay kept on the form when the user is picking an op name from the
-// library. Other "modal" interactions (kind picker, connection edit) are
-// gone — the canvas + palette replaces them.
+// library. Element/connection property editing is a separate modal opened
+// via double-click on the canvas.
 //
 
 pub enum ChainFormEditor {
@@ -320,9 +320,8 @@ pub enum ChainFormEditor {
 
 //
 // What the user has clicked. `Selected::None` means clicking a block /
-// connection has not happened yet (or selection was cleared). When a block
-// or connection is selected, the properties strip and key handlers operate
-// on it.
+// connection has not happened yet (or selection was cleared). Double-click
+// opens `props_modal` for the selection; property edits land there.
 //
 
 #[derive(Clone, PartialEq, Eq)]
@@ -424,6 +423,11 @@ pub struct ChainForm {
     pub drag: Drag,
     pub editing: Option<EditTarget>,
     //
+    // When true, the properties modal is open for `selected`. Opened by
+    // double-clicking a block or connection on the canvas.
+    //
+    pub props_modal: bool,
+    //
     // Snapshot of currently known op full_names. Used by the operation
     // picker overlay so the user can pick a real op name rather than typing
     // it free-form.
@@ -450,6 +454,7 @@ impl ChainForm {
             selected: Selected::None,
             drag: Drag::None,
             editing: None,
+            props_modal: false,
             available_op_names,
             element_id_seq: 0,
             editor: None,

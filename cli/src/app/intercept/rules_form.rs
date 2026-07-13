@@ -13,7 +13,20 @@ pub enum RuleFormField {
     Scope,
     ScopeNode,
     ScopeAgent,
+    /// On/off toggle for LLM match summarization.
     Summarize,
+    /// Free-text summarization prompt (only when Summarize is on).
+    SummarizePrompt,
+}
+
+impl RuleFormField {
+    /// True when space / ←→ should cycle this field rather than edit text.
+    pub fn is_cycleable(self) -> bool {
+        matches!(
+            self,
+            RuleFormField::Direction | RuleFormField::Scope | RuleFormField::Summarize
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +143,9 @@ impl RuleForm {
             }
         }
         v.push(RuleFormField::Summarize);
+        if self.summarize_enabled {
+            v.push(RuleFormField::SummarizePrompt);
+        }
         v
     }
 
@@ -151,13 +167,7 @@ impl RuleForm {
             RuleFormField::Regex => Some(&mut self.regex),
             RuleFormField::ScopeNode => Some(&mut self.scope_node),
             RuleFormField::ScopeAgent => Some(&mut self.scope_agent),
-            RuleFormField::Summarize => {
-                if self.summarize_enabled {
-                    Some(&mut self.summarize)
-                } else {
-                    None
-                }
-            }
+            RuleFormField::SummarizePrompt => Some(&mut self.summarize),
             _ => None,
         }
     }
@@ -176,6 +186,15 @@ impl RuleForm {
             }
             RuleFormField::Summarize => {
                 self.summarize_enabled = !self.summarize_enabled;
+                //
+                // Prompt field disappears when toggled off; if focus was
+                // left on it, clamp back to the toggle.
+                //
+                if !self.summarize_enabled
+                    && matches!(self.focus, RuleFormField::SummarizePrompt)
+                {
+                    self.focus = RuleFormField::Summarize;
+                }
             }
             _ => {}
         }

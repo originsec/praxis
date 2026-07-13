@@ -5,8 +5,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 
 use crate::app::{
-    intercept::RuleFormField, AddRemoteNodeForm, App, ChainFormEditor, PopupKind, ReconTab,
-    SettingsTab,
+    AddRemoteNodeForm, App, ChainFormEditor, NewOpForm, PopupKind, ReconTab, SettingsTab,
 };
 use crate::ui::hits::{MouseAction, ReconHintAction, SessionHintAction};
 
@@ -68,8 +67,18 @@ impl App {
             MouseAction::NewOpField(field) => {
                 if let Some(ref mut form) = self.new_op_form {
                     form.focused_field = field;
-                    Self::toggle_new_op_field(form);
+                    if NewOpForm::is_toggle(field) {
+                        Self::toggle_new_op_field(form);
+                    }
                 }
+                true
+            }
+            MouseAction::NewOpSave => {
+                self.submit_new_op().await;
+                true
+            }
+            MouseAction::NewOpCancel => {
+                self.new_op_form = None;
                 true
             }
 
@@ -282,12 +291,7 @@ impl App {
             }
             MouseAction::ChainDeleteConnection => {
                 if let Some(form) = self.chain_form.as_mut() {
-                    if let crate::app::Selected::Connection(idx) = form.selected.clone() {
-                        if idx < form.connections.len() {
-                            form.connections.remove(idx);
-                            form.selected = crate::app::Selected::None;
-                        }
-                    }
+                    super::chain_form::delete_selection(form);
                 }
                 true
             }
@@ -319,10 +323,7 @@ impl App {
                 if let Some(form) = self.intercept.rule_form.as_mut() {
                     form.focus = field;
                     // Toggle/cycle fields activate on click.
-                    if matches!(
-                        field,
-                        RuleFormField::Direction | RuleFormField::Scope | RuleFormField::Summarize
-                    ) {
+                    if field.is_cycleable() {
                         form.cycle_current();
                     }
                 }

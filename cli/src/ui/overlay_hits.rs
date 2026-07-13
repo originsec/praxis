@@ -4,7 +4,7 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::{
-    AddRemoteNodeForm, App, ConfirmKind, NewOpForm, Popup, PopupKind, RunOptions, TriggerForm,
+    AddRemoteNodeForm, App, ConfirmKind, Popup, PopupKind, RunOptions, TriggerForm,
 };
 use crate::ui::chain_form::{ChainFormHitMap, HitRect};
 use crate::ui::chrome;
@@ -97,36 +97,7 @@ pub fn register_popup_hits(app: &App, terminal: Rect, popup: &Popup) {
     }
 }
 
-pub fn register_new_op_form_hits(app: &App, area: Rect, form: &NewOpForm) {
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-    let inner = Rect {
-        x: chunks[2].x + 1,
-        width: chunks[2].width.saturating_sub(2),
-        ..chunks[2]
-    };
 
-    let is_agent = form.mode == 1;
-    let field_rows: &[(usize, u16)] = if is_agent {
-        &[(0, 0), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 9), (8, 10)]
-    } else {
-        &[(0, 0), (1, 2), (2, 3), (3, 4), (4, 5), (6, 6), (7, 8), (8, 9)]
-    };
-
-    for &(field, row) in field_rows {
-        if row < inner.height {
-            app.hits_register(
-                Rect::new(inner.x, inner.y + row, inner.width, 1),
-                MouseAction::NewOpField(field),
-            );
-        }
-    }
-}
 
 pub fn register_run_options_hits(app: &App, area: Rect, opts: &RunOptions) {
     let chunks = Layout::vertical([

@@ -303,6 +303,10 @@ impl App {
                         form.editing = None;
                         return;
                     }
+                    if form.props_modal {
+                        form.props_modal = false;
+                        return;
+                    }
                 }
                 self.chain_form = None;
                 return;
@@ -456,9 +460,11 @@ impl App {
             }
 
             //
-            // Block body.
+            // Block body. Double-click opens the properties modal;
+            // single-click selects and starts a drag.
             //
             if let Some(id) = self.block_at(canvas_col, canvas_row) {
+                let is_dbl = self.is_double_click(row, col);
                 let pos = self
                     .chain_form
                     .as_ref()
@@ -468,29 +474,38 @@ impl App {
                 let grab_dy = canvas_row - pos.1;
                 if let Some(form) = self.chain_form.as_mut() {
                     form.selected = Selected::Block(id.clone());
-                    form.drag = Drag::Block {
-                        id,
-                        grab_dx,
-                        grab_dy,
-                    };
                     form.editing = None;
+                    if is_dbl {
+                        form.props_modal = true;
+                        form.drag = Drag::None;
+                    } else {
+                        form.props_modal = false;
+                        form.drag = Drag::Block {
+                            id,
+                            grab_dx,
+                            grab_dy,
+                        };
+                    }
                 }
                 return;
             }
 
             //
-            // Connection segment.
+            // Connection segment. Double-click opens properties.
             //
             if let Some(idx) = self.connection_at(canvas_col, canvas_row) {
+                let is_dbl = self.is_double_click(row, col);
                 if let Some(form) = self.chain_form.as_mut() {
                     form.selected = Selected::Connection(idx);
                     form.editing = None;
+                    form.props_modal = is_dbl;
+                    form.drag = Drag::None;
                 }
                 return;
             }
 
             //
-            // Empty canvas → start panning.
+            // Empty canvas → start panning; dismiss properties modal.
             //
             if let Some(form) = self.chain_form.as_mut() {
                 form.drag = Drag::Canvas {
@@ -499,6 +514,7 @@ impl App {
                 };
                 form.selected = Selected::None;
                 form.editing = None;
+                form.props_modal = false;
             }
         }
     }
@@ -911,6 +927,8 @@ pub fn delete_selection(form: &mut ChainForm) {
                 .retain(|c| c.from_element != id && c.to_element != id);
             form.positions.remove(&id);
             form.selected = Selected::None;
+            form.props_modal = false;
+            form.editing = None;
             //
             // No-op refusal would just leave the user with no recourse;
             // we let them delete and re-add via the palette if needed.
@@ -922,6 +940,8 @@ pub fn delete_selection(form: &mut ChainForm) {
                 form.connections.remove(idx);
             }
             form.selected = Selected::None;
+            form.props_modal = false;
+            form.editing = None;
         }
         Selected::None => {}
     }

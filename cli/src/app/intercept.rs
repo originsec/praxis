@@ -1558,50 +1558,115 @@ impl App {
     }
 
     async fn handle_rule_form_key(&mut self, key: KeyEvent) {
-        let form = match self.intercept.rule_form.as_mut() {
-            Some(f) => f,
-            None => return,
-        };
+        //
+        // Key bindings match the new-op form: ↑↓ / Tab / Enter move
+        // between fields, ←→ and Space toggle/cycle pickers, free text
+        // otherwise. Prompt (SummarizePrompt) is multiline: shift/alt+
+        // enter inserts a newline (plain enter advances fields).
+        //
         match key.code {
             KeyCode::Esc => {
                 self.intercept.rule_form = None;
                 return;
             }
-            KeyCode::Tab => {
-                form.focus_next();
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    if form.focus == RuleFormField::SummarizePrompt {
+                        form.summarize.push('\n');
+                    }
+                }
                 return;
             }
-            KeyCode::BackTab => {
-                form.focus_prev();
+            KeyCode::Char('\n') => {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    if form.focus == RuleFormField::SummarizePrompt {
+                        form.summarize.push('\n');
+                    }
+                }
+                return;
+            }
+            KeyCode::Down | KeyCode::Tab | KeyCode::Enter => {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    form.focus_next();
+                }
+                return;
+            }
+            KeyCode::Up | KeyCode::BackTab => {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    form.focus_prev();
+                }
                 return;
             }
             _ => {}
         }
-        //
-        // Ctrl+Enter submits.
-        //
+
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
             self.submit_rule_form().await;
             return;
         }
 
         match key.code {
-            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
-                let focus = form.focus;
-                if matches!(focus, RuleFormField::ScopeNode | RuleFormField::ScopeAgent) {
-                    self.cycle_rule_form_scope_picker(focus);
-                } else {
-                    form.cycle_current();
+            KeyCode::Left | KeyCode::Right => {
+                let focus = self
+                    .intercept
+                    .rule_form
+                    .as_ref()
+                    .map(|f| f.focus);
+                match focus {
+                    Some(RuleFormField::ScopeNode | RuleFormField::ScopeAgent) => {
+                        if let Some(f) = focus {
+                            self.cycle_rule_form_scope_picker(f);
+                        }
+                    }
+                    Some(f) if f.is_cycleable() => {
+                        if let Some(form) = self.intercept.rule_form.as_mut() {
+                            form.cycle_current();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char(' ') => {
+                let focus = self
+                    .intercept
+                    .rule_form
+                    .as_ref()
+                    .map(|f| f.focus);
+                match focus {
+                    Some(f) if f.is_cycleable() => {
+                        if let Some(form) = self.intercept.rule_form.as_mut() {
+                            form.cycle_current();
+                        }
+                    }
+                    Some(RuleFormField::ScopeNode | RuleFormField::ScopeAgent) => {
+                        if let Some(f) = focus {
+                            self.cycle_rule_form_scope_picker(f);
+                        }
+                    }
+                    _ => {
+                        if let Some(form) = self.intercept.rule_form.as_mut() {
+                            if let Some(s) = form.current_text_mut() {
+                                s.push(' ');
+                            }
+                        }
+                    }
                 }
             }
             KeyCode::Backspace => {
-                if let Some(s) = form.current_text_mut() {
-                    s.pop();
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    if let Some(s) = form.current_text_mut() {
+                        s.pop();
+                    }
                 }
             }
-            KeyCode::Char(c) => {
-                if let Some(s) = form.current_text_mut() {
-                    s.push(c);
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(form) = self.intercept.rule_form.as_mut() {
+                    if let Some(s) = form.current_text_mut() {
+                        s.push(c);
+                    }
                 }
             }
             _ => {}

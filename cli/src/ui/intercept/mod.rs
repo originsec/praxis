@@ -1,13 +1,13 @@
 //
 // Intercept window render dispatcher. Owns the tab header, status
-// line, and delegates content to sub-tab renderers. The rule form (if
-// open) takes over the content area unless on the Rules tab (split view).
+// line, and delegates content to sub-tab renderers. Rule create/edit
+// is `rule_form` (uses shared `form_modal` chrome).
 //
 
-mod form;
 pub mod hints;
 mod log;
 mod matches;
+mod rule_form;
 mod rules;
 mod search_bar;
 
@@ -35,12 +35,15 @@ pub fn show_banner(app: &App) -> bool {
 
 /// Chrome layout below the window header — shared by render and mouse hit-tests.
 pub struct InterceptChrome {
-    pub tabs: Rect,
     pub body: Rect,
 }
 
 pub fn chrome_layout(area: Rect, show_banner: bool) -> InterceptChrome {
-    let mut constraints = vec![Constraint::Length(1)];
+    //
+    // Optional banner, then fixed chrome rows, then Min body so the
+    // tab content always fills remaining height (same pattern as ops).
+    //
+    let mut constraints = Vec::new();
     if show_banner {
         constraints.push(Constraint::Length(1));
     }
@@ -57,10 +60,9 @@ pub fn chrome_layout(area: Rect, show_banner: bool) -> InterceptChrome {
         idx += 1; // banner (render-only)
     }
     idx += 1; // status strip (render-only)
-    let tabs = chunks[idx];
-    idx += 2; // divider + body
+    idx += 2; // tabs + divider
     let body = chunks[idx];
-    InterceptChrome { tabs, body }
+    InterceptChrome { body }
 }
 
 /// Filter bar + horizontal split used by Traffic and Matches tabs.
@@ -91,23 +93,16 @@ pub fn filter_and_table(body: Rect) -> (Rect, Rect) {
     (chunks[0], chunks[1])
 }
 
-/// Rules tab body: full width, or left pane when the form is split in.
-pub fn rules_list_area(body: Rect, split_form: bool) -> Rect {
-    if split_form {
-        Layout::horizontal([
-            Constraint::Percentage(42),
-            Constraint::Percentage(58),
-        ])
-        .split(body)[0]
-    } else {
-        body
-    }
-}
-
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let banner = show_banner(app);
 
-    let mut constraints = vec![Constraint::Length(1)];
+    //
+    // Same constraint stack as chrome_layout: do not pre-allocate a
+    // blank Length(1) before the optional banner — that used to shift
+    // Min(1) onto the hints row when the banner was visible, leaving
+    // Traffic/Rules/Matches only one row tall.
+    //
+    let mut constraints = Vec::new();
     if banner {
         constraints.push(Constraint::Length(1));
     }
@@ -135,49 +130,45 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     idx += 1;
     let hints = chunks[idx];
 
-    if let Some(ref rf) = app.intercept.rule_form {
-        if app.intercept.tab == InterceptTab::Rules {
-            let split = Layout::horizontal([
-                Constraint::Percentage(42),
-                Constraint::Percentage(58),
-            ])
-            .split(content);
-            rules::render(f, split[0], app);
-            register_rules_hits(app, content);
-            form::render(f, split[1], rf, app);
-        } else {
-            form::render(f, content, rf, app);
-        }
-        render_hints(f, hints, app);
-        return;
-    }
+    let form_open = app.intercept.rule_form.is_some();
 
     match app.intercept.tab {
         InterceptTab::Traffic => {
             log::render(f, content, app);
-            register_traffic_hits(app, content);
+            if !form_open {
+                register_traffic_hits(app, content);
+            }
         }
         InterceptTab::Rules => {
             rules::render(f, content, app);
-            register_rules_hits(app, content);
+            if !form_open {
+                register_rules_hits(app, content);
+            }
         }
         InterceptTab::Matches => {
             matches::render(f, content, app);
-            register_matches_hits(app, content);
+            if !form_open {
+                register_matches_hits(app, content);
+            }
         }
     }
 
     render_hints(f, hints, app);
+
+    //
+    // Rule create/edit is a centered modal over the intercept window
+    // (same chrome as settings model forms), not a split pane.
+    //
+    if let Some(ref rf) = app.intercept.rule_form {
+        rule_form::render(f, area, rf, app);
+    }
 }
 
 fn register_traffic_hits(app: &App, body: Rect) {
     let panes = filter_split(body, app.intercept.log_split_percent);
     app.hits_register(
         split_border_rect(panes.left),
-        MouseAction::InterceptLogSplitDragStart {
-            outer_x: panes.filter.x,
-            outer_width: panes.filter.width,
-        },
+        MouseAction::InterceptLogSplitDragStart,
     );
     app.hits_register(panes.right, MouseAction::InterceptLogDetailFocus);
     app.hits_register(
@@ -194,10 +185,7 @@ fn register_matches_hits(app: &App, body: Rect) {
     let panes = filter_split(body, app.intercept.match_split_percent);
     app.hits_register(
         split_border_rect(panes.left),
-        MouseAction::InterceptMatchSplitDragStart {
-            outer_x: panes.filter.x,
-            outer_width: panes.filter.width,
-        },
+        MouseAction::InterceptMatchSplitDragStart,
     );
     app.hits_register(panes.right, MouseAction::InterceptMatchDetailFocus);
     app.hits_register(
@@ -211,9 +199,7 @@ fn register_matches_hits(app: &App, body: Rect) {
 }
 
 fn register_rules_hits(app: &App, body: Rect) {
-    let split_form = app.intercept.rule_form.is_some();
-    let list_body = rules_list_area(body, split_form);
-    let (_filter, table) = filter_and_table(list_body);
+    let (_filter, table) = filter_and_table(body);
     app.hits_register(
         table,
         MouseAction::SelectRow(RowSelect {

@@ -33,39 +33,6 @@ const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
 const SYSTEM_BAR: Color = SECONDARY;
 
-pub struct OrchChrome {
-    pub tabs: Rect,
-    pub meta: Rect,
-    pub input: Rect,
-}
-
-/// Layout below the window header — must match `render`.
-pub fn chrome_layout(area: Rect, state: &OrchestratorState) -> OrchChrome {
-    let show_tabs = state.sessions.len() > 1;
-    let no_sessions = state.sessions.is_empty();
-    let input_lines = if no_sessions {
-        1
-    } else {
-        input_content_rows(state)
-    };
-    let input_height = (input_lines + 2).max(3);
-    let chunks = Layout::vertical([
-        Constraint::Length(if show_tabs { 1 } else { 0 }),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(input_height),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-    OrchChrome {
-        tabs: chunks[0],
-        meta: chunks[5],
-        input: chunks[3],
-    }
-}
-
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let state = &app.orchestrator;
     let session = state.active_session();

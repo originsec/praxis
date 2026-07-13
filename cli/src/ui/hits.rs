@@ -16,8 +16,8 @@ pub enum MouseAction {
     InterceptTab(InterceptTab),
     InterceptLogDetailFocus,
     InterceptMatchDetailFocus,
-    InterceptLogSplitDragStart { outer_x: u16, outer_width: u16 },
-    InterceptMatchSplitDragStart { outer_x: u16, outer_width: u16 },
+    InterceptLogSplitDragStart,
+    InterceptMatchSplitDragStart,
     InterceptRuleField(RuleFormField),
     InterceptRuleSave,
     InterceptRuleCancel,
@@ -26,12 +26,12 @@ pub enum MouseAction {
     OpsTab(OpsTab),
     OpsDetailFocus,
     OpsExecDetail { inner: Rect },
-    OpsSplitDragStart { outer_x: u16, outer_width: u16 },
+    OpsSplitDragStart,
     OpsHint(OpsHintAction),
 
     NodesDetailFocus,
     NodesAgentRow { agents_start: u16 },
-    NodesSplitDragStart { outer_x: u16, outer_width: u16 },
+    NodesSplitDragStart,
     NodesHint(NodesHintAction),
 
     // Recon overlay (nodes window)
@@ -61,6 +61,8 @@ pub enum MouseAction {
 
     // Operations forms
     NewOpField(usize),
+    NewOpSave,
+    NewOpCancel,
     RunOptionsToggle { section: u8, index: usize },
     RunOptionsRun,
     RunOptionsCancel,

@@ -18,6 +18,8 @@ impl App {
                 | MouseAction::PopupItem(_)
                 | MouseAction::PopupDismiss
                 | MouseAction::NewOpField(_)
+                | MouseAction::NewOpSave
+                | MouseAction::NewOpCancel
                 | MouseAction::RunOptionsToggle { .. }
                 | MouseAction::RunOptionsRun
                 | MouseAction::RunOptionsCancel
@@ -103,11 +105,11 @@ impl App {
                 self.fetch_body_for_match_selected().await;
                 true
             }
-            MouseAction::InterceptLogSplitDragStart { .. } => {
+            MouseAction::InterceptLogSplitDragStart => {
                 self.intercept.log_dragging = true;
                 true
             }
-            MouseAction::InterceptMatchSplitDragStart { .. } => {
+            MouseAction::InterceptMatchSplitDragStart => {
                 self.intercept.match_dragging = true;
                 true
             }
@@ -155,7 +157,7 @@ impl App {
                 }
                 true
             }
-            MouseAction::OpsSplitDragStart { .. } => {
+            MouseAction::OpsSplitDragStart => {
                 self.operations.dragging = true;
                 true
             }
@@ -182,7 +184,7 @@ impl App {
                 }
                 true
             }
-            MouseAction::NodesSplitDragStart { .. } => {
+            MouseAction::NodesSplitDragStart => {
                 self.nodes.dragging = true;
                 true
             }

@@ -1,14 +1,16 @@
 //
 // Visual chain builder. Renders a 2D canvas of element blocks connected by
 // orthogonal line segments. Mouse-driven: blocks drag, ports rubber-band
-// connections, the canvas pans. Inline edits land in the properties strip
-// below the canvas.
+// connections, the canvas pans. Double-click a block or connection to edit
+// properties in a centered modal (no properties pane in the main view).
 //
 
 use crate::app::{
     BlockField, ChainElementDraft, ChainForm, ChainFormEditor, ConditionKind, ConnectionDraft,
     Drag, EditTarget, ElementKind, PortSide, Selected, input_port_count, output_port_count,
 };
+use crate::ui::chrome;
+use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{
     ACCENT, BG, BG_ELEMENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, ERROR, MUTED, OK,
     STATUS_RUNNING, TEXT, TEXT_BRIGHT,
@@ -94,7 +96,6 @@ pub fn render_chain_form(f: &mut Frame, area: Rect, form: &ChainForm) -> ChainFo
         Constraint::Length(1), // divider
         Constraint::Length(3), // header strip
         Constraint::Min(8),    // canvas
-        Constraint::Length(4), // properties strip
         Constraint::Length(2), // palette + buttons
         Constraint::Length(1), // hints / error
     ])
@@ -106,14 +107,16 @@ pub fn render_chain_form(f: &mut Frame, area: Rect, form: &ChainForm) -> ChainFo
     let mut hit = ChainFormHitMap::default();
     render_header_strip(f, chunks[2], form, &mut hit);
     render_canvas(f, chunks[3], form, &mut hit);
-    render_properties_strip(f, chunks[4], form, &mut hit);
-    render_palette_and_buttons(f, chunks[5], form, &mut hit);
-    render_hints(f, chunks[6], form);
+    render_palette_and_buttons(f, chunks[4], form, &mut hit);
+    render_hints(f, chunks[5], form);
 
     //
-    // Overlay editors (op-name picker only — kind/connection edit moved
-    // into the canvas itself).
+    // Properties modal (double-click) sits over the builder; op-name
+    // picker stacks on top of that when open.
     //
+    if form.props_modal {
+        render_properties_modal(f, area, form, &mut hit);
+    }
     if let Some(editor) = form.editor.as_ref() {
         render_op_picker(f, area, form, editor);
     }
@@ -807,44 +810,78 @@ fn draw_rubberband(
 }
 
 //
-// Properties strip — fields for the currently selected block (or
-// connection), with click-to-edit hit rects.
+// Properties modal — opened by double-clicking a block or connection.
+// Same chrome as new-op / intercept rule forms.
 //
 
-fn render_properties_strip(f: &mut Frame, area: Rect, form: &ChainForm, hit: &mut ChainFormHitMap) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_SUBTLE))
-        .title(Span::styled(
-            " Properties ",
-            Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
-        ));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
+fn render_properties_modal(
+    f: &mut Frame,
+    area: Rect,
+    form: &ChainForm,
+    hit: &mut ChainFormHitMap,
+) {
     match form.selected.clone() {
-        Selected::None => {
-            f.render_widget(
-                Paragraph::new(Span::styled(
-                    "(click a block or connection to edit)",
-                    Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
-                )),
-                inner,
-            );
-        }
         Selected::Block(id) => {
             let Some(el) = form.elements.iter().find(|e| e.id == id).cloned() else {
                 return;
             };
-            render_block_properties(f, inner, form, &el, hit);
+            let field_rows = block_prop_field_count(el.kind);
+            // chrome 4 + header + fields + blank + hints
+            let height = (field_rows + 7).min(area.height.saturating_sub(2)).max(8);
+            let width = 64u16.min(area.width.saturating_sub(4)).max(40);
+            let popup = centered_rect_fixed(width, height, area);
+            let title = format!("{} properties", el.kind.label());
+            let body = chrome::modal_panel(f, popup, &title, "esc");
+            let body_chunks =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(body);
+            render_block_properties(f, body_chunks[0], form, &el, hit);
+            render_props_modal_hints(f, body_chunks[1]);
         }
         Selected::Connection(idx) => {
             let Some(conn) = form.connections.get(idx).cloned() else {
                 return;
             };
-            render_connection_properties(f, inner, form, &conn, idx, hit);
+            let height = 9u16.min(area.height.saturating_sub(2)).max(8);
+            let width = 64u16.min(area.width.saturating_sub(4)).max(40);
+            let popup = centered_rect_fixed(width, height, area);
+            let body = chrome::modal_panel(f, popup, "Connection properties", "esc");
+            let body_chunks =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(body);
+            render_connection_properties(f, body_chunks[0], form, &conn, idx, hit);
+            render_props_modal_hints(f, body_chunks[1]);
         }
+        Selected::None => {}
     }
+}
+
+fn block_prop_field_count(kind: ElementKind) -> u16 {
+    match kind {
+        ElementKind::Operation | ElementKind::Transform | ElementKind::Tool => 2,
+        ElementKind::GenericPrompt
+        | ElementKind::Memory
+        | ElementKind::Loop
+        | ElementKind::Payload => 1,
+        ElementKind::Trigger | ElementKind::Termination => 0,
+    }
+}
+
+fn render_props_modal_hints(f: &mut Frame, area: Rect) {
+    let key = Style::default().fg(TEXT_BRIGHT);
+    let label = Style::default().fg(MUTED);
+    let line = Line::from(vec![
+        Span::styled("click", key),
+        Span::styled(" edit field", label),
+        Span::raw("    "),
+        Span::styled("del", key),
+        Span::styled(" remove", label),
+        Span::raw("    "),
+        Span::styled("esc", key),
+        Span::styled(" done", label),
+    ]);
+    f.render_widget(
+        Paragraph::new(line).style(Style::default().bg(BG_MENU)),
+        area,
+    );
 }
 
 fn render_block_properties(
@@ -1131,8 +1168,8 @@ fn render_hints(f: &mut Frame, area: Rect, form: &ChainForm) {
             Span::styled("drag", key),
             Span::styled(" block / port", lbl),
             Span::raw("   "),
-            Span::styled("click", key),
-            Span::styled(" select / edit", lbl),
+            Span::styled("dbl-click", key),
+            Span::styled(" properties", lbl),
             Span::raw("   "),
             Span::styled("scroll", key),
             Span::styled(" pan", lbl),

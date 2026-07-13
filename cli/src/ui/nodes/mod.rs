@@ -167,10 +167,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 fn register_browse_hits(app: &App, list_area: Rect, detail_area: Rect, _hints_area: Rect) {
     app.hits_register(
         split_border_rect(list_area),
-        MouseAction::NodesSplitDragStart {
-            outer_x: list_area.x,
-            outer_width: list_area.width.saturating_add(detail_area.width),
-        },
+        MouseAction::NodesSplitDragStart,
     );
     app.hits_register(
         list_area,

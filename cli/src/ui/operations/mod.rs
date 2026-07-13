@@ -1,5 +1,6 @@
 mod executions;
 mod library;
+pub mod new_op_form;
 mod triggers;
 
 use crate::app::{App, OperationsState, OpsTab};
@@ -37,7 +38,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         OpsTab::Triggers => triggers::render_triggers(f, chunks[2], state),
     }
 
-    register_content_hits(app, chunks[2], state);
+    //
+    // Skip list hits while the new-op modal is open so clicks go to
+    // the form (later HitLayer entries still win, but this keeps the
+    // backdrop inert like settings).
+    //
+    if app.new_op_form.is_none() {
+        register_content_hits(app, chunks[2], state);
+    }
     render_hints(f, chunks[3], app, state);
 }
 
@@ -267,10 +275,7 @@ fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
     };
     app.hits_register(
         split_border_rect(border_rect),
-        MouseAction::OpsSplitDragStart {
-            outer_x: main_area.x,
-            outer_width: main_area.width,
-        },
+        MouseAction::OpsSplitDragStart,
     );
 
     let row_kind = match state.tab {
