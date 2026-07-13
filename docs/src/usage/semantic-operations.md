@@ -195,7 +195,7 @@ Operations can be combined into chains for complex workflows. A chain is a graph
 The shipped chain builder is the **praxis TUI** (Operations → Library → New Chain / Edit). It is a terminal canvas with drag-and-drop blocks, port connections, and a properties modal — not a web/React Flow editor.
 
 1. Go to **Operations** → **Library**
-2. Create a chain (`Ctrl+Shift+N` or the new-chain action) or edit an existing one (`Ctrl+E`)
+2. Create a chain (`Ctrl+Alt+N` or the new-chain action) or edit an existing one (`Ctrl+E`)
 3. Add elements from the palette (or keyboard shortcuts) — new nodes auto-wire from the selection
 4. Connect outputs to inputs by dragging ports (forgiving multi-cell hit targets)
 5. Open properties with `Enter` or double-click; assign session groups and block config

@@ -283,17 +283,12 @@ impl App {
                 }
             }
             //
-            // Ctrl+Shift+N — new chain (Library). Accept uppercase 'N'
-            // (common terminal encoding of Ctrl+Shift+N) or 'n' with SHIFT.
+            // Ctrl+Alt+N — new chain (Library). Hint shows as ^!n.
             //
-            KeyCode::Char('N') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.operations.tab == OpsTab::Library {
-                    self.open_new_chain_form();
-                }
-            }
             KeyCode::Char('n')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+                if key
+                    .modifiers
+                    .contains(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 if self.operations.tab == OpsTab::Library {
                     self.open_new_chain_form();
@@ -301,7 +296,6 @@ impl App {
             }
             KeyCode::Char('n')
                 if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::SHIFT)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 match self.operations.tab {

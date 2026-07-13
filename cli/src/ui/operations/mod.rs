@@ -127,7 +127,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
             reg.chip("^n", MouseAction::OpsHint(OpsHintAction::NewOp));
             reg.chip(" new op", MouseAction::OpsHint(OpsHintAction::NewOp));
             reg.gap(4);
-            reg.chip("^+n", MouseAction::OpsHint(OpsHintAction::NewChain));
+            reg.chip("^!n", MouseAction::OpsHint(OpsHintAction::NewChain));
             reg.chip(" new chain", MouseAction::OpsHint(OpsHintAction::NewChain));
             reg.gap(4);
             reg.chip("^e", MouseAction::OpsHint(OpsHintAction::Edit));
@@ -144,7 +144,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
                 Span::styled("^n", key),
                 Span::styled(" new op", label),
                 gap.clone(),
-                Span::styled("^+n", key),
+                Span::styled("^!n", key),
                 Span::styled(" new chain", label),
                 gap.clone(),
                 Span::styled("^e", key),
