@@ -186,7 +186,7 @@ Nodes report their privilege status automatically. In the praxis TUI, the interc
 
 ## Enabling Interception
 
-1. Open the **Intercept** window (`Ctrl+I`) in the praxis TUI
+1. Open the **Intercept** window (`Ctrl+T`) in the praxis TUI
 2. Select your node (must be running privileged for VPN/Hosts/TPROXY methods)
 3. Choose a method (Proxy, VPN, Hosts, or TPROXY)
 4. Enable interception

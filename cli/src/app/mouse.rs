@@ -122,6 +122,18 @@ impl App {
                 self.intercept.match_dragging = true;
                 true
             }
+            MouseAction::InterceptCycleNodeFilter => {
+                self.cycle_node_filter();
+                true
+            }
+            MouseAction::InterceptCycleAgentFilter => {
+                self.cycle_agent_filter();
+                true
+            }
+            MouseAction::InterceptCycleBodyMode => {
+                self.intercept.body_mode = self.intercept.body_mode.cycle();
+                true
+            }
 
             MouseAction::OpsTab(tab) => {
                 let prev = self.operations.tab;
@@ -394,12 +406,12 @@ impl App {
     }
 
     pub(crate) async fn handle_window_mouse_drag(&mut self, mouse: MouseEvent, content_area: Rect) {
-        use crate::ui::intercept::{chrome_layout, filter_split, show_banner};
+        use crate::ui::intercept::{chrome_layout, filter_split, show_banner, show_footer};
 
         match mouse.kind {
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.intercept.log_dragging {
-                    let chrome = chrome_layout(content_area, show_banner(self));
+                    let chrome = chrome_layout(content_area, show_banner(self), show_footer(self));
                     let panes = filter_split(chrome.body, self.intercept.log_split_percent);
                     self.intercept.log_split_percent = drag_split_percent(
                         panes.filter.x,
@@ -407,7 +419,7 @@ impl App {
                         mouse.column,
                     );
                 } else if self.intercept.match_dragging {
-                    let chrome = chrome_layout(content_area, show_banner(self));
+                    let chrome = chrome_layout(content_area, show_banner(self), show_footer(self));
                     let panes = filter_split(chrome.body, self.intercept.match_split_percent);
                     self.intercept.match_split_percent = drag_split_percent(
                         panes.filter.x,

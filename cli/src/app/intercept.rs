@@ -1825,7 +1825,7 @@ impl App {
     // another modal surface.
     //
 
-    fn cycle_node_filter(&mut self) {
+    pub(crate) fn cycle_node_filter(&mut self) {
         let mut nodes: Vec<String> = self
             .nodes
             .nodes
@@ -1854,7 +1854,7 @@ impl App {
         self.intercept.set_node_filter(new);
     }
 
-    fn cycle_agent_filter(&mut self) {
+    pub(crate) fn cycle_agent_filter(&mut self) {
         let node_scope = self.intercept.node_filter.as_deref();
         let mut agents: Vec<String> = self
             .nodes

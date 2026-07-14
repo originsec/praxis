@@ -59,7 +59,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         ("^o", "orchestrator", Window::Orchestrator),
         ("^l", "nodes", Window::Nodes),
         ("^p", "ops", Window::Operations),
-        ("^i", "intercept", Window::Intercept),
+        ("^t", "intercept", Window::Intercept),
         ("^g", "logs", Window::LogQuery),
         ("^s", "settings", Window::Settings),
     ];
@@ -127,7 +127,7 @@ fn register_nav_hits(app: &App, area: Rect) {
         ("^o", "orchestrator", Window::Orchestrator),
         ("^l", "nodes", Window::Nodes),
         ("^p", "ops", Window::Operations),
-        ("^i", "intercept", Window::Intercept),
+        ("^t", "intercept", Window::Intercept),
         ("^g", "logs", Window::LogQuery),
         ("^s", "settings", Window::Settings),
     ];

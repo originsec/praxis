@@ -4,7 +4,6 @@
 // is `rule_form` (uses shared `form_modal` chrome).
 //
 
-pub mod hints;
 mod log;
 mod matches;
 mod rule_form;
@@ -33,15 +32,22 @@ pub fn show_banner(app: &App) -> bool {
         && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty())
 }
 
+/// Footer row is only used for transient error/status banners — no
+/// keyboard-hint strip.
+pub fn show_footer(app: &App) -> bool {
+    app.intercept.last_error.is_some() || app.intercept.status_message.is_some()
+}
+
 /// Chrome layout below the window header — shared by render and mouse hit-tests.
 pub struct InterceptChrome {
     pub body: Rect,
 }
 
-pub fn chrome_layout(area: Rect, show_banner: bool) -> InterceptChrome {
+pub fn chrome_layout(area: Rect, show_banner: bool, show_footer: bool) -> InterceptChrome {
     //
     // Optional banner, then fixed chrome rows, then Min body so the
     // tab content always fills remaining height (same pattern as ops).
+    // Optional footer only when an error/status message is showing.
     //
     let mut constraints = Vec::new();
     if show_banner {
@@ -52,8 +58,10 @@ pub fn chrome_layout(area: Rect, show_banner: bool) -> InterceptChrome {
         Constraint::Length(1), // tab header
         Constraint::Length(1), // divider
         Constraint::Min(1),    // tab body
-        Constraint::Length(1), // hints / status
     ]);
+    if show_footer {
+        constraints.push(Constraint::Length(1));
+    }
     let chunks = Layout::vertical(constraints).split(area);
     let mut idx = 0usize;
     if show_banner {
@@ -95,11 +103,12 @@ pub fn filter_and_table(body: Rect) -> (Rect, Rect) {
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let banner = show_banner(app);
+    let footer = show_footer(app);
 
     //
     // Same constraint stack as chrome_layout: do not pre-allocate a
     // blank Length(1) before the optional banner — that used to shift
-    // Min(1) onto the hints row when the banner was visible, leaving
+    // Min(1) onto the footer when the banner was visible, leaving
     // Traffic/Rules/Matches only one row tall.
     //
     let mut constraints = Vec::new();
@@ -111,8 +120,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Length(1), // tab header
         Constraint::Length(1), // divider
         Constraint::Min(1),    // content
-        Constraint::Length(1), // hints
     ]);
+    if footer {
+        constraints.push(Constraint::Length(1));
+    }
 
     let chunks = Layout::vertical(constraints).split(area);
     let mut idx = 0usize;
@@ -128,7 +139,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     idx += 1;
     let content = chunks[idx];
     idx += 1;
-    let hints = chunks[idx];
 
     let form_open = app.intercept.rule_form.is_some();
 
@@ -153,7 +163,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    render_hints(f, hints, app);
+    if footer {
+        render_status_footer(f, chunks[idx], app);
+    }
 
     //
     // Rule create/edit is a centered modal over the intercept window
@@ -339,7 +351,7 @@ fn render_divider(f: &mut Frame, area: Rect) {
     );
 }
 
-fn render_hints(f: &mut Frame, area: Rect, app: &App) {
+fn render_status_footer(f: &mut Frame, area: Rect, app: &App) {
     if let Some((msg, _)) = &app.intercept.last_error {
         let line = Line::from(vec![
             Span::styled("\u{25b3} ", Style::default().fg(STATUS_FAIL)),
@@ -360,13 +372,5 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(msg.clone(), Style::default().fg(OK)),
         ]);
         f.render_widget(Paragraph::new(line), area);
-        return;
     }
-
-    let hints = match app.intercept.tab {
-        InterceptTab::Traffic => log::hints(app),
-        InterceptTab::Rules => rules::hints(app),
-        InterceptTab::Matches => matches::hints(app),
-    };
-    f.render_widget(Paragraph::new(hints), area);
 }

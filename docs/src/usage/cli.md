@@ -57,7 +57,7 @@ Node and agent management with integrated session chat and terminal access:
 - Agent selection and concurrent ACP session management
 - **Session Chat** — direct conversation with agents, with YOLO mode and working directory selection
 - **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `d` / `Del` to discard, Esc to dismiss
-- **Terminal** (`Ctrl+R` to create, `Ctrl+T` to toggle) — full PTY terminal emulation with scrollback
+- **Terminal** (`Ctrl+Y` to toggle) — full PTY terminal emulation with scrollback
 - **Recon** (`r` with an agent selected in the detail pane) — view reconnaissance results directly in the terminal
 
 Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
@@ -106,7 +106,7 @@ The **Sessions** tab shows discovered session files on the left and parsed
 conversation transcripts on the right. Session content is parsed as
 JSONL, JSON array, or raw text depending on the agent's format.
 
-### Intercept (`Ctrl+I`)
+### Intercept (`Ctrl+T`)
 
 Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch):
 
@@ -268,10 +268,10 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 |-----|--------|
 | `Ctrl+O` | Orchestrator window |
 | `Ctrl+L` | Nodes window |
-| `Ctrl+I` | Intercept window |
+| `Ctrl+T` | Intercept window |
 | `Ctrl+P` | Operations window |
 | `Ctrl+S` | Settings window |
-| `Ctrl+T` | Toggle terminal mode |
+| `Ctrl+Y` | Toggle terminal mode (Nodes) |
 | `Ctrl+Q` | Quit |
 
 `Ctrl+W` is window-scoped: in Nodes it toggles the Active Sessions

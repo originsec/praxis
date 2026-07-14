@@ -139,10 +139,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
         if has_terminal {
             reg.gap(4);
-            reg.chip("^t", MouseAction::NodesHint(NodesHintAction::Terminal));
+            reg.chip("^y", MouseAction::NodesHint(NodesHintAction::Terminal));
             reg.chip(" terminal", MouseAction::NodesHint(NodesHintAction::Terminal));
             hint_spans.push(Span::raw("    "));
-            hint_spans.push(Span::styled("^t", key_style));
+            hint_spans.push(Span::styled("^y", key_style));
             hint_spans.push(Span::styled(" terminal", label_style));
         }
 

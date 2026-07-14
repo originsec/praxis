@@ -183,6 +183,25 @@ impl App {
             return;
         }
 
+        //
+        // Ctrl+Y opens the node PTY terminal. Handled here (not only in
+        // the browse match below) so it still works from detail focus.
+        // Avoid Ctrl+B: that is tmux's default prefix and never reaches
+        // the app under a stock tmux config.
+        //
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('y') {
+            if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                if node.capabilities.is_empty()
+                    || node
+                        .capabilities
+                        .contains(&common::NodeCapability::Terminal)
+                {
+                    self.open_terminal();
+                }
+            }
+            return;
+        }
+
         if self.nodes.detail_focus {
             match key.code {
                 KeyCode::Esc | KeyCode::Left => {
@@ -252,20 +271,9 @@ impl App {
                 //
                 // `i` while focused in the Nodes window (not in detail
                 // pane) toggles intercept for the selected node. The
-                // existing ^i global shortcut still opens the window.
+                // global ^t shortcut opens the Intercept window.
                 //
                 self.toggle_intercept_for_selected_node().await;
-            }
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
-                    if node.capabilities.is_empty()
-                        || node
-                            .capabilities
-                            .contains(&common::NodeCapability::Terminal)
-                    {
-                        self.open_terminal();
-                    }
-                }
             }
             _ => {}
         }
@@ -273,9 +281,9 @@ impl App {
 
     //
     // Toggle intercept for the currently-selected node from the Nodes
-    // window. Fires the same ConfirmAction as the old ^i handler in the
-    // intercept window did, but sourced from the selected node row
-    // rather than the selected traffic entry.
+    // window. Fires the same ConfirmAction as the old intercept-window
+    // toggle did, but sourced from the selected node row rather than
+    // the selected traffic entry.
     //
     pub(crate) async fn toggle_intercept_for_selected_node(&mut self) {
         let Some(node) = self.nodes.nodes.get(self.nodes.selected) else {
@@ -411,7 +419,7 @@ impl App {
     }
 
     pub(crate) async fn handle_terminal_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('y') {
             self.close_terminal();
             return;
         }

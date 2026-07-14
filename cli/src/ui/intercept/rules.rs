@@ -13,7 +13,7 @@ use ratatui::widgets::{Cell, Row, Table, TableState};
 use crate::app::App;
 use crate::ui::chrome;
 use crate::ui::common::titled_panel;
-use crate::ui::intercept::{hints as shared_hints, search_bar};
+use crate::ui::intercept::search_bar;
 use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
@@ -141,29 +141,3 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-pub fn hints(_app: &App) -> Line<'static> {
-    let key = Style::default().fg(TEXT_BRIGHT);
-    let label = Style::default().fg(MUTED);
-    shared_hints::line_with_tier(vec![
-        Span::styled("^n", key),
-        Span::styled(" new", label),
-        Span::raw("    "),
-        Span::styled("^e", key),
-        Span::styled(" edit", label),
-        Span::raw("    "),
-        Span::styled("^u", key),
-        Span::styled(" dup", label),
-        Span::raw("    "),
-        Span::styled("^d", key),
-        Span::styled(" del", label),
-        Span::raw("    "),
-        Span::styled("space", key),
-        Span::styled(" toggle", label),
-        Span::raw("    "),
-        Span::styled("\u{21b5}", key),
-        Span::styled(" matches", label),
-        Span::raw("    "),
-        Span::styled("r", key),
-        Span::styled(" refresh", label),
-    ])
-}

@@ -73,7 +73,7 @@ pub(super) fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let mut hint_spans = vec![
-        Span::styled("^t", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled("^y", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" close", Style::default().fg(MUTED)),
         Span::raw("    "),
         Span::styled("scroll", Style::default().fg(TEXT_BRIGHT)),

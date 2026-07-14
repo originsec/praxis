@@ -16,6 +16,7 @@ use crate::app::intercept::{DisplayRow, InterceptState};
 use crate::ui::chrome;
 use crate::ui::common::{focused_titled_panel, short_id};
 use crate::ui::intercept::{body_lines, search_bar};
+use crate::ui::hits::{HintRegistrar, MouseAction};
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, PROTO_H2, PROTO_WS, STATUS_2XX, STATUS_3XX, STATUS_4XX,
     STATUS_5XX, TEXT, TEXT_BRIGHT, WARN,
@@ -62,13 +63,42 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
     };
     let showing = state.display_rows.len();
     let total = state.total_in_service.max(state.buffer.len());
+    let body_label = state.body_mode.label();
 
-    let groups = [
-        search_bar::pill_spans("node", &node_label),
-        search_bar::pill_spans("agent", &agent_label),
-        search_bar::pill_spans("showing", &format!("{}/{}", showing, total)),
-        search_bar::pill_spans("body", state.body_mode.label()),
+    //
+    // Toggle pills first (clickable), then a plain showing count —
+    // not a pill so it does not look actionable.
+    //
+    let pills: [(&str, &str, MouseAction); 3] = [
+        ("node", &node_label, MouseAction::InterceptCycleNodeFilter),
+        ("agent", &agent_label, MouseAction::InterceptCycleAgentFilter),
+        ("body", body_label, MouseAction::InterceptCycleBodyMode),
     ];
+
+    let search_prefix = search_bar::search_prefix_width(app);
+    let mut reg = HintRegistrar::new(app, area);
+    reg.gap(search_prefix);
+
+    let mut groups: Vec<Vec<Span<'static>>> = Vec::with_capacity(4);
+    for (label, value, action) in pills {
+        reg.gap(4);
+        let pill = search_bar::pill_spans(label, value);
+        let pill_w: u16 = pill.iter().map(|s| s.content.chars().count() as u16).sum();
+        reg.chip(&" ".repeat(pill_w as usize), action);
+        groups.push(pill);
+    }
+
+    //
+    // Showing: dim meta text, not a two-tone button.
+    //
+    groups.push(vec![
+        Span::styled("showing ", Style::default().fg(DIM)),
+        Span::styled(
+            format!("{}/{}", showing, total),
+            Style::default().fg(MUTED),
+        ),
+    ]);
+
     search_bar::render(f, area, app, &groups);
 }
 
@@ -487,47 +517,3 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-pub fn hints(app: &App) -> Line<'static> {
-    use crate::ui::intercept::hints as shared;
-    let key = Style::default().fg(TEXT_BRIGHT);
-    let label = Style::default().fg(MUTED);
-    shared::line_with_tier(vec![
-        Span::styled("n", key),
-        Span::styled(" node", label),
-        Span::raw("    "),
-        Span::styled("a", key),
-        Span::styled(" agent", label),
-        Span::raw("    "),
-        Span::styled("p", key),
-        Span::styled(
-            if app.intercept.paused {
-                " resume"
-            } else {
-                " pause"
-            },
-            label,
-        ),
-        Span::raw("    "),
-        Span::styled("t", key),
-        Span::styled(
-            if app.intercept.follow_tail {
-                " tail"
-            } else {
-                " follow"
-            },
-            label,
-        ),
-        Span::raw("    "),
-        Span::styled("b", key),
-        Span::styled(" body", label),
-        Span::raw("    "),
-        Span::styled("r", key),
-        Span::styled(" refresh", label),
-        Span::raw("    "),
-        Span::styled("m", key),
-        Span::styled(" matches", label),
-        Span::raw("    "),
-        Span::styled("y", key),
-        Span::styled(" copy", label),
-    ])
-}

@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 
 use super::theme::{
     ACCENT, BG, BG_ELEMENT, BORDER, DIM, MUTED, TEXT, TEXT_BRIGHT,
@@ -169,15 +169,15 @@ pub fn tab_sep() -> Span<'static> {
 }
 
 //
-// Standard modal/popup chrome. Clears `area`, paints the menu-tinted
-// background, renders a bold title on the top row with an optional
+// Standard modal/popup chrome. Clears `area`, paints the elevated
+// BG_ELEMENT fill, renders a bold title on the top row with an optional
 // dismiss hint right-aligned, draws a slim divider below, and returns
 // the body rect for the caller to draw into.
 //
 // All modal-style overlays (settings forms, popups, sessions list,
-// confirm dialogs) should use this so they share the same chrome —
-// keep titles plain (no leading symbol) and let the bold weight do
-// the work.
+// confirm dialogs, chain builder props) should use this so they share
+// the same chrome — keep titles plain (no leading symbol) and let the
+// bold weight + fill elevation do the work. No accent border.
 //
 
 pub fn modal_panel(f: &mut Frame, area: Rect, title: &str, esc_hint: &str) -> Rect {
@@ -188,7 +188,6 @@ pub fn modal_panel(f: &mut Frame, area: Rect, title: &str, esc_hint: &str) -> Re
 // Geometry-only counterpart of `modal_panel` — the body rect where
 // content is painted after the title + divider. Hit registration uses
 // this so mouse targets match paint without re-deriving the layout.
-// Outer `area` is the bordered popup; content sits inside the border.
 //
 pub fn modal_content_rect(area: Rect) -> Rect {
     let inner = Rect {
@@ -213,16 +212,15 @@ pub fn modal_content_rect(area: Rect) -> Rect {
 
 pub fn modal_panel_line(f: &mut Frame, area: Rect, title: Line<'static>, esc_hint: &str) -> Rect {
     //
-    // Elevated panel over the page: clear the footprint, fill with
-    // BG_ELEMENT (one step lighter than canvas/menu greys), and draw an
-    // accent border so the modal does not blend into the chain builder.
+    // Elevated panel over the page: clear the footprint and fill with
+    // BG_ELEMENT (one step lighter than canvas greys). No border box —
+    // fill + title weight separate the modal from the page.
     //
     f.render_widget(Clear, area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(ACCENT))
-        .style(Style::default().bg(BG_ELEMENT));
-    f.render_widget(block, area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(BG_ELEMENT)),
+        area,
+    );
 
     let inner = Rect {
         x: area.x + 2,

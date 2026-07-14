@@ -14,7 +14,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use crate::app::App;
 use crate::app::intercept::{InterceptState, SummaryStatus};
 use crate::ui::common::focused_titled_panel;
-use crate::ui::intercept::{body_lines, hints as shared_hints, search_bar};
+use crate::ui::intercept::{body_lines, search_bar};
 use crate::ui::theme::{
     ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
@@ -324,26 +324,3 @@ fn truncate_first_line(s: &str, max: usize) -> String {
     truncate(s.lines().next().unwrap_or(s), max)
 }
 
-pub fn hints(_app: &App) -> Line<'static> {
-    let key = Style::default().fg(TEXT_BRIGHT);
-    let label = Style::default().fg(MUTED);
-    shared_hints::line_with_tier(vec![
-        Span::styled("f", key),
-        Span::styled(" rule", label),
-        Span::raw("    "),
-        Span::styled("o", key),
-        Span::styled(" traffic", label),
-        Span::raw("    "),
-        Span::styled("^n", key),
-        Span::styled(" new rule", label),
-        Span::raw("    "),
-        Span::styled("b", key),
-        Span::styled(" body", label),
-        Span::raw("    "),
-        Span::styled("r", key),
-        Span::styled(" refresh", label),
-        Span::raw("    "),
-        Span::styled("y", key),
-        Span::styled(" copy", label),
-    ])
-}

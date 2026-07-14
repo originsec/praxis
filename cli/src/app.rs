@@ -1024,7 +1024,7 @@ impl App {
     async fn handle_key(&mut self, key: KeyEvent) {
         //
         // Terminal mode intercepts all keys except ^q when Nodes window active.
-        // From other windows, ^t switches back to the open terminal.
+        // ^y toggles the terminal closed from inside the PTY view.
         //
         if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
@@ -1161,7 +1161,12 @@ impl App {
                     self.refresh_operations();
                     return;
                 }
-                KeyCode::Char('i') => {
+                //
+                // ^t opens Intercept. Avoid ^i: in classic terminals (and
+                // often under tmux) Ctrl+I is indistinguishable from Tab
+                // (ASCII 0x09), so the binding never fires.
+                //
+                KeyCode::Char('t') => {
                     self.active_window = Window::Intercept;
                     self.enter_intercept().await;
                     return;

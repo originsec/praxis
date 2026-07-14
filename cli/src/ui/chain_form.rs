@@ -345,8 +345,8 @@ fn render_canvas(f: &mut Frame, area: Rect, form: &ChainForm, hit: &mut ChainFor
     hit.canvas = HitRect::new(inner.x, inner.y, inner.width, inner.height);
 
     //
-    // Canvas fill is BG_PANEL so elevated modals (BG_ELEMENT + border)
-    // read as a distinct layer above the graph.
+    // Canvas fill is BG_PANEL so elevated modals (BG_ELEMENT) read as a
+    // distinct layer above the graph.
     //
     let bg_style = Style::default().bg(BG_PANEL);
     let buf = f.buffer_mut();

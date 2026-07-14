@@ -11,11 +11,31 @@ use ratatui::widgets::Paragraph;
 use crate::app::intercept::InterceptTab;
 use crate::app::App;
 use crate::ui::chrome;
-use crate::ui::theme::{ACCENT, DIM, MUTED, TEXT_BRIGHT};
+use crate::ui::theme::{ACCENT, DIM, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App, extra_groups: &[Vec<Span<'static>>]) {
+    let mut spans = vec![
+        Span::styled("/", Style::default().fg(TEXT_BRIGHT)),
+        Span::raw(" "),
+        search_content_span(app),
+    ];
+
+    for group in extra_groups {
+        spans.push(Span::raw("    "));
+        spans.extend(group.iter().cloned());
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Columns occupied by the leading `/ ` + search field (before extra groups).
+pub fn search_prefix_width(app: &App) -> u16 {
+    2 + search_content_span(app).content.chars().count() as u16
+}
+
+fn search_content_span(app: &App) -> Span<'static> {
     let state = &app.intercept;
-    let search_span = if state.search_focused {
+    if state.search_focused {
         if state.search_input.is_empty() {
             Span::styled("\u{2588}", Style::default().fg(ACCENT))
         } else {
@@ -33,26 +53,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, extra_groups: &[Vec<Span<'st
         Span::styled(hint, Style::default().fg(DIM).add_modifier(Modifier::ITALIC))
     } else {
         Span::styled(state.search_input.clone(), Style::default().fg(ACCENT))
-    };
-
-    let mut spans = vec![
-        Span::styled("/", Style::default().fg(TEXT_BRIGHT)),
-        Span::raw(" "),
-        search_span,
-    ];
-
-    for group in extra_groups {
-        spans.push(Span::raw("    "));
-        spans.extend(group.iter().cloned());
     }
-
-    if !state.search_input.is_empty() && !state.search_focused {
-        spans.push(Span::raw("    "));
-        spans.push(Span::styled("esc", Style::default().fg(MUTED)));
-        spans.push(Span::styled(" clear", Style::default().fg(DIM)));
-    }
-
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 pub fn pill_spans(label: &str, value: &str) -> Vec<Span<'static>> {

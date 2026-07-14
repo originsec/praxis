@@ -119,7 +119,7 @@ For more complex workflows, you can chain multiple operations together. See [Sem
 ## Step 7: Enable Interception (Optional)
 
 To see the traffic between the agent and its LLM backend, open the
-**Intercept** window (`Ctrl+I`):
+**Intercept** window (`Ctrl+T`):
 
 1. Select your node
 2. Choose a method:
