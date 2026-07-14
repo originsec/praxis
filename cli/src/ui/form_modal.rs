@@ -216,10 +216,10 @@ pub fn form_footer_hints(show_newline: bool) -> Line<'static> {
         Span::styled("space/\u{2190}\u{2192}", key),
         Span::styled(" toggle", label),
         Span::raw("    "),
-        Span::styled("^s", key),
+        Span::styled(crate::keymap::action::SAVE, key),
         Span::styled(" save", label),
         Span::raw("    "),
-        Span::styled("esc", key),
+        Span::styled(crate::keymap::action::ESC, key),
         Span::styled(" cancel", label),
     ];
     if show_newline {
@@ -244,7 +244,7 @@ pub fn register_form_footer_hits(app: &App, hints: Rect, save: MouseAction, canc
     reg.gap(4);
     reg.gap(16); // "space/←→ toggle"
     reg.gap(4);
-    reg.chip("^s", save.clone());
+    reg.chip(crate::keymap::action::SAVE, save.clone());
     reg.chip(" save", save);
     reg.gap(4);
     reg.chip("esc", cancel.clone());

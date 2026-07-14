@@ -136,7 +136,7 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
         Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" resume", Style::default().fg(MUTED)),
         Span::raw("    "),
-        Span::styled("d", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled("^d", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" / ", Style::default().fg(DIM)),
         Span::styled("del", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" discard", Style::default().fg(MUTED)),

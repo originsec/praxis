@@ -34,7 +34,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Length(1), // tabs
         Constraint::Length(1), // divider
         Constraint::Min(1),    // content
-        Constraint::Length(1), // status
+        Constraint::Length(1), // hints / status
     ])
     .split(area);
 
@@ -92,7 +92,31 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(msg.as_str(), style),
         ]);
         f.render_widget(Paragraph::new(line), chunks[3]);
+    } else if state.model_form.is_none() && !state.dropdown_open {
+        render_settings_hints(f, chunks[3], state);
     }
+}
+
+fn render_settings_hints(f: &mut Frame, area: Rect, state: &SettingsState) {
+    use crate::keymap::action;
+    use crate::ui::hint_row::{self, HintItem};
+
+    let mut items = vec![
+        HintItem::new(action::ARROWS, "select"),
+        HintItem::new(action::ENTER, "edit"),
+        HintItem::new(action::TAB, "switch"),
+    ];
+    match state.tab {
+        SettingsTab::Llm => {
+            items.push(HintItem::new(action::DELETE, "delete model"));
+        }
+        SettingsTab::Agents => {
+            items.push(HintItem::new(action::SPACE, "toggle script"));
+            items.push(HintItem::new(action::DELETE, "delete script"));
+        }
+        _ => {}
+    }
+    hint_row::render(f, area, &items, None);
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &SettingsState) {

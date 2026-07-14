@@ -4,6 +4,7 @@ mod client;
 mod commands;
 mod config;
 mod event;
+mod keymap;
 mod markdown;
 mod output;
 mod session_store;
@@ -462,10 +463,16 @@ async fn run_tui(
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     if keyboard_enhancement {
+        //
+        // DISAMBIGUATE lets Shift/Alt+Enter report as Enter+modifiers
+        // (needed for multi-line prompts). REPORT_EVENT_TYPES pairs with
+        // our KeyEventKind::Press filter so release events are ignored.
+        //
         execute!(
             stdout,
             crossterm::event::PushKeyboardEnhancementFlags(
-                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
             ),
         )?;
     }

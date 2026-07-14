@@ -5,9 +5,88 @@
 // caller later slices on the cursor position.
 //
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 pub(crate) fn insert_char(text: &mut String, cursor: &mut usize, ch: char) {
     text.insert(*cursor, ch);
     *cursor += ch.len_utf8();
+}
+
+pub(crate) fn insert_newline(text: &mut String, cursor: &mut usize) {
+    insert_char(text, cursor, '\n');
+}
+
+//
+// True when the key should insert a newline in free-text prompts
+// (orchestrator / session chat) rather than submit. Shift+Enter is the
+// primary binding; Alt+Enter is a fallback for terminals that do not
+// report modifiers on Enter without Kitty keyboard protocol.
+//
+pub(crate) fn wants_newline(key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Enter => {
+            key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT)
+        }
+        //
+        // Some paste paths and a few terminals deliver a literal newline
+        // as a character event rather than KeyCode::Enter.
+        //
+        KeyCode::Char('\n') => true,
+        _ => false,
+    }
+}
+
+//
+// True when Enter should submit/send (no shift/alt).
+//
+pub(crate) fn wants_submit(key: KeyEvent) -> bool {
+    key.code == KeyCode::Enter
+        && !key.modifiers.contains(KeyModifiers::SHIFT)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+}
+
+//
+// Move the cursor to the previous line, preserving column when possible.
+// Returns false when already on the first line.
+//
+pub(crate) fn move_line_up(text: &str, cursor: &mut usize) -> bool {
+    let pos = (*cursor).min(text.len());
+    let line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    if line_start == 0 {
+        return false;
+    }
+    let col = pos - line_start;
+    let prev_end = line_start - 1; // the '\n'
+    let prev_start = text[..prev_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let prev_len = prev_end - prev_start;
+    *cursor = prev_start + col.min(prev_len);
+    true
+}
+
+//
+// Move the cursor to the next line, preserving column when possible.
+// Returns false when already on the last line.
+//
+pub(crate) fn move_line_down(text: &str, cursor: &mut usize) -> bool {
+    let pos = (*cursor).min(text.len());
+    let line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = text[pos..]
+        .find('\n')
+        .map(|i| pos + i)
+        .unwrap_or(text.len());
+    if line_end >= text.len() {
+        return false;
+    }
+    let col = pos - line_start;
+    let next_start = line_end + 1;
+    let next_end = text[next_start..]
+        .find('\n')
+        .map(|i| next_start + i)
+        .unwrap_or(text.len());
+    let next_len = next_end - next_start;
+    *cursor = next_start + col.min(next_len);
+    true
 }
 
 pub(crate) fn backspace(text: &mut String, cursor: &mut usize) -> bool {

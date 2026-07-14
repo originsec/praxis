@@ -297,7 +297,7 @@ impl Default for NodesState {
         Self {
             nodes: Vec::new(),
             selected: 0,
-            split_percent: 55,
+            split_percent: crate::ui::list_detail::DEFAULT_SPLIT_PERCENT,
             split_percent_user_set: false,
             dragging: false,
             sessions: HashMap::new(),
@@ -1474,11 +1474,24 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                if !recon.filter.is_empty() {
-                    recon.filter.clear();
-                    Self::recon_select_first_visible(recon);
-                } else {
-                    self.close_recon();
+                //
+                // Esc ladder: unfocus filter → clear filter → leave detail
+                // → close overlay.
+                //
+                use crate::keymap::{resolve_esc, EscOutcome};
+                match resolve_esc(
+                    recon.filter_focused,
+                    !recon.filter.is_empty(),
+                    recon.right_pane_focused,
+                    true,
+                ) {
+                    EscOutcome::UnfocusFilter => recon.filter_focused = false,
+                    EscOutcome::ClearFilter => {
+                        recon.filter.clear();
+                        Self::recon_select_first_visible(recon);
+                    }
+                    EscOutcome::UnfocusDetail => recon.right_pane_focused = false,
+                    EscOutcome::CloseOverlay | EscOutcome::None => self.close_recon(),
                 }
             }
             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1514,7 +1527,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            KeyCode::Right => {
                 if recon.right_pane_focused {
                     // already on detail
                 } else if let Some(ref id) = recon.selected.clone() {
@@ -1533,7 +1546,7 @@ impl App {
                     recon.right_pane_focused = true;
                 }
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Left => {
                 if recon.right_pane_focused {
                     recon.right_pane_focused = false;
                 } else if let Some(ref id) = recon.selected.clone() {
@@ -1544,7 +1557,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 if recon.right_pane_focused {
                     if recon.selected_right_scroll > 0 {
                         recon.selected_right_scroll -= 1;
@@ -1568,7 +1581,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 if recon.right_pane_focused {
                     let max = recon.right_pane_max_scroll.get();
                     recon.selected_right_scroll =
@@ -1615,10 +1628,14 @@ impl App {
                 recon.selected_right_scroll =
                     recon.selected_right_scroll.saturating_add(10).min(max);
             }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //
+            // Bare r = refresh (view reload). ^u = semantic discover.
+            // ^e = edit config. Avoid ^d here — that is delete elsewhere.
+            //
+            KeyCode::Char('r') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.trigger_recon_refresh(false).await;
             }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.trigger_recon_refresh(true).await;
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -32,15 +32,15 @@ Three tabs:
 | Key | Action |
 |-----|--------|
 | `Tab` / `1` `2` `3` | Switch tab |
-| `↑` / `↓` or `j` / `k` | Move among visible tree rows |
-| `←` / `→` or `h` / `l` | Collapse / expand (or focus detail) |
+| `↑` / `↓` | Move among visible tree rows |
+| `←` / `→` | Collapse / expand (or focus detail) |
 | `Space` / `Enter` | Toggle expand on branches; open leaf detail |
 | `/` | Focus filter bar (type to filter; `Esc` blurs) |
 | `PgUp` / `PgDn` | Scroll detail pane |
-| `Ctrl+R` | Refresh (static recon) |
-| `Ctrl+D` | Discover (semantic recon) |
+| `r` | Refresh (static recon) |
+| `Ctrl+U` | Discover (semantic recon) |
 | `Ctrl+E` | Edit selected Config file in `$EDITOR` |
-| `Esc` | Clear filter, or close overlay if filter empty |
+| `Esc` | Unfocus filter → clear filter → leave detail → close |
 | `Ctrl+Q` | Close overlay |
 
 **Mouse:** click chevrons to expand/collapse; click a row to select (second
@@ -57,8 +57,10 @@ displayed instantly on re-open.
 - **Tools:** `MCP Servers` → server → tools; peer sections for `Skills`
   and `Internal`. Servers show transport, tool count, and a status badge
   (`[ok]` / `[empty]`).
-- **Config:** groups by `config_type`; expand a group to pick a file and
-  view contents (fetched on select).
+- **Config:** groups by `config_type` (path suffixes like
+  `project_instructions: /home/...` collapse under a single
+  `project_instructions` node); expand a group to pick a file and view
+  contents (fetched on select).
 - **Sessions:** groups by project `context_path`; session rows show
   message count and relative time (`2h ago`).
 

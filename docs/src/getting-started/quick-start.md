@@ -48,8 +48,8 @@ Sessions. Press `r` to refresh static recon.
 
 ### Semantic Recon
 
-For deeper discovery, press `d` to run semantic recon (requires an LLM
-configured for "Semantic Parser"). This uses the LLM to parse
+For deeper discovery, press `Ctrl+U` to run semantic recon (requires an
+LLM configured for "Semantic Parser"). This uses the LLM to parse
 configuration files and extract tool definitions that might not be
 obvious from static analysis. It also creates sessions and communicates
 directly with the agent to discover its full capabilities, so it takes

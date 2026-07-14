@@ -99,7 +99,21 @@ pub struct LogQueryState {
     pub schema_expanded: Option<usize>,
     pub schema_selected: usize,
     pub schema_scroll: u16,
+
+    //
+    // Resizable panes: editor height (rows) and results list percentage
+    // when a row is expanded into list|detail.
+    //
+    pub editor_height: u16,
+    pub editor_dragging: bool,
+    pub results_split_percent: u16,
+    pub results_dragging: bool,
 }
+
+/// Default / clamp range for the log-query editor pane height.
+pub const EDITOR_HEIGHT_DEFAULT: u16 = 9;
+pub const EDITOR_HEIGHT_MIN: u16 = 4;
+pub const EDITOR_HEIGHT_MAX: u16 = 20;
 
 impl Default for LogQueryState {
     fn default() -> Self {
@@ -128,6 +142,10 @@ impl Default for LogQueryState {
             schema_expanded: None,
             schema_selected: 0,
             schema_scroll: 0,
+            editor_height: EDITOR_HEIGHT_DEFAULT,
+            editor_dragging: false,
+            results_split_percent: 60,
+            results_dragging: false,
         }
     }
 }

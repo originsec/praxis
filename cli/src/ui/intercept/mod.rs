@@ -32,10 +32,9 @@ pub fn show_banner(app: &App) -> bool {
         && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty())
 }
 
-/// Footer row is only used for transient error/status banners — no
-/// keyboard-hint strip.
-pub fn show_footer(app: &App) -> bool {
-    app.intercept.last_error.is_some() || app.intercept.status_message.is_some()
+/// Footer is always on: action hints, or a transient error/status banner.
+pub fn show_footer(_app: &App) -> bool {
+    true
 }
 
 /// Chrome layout below the window header — shared by render and mouse hit-tests.
@@ -178,10 +177,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
 fn register_traffic_hits(app: &App, body: Rect) {
     let panes = filter_split(body, app.intercept.log_split_percent);
-    app.hits_register(
-        split_border_rect(panes.left),
-        MouseAction::InterceptLogSplitDragStart,
-    );
+    //
+    // Pane hits first; split border last so drag wins hit-test on the
+    // divider (last registered = top-most).
+    //
     app.hits_register(panes.right, MouseAction::InterceptLogDetailFocus);
     app.hits_register(
         panes.left,
@@ -191,14 +190,14 @@ fn register_traffic_hits(app: &App, body: Rect) {
             data_start: table_data_start_titled(panes.left),
         }),
     );
+    app.hits_register(
+        split_border_rect(panes.left),
+        MouseAction::InterceptLogSplitDragStart,
+    );
 }
 
 fn register_matches_hits(app: &App, body: Rect) {
     let panes = filter_split(body, app.intercept.match_split_percent);
-    app.hits_register(
-        split_border_rect(panes.left),
-        MouseAction::InterceptMatchSplitDragStart,
-    );
     app.hits_register(panes.right, MouseAction::InterceptMatchDetailFocus);
     app.hits_register(
         panes.left,
@@ -207,6 +206,10 @@ fn register_matches_hits(app: &App, body: Rect) {
             table_area: panes.left,
             data_start: table_data_start_titled(panes.left),
         }),
+    );
+    app.hits_register(
+        split_border_rect(panes.left),
+        MouseAction::InterceptMatchSplitDragStart,
     );
 }
 
@@ -372,5 +375,42 @@ fn render_status_footer(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(msg.clone(), Style::default().fg(OK)),
         ]);
         f.render_widget(Paragraph::new(line), area);
+        return;
     }
+
+    render_action_hints(f, area, app);
+}
+
+fn render_action_hints(f: &mut Frame, area: Rect, app: &App) {
+    use crate::keymap::action;
+    use crate::ui::hint_row::{self, HintItem};
+
+    let items: Vec<HintItem> = match app.intercept.tab {
+        InterceptTab::Traffic => vec![
+            HintItem::new(action::ENTER, "detail"),
+            HintItem::new("p", "pause"),
+            HintItem::new("t", "tail"),
+            HintItem::new(action::REFRESH, "refresh"),
+            HintItem::new("y", "copy"),
+            HintItem::new("b", "body"),
+            HintItem::new(action::CLEAR_ALL, "clear"),
+        ],
+        InterceptTab::Rules => vec![
+            HintItem::new(action::NEW, "new"),
+            HintItem::new(action::EDIT, "edit"),
+            HintItem::new(action::DELETE, "delete"),
+            HintItem::new(action::SPACE, "toggle"),
+            HintItem::new(action::REFRESH, "refresh"),
+            HintItem::new(action::ENTER, "matches"),
+        ],
+        InterceptTab::Matches => vec![
+            HintItem::new(action::ENTER, "detail"),
+            HintItem::new("f", "rule filter"),
+            HintItem::new(action::REFRESH, "refresh"),
+            HintItem::new("y", "copy"),
+            HintItem::new("b", "body"),
+            HintItem::new(action::NEW, "rule from match"),
+        ],
+    };
+    hint_row::render(f, area, &items, None);
 }

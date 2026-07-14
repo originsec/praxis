@@ -6,7 +6,7 @@
 //
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
@@ -28,10 +28,9 @@ const COL_SAMPLE_ROWS: usize = 200;
 
 pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     if state.row_expanded && !state.rows.is_empty() {
-        let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(area);
-        render_table(f, cols[0], state);
-        detail::render(f, cols[1], state);
+        let panes = crate::ui::list_detail::layout(area, state.results_split_percent);
+        render_table(f, panes.list, state);
+        detail::render(f, panes.detail, state);
     } else {
         render_table(f, area, state);
     }
@@ -59,7 +58,7 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
         let hint = if state.is_running {
             "Running…"
         } else {
-            "Write a query above and press Ctrl+R to see results."
+            "Write a query above and press ^r to see results."
         };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(MUTED)))),

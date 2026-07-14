@@ -6,7 +6,7 @@ mod triggers;
 use crate::app::{App, OperationsState, OpsTab};
 use crate::ui::chrome;
 use crate::ui::common::table_data_start_margin_header;
-use crate::ui::hits::{split_border_rect, HintRegistrar, MouseAction, OpsHintAction, RowSelect, RowSelectKind};
+use crate::ui::hits::{HintRegistrar, MouseAction, OpsHintAction, RowSelect, RowSelectKind};
 use crate::ui::theme::{ACCENT, BORDER_SUBTLE, DIM, MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -24,6 +24,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
         Constraint::Length(1), // divider
+        Constraint::Length(1), // filter
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
@@ -31,11 +32,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     render_tabs(f, chunks[0], app, state);
     render_divider(f, chunks[1]);
+    render_filter_row(f, chunks[2], state);
 
     match state.tab {
-        OpsTab::Library => library::render_library(f, chunks[2], state),
-        OpsTab::Executions => executions::render_executions(f, chunks[2], state),
-        OpsTab::Triggers => triggers::render_triggers(f, chunks[2], state),
+        OpsTab::Library => library::render_library(f, chunks[3], state),
+        OpsTab::Executions => executions::render_executions(f, chunks[3], state),
+        OpsTab::Triggers => triggers::render_triggers(f, chunks[3], state),
     }
 
     //
@@ -44,9 +46,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     // backdrop inert like settings).
     //
     if app.new_op_form.is_none() {
-        register_content_hits(app, chunks[2], state);
+        register_content_hits(app, chunks[3], state);
     }
-    render_hints(f, chunks[3], app, state);
+    render_hints(f, chunks[4], app, state);
+}
+
+fn render_filter_row(f: &mut Frame, area: Rect, state: &OperationsState) {
+    use crate::ui::filter_bar::{self, FilterBarModel};
+    filter_bar::render(
+        f,
+        area,
+        &FilterBarModel {
+            focused: state.filter_focused,
+            query: &state.filter,
+            placeholder: "filter",
+            extra_pills: Vec::new(),
+            meta: None,
+        },
+    );
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
@@ -253,29 +270,14 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
 }
 
 fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
-    let pct = state.split_percent.clamp(20, 80);
-    let split = Layout::horizontal([
-        Constraint::Percentage(pct),
-        Constraint::Percentage(100 - pct),
-    ])
-    .split(main_area);
-    let list_area = split[0];
-    let detail_area = split[1];
+    let panes = crate::ui::list_detail::layout(main_area, state.split_percent);
+    let list_area = panes.list;
+    let detail_area = panes.detail;
     let detail_inner = Rect::new(
         detail_area.x.saturating_add(1),
         detail_area.y.saturating_add(1),
         detail_area.width.saturating_sub(2),
         detail_area.height.saturating_sub(2),
-    );
-
-    let border_rect = Rect {
-        height: main_area.height,
-        y: main_area.y,
-        ..list_area
-    };
-    app.hits_register(
-        split_border_rect(border_rect),
-        MouseAction::OpsSplitDragStart,
     );
 
     let row_kind = match state.tab {
@@ -298,18 +300,20 @@ fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
             MouseAction::OpsExecDetail { inner: detail_inner },
         );
     }
+    //
+    // Split border last so drag wins hit-test on the divider.
+    //
+    app.hits_register(panes.border, MouseAction::OpsSplitDragStart);
 }
 
 fn append_filter_hint(spans: &mut Vec<Span<'static>>, state: &OperationsState) {
+    //
+    // Filter chrome lives in the dedicated filter row; only show active
+    // query status here when focused or non-empty.
+    //
     if state.filter_focused {
-        spans.push(Span::styled("/", Style::default().fg(ACCENT)));
         spans.push(Span::styled(
-            state.filter.clone(),
-            Style::default().fg(ACCENT),
-        ));
-        spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
-        spans.push(Span::styled(
-            "    \u{21B5} apply  esc dismiss",
+            "typing filter\u{2026}  \u{21B5} apply  esc dismiss",
             Style::default().fg(DIM),
         ));
     } else if !state.filter.is_empty() {
@@ -319,12 +323,5 @@ fn append_filter_hint(spans: &mut Vec<Span<'static>>, state: &OperationsState) {
             Style::default().fg(ACCENT),
         ));
         spans.push(Span::styled("    esc clear", Style::default().fg(DIM)));
-    } else {
-        spans.push(Span::styled(
-            "/ to filter",
-            Style::default()
-                .fg(DIM)
-                .add_modifier(ratatui::style::Modifier::ITALIC),
-        ));
     }
 }

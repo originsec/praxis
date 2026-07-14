@@ -1,6 +1,6 @@
 # Log Query
 
-The Log Query feature provides a KQL-like query interface for exploring and correlating data across Praxis virtual tables (captured traffic, events, recon results, nodes, agents, operation history, etc). The syntax is inspired by Kusto Query Language but only a subset of KQL is implemented — not all features or functions from the full Kusto specification will work. Write queries in the code editor, execute them with Ctrl+Enter, and browse paginated results.
+The Log Query feature provides a KQL-like query interface for exploring and correlating data across Praxis virtual tables (captured traffic, events, recon results, nodes, agents, operation history, etc). The syntax is inspired by Kusto Query Language but only a subset of KQL is implemented — not all features or functions from the full Kusto specification will work. Write queries in the code editor, execute them with **Ctrl+R** (Ctrl+Enter is kept as an alias), and browse paginated results.
 
 ## Available Tables
 

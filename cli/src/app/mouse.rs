@@ -5,8 +5,9 @@ use ratatui::layout::Rect;
 use crate::app::{
     log_query::LogQueryFocus, AddRemoteNodeForm, App, ConfirmAction, ConfirmKind, OpsTab, Window,
 };
-use crate::ui::common::{drag_split_percent, table_row_at};
+use crate::ui::common::{drag_split_percent, drag_top_height, table_row_at};
 use crate::ui::hits::{MouseAction, NodesHintAction, OpsHintAction, RowSelectKind};
+use crate::app::log_query::{EDITOR_HEIGHT_MAX, EDITOR_HEIGHT_MIN};
 
 impl App {
     fn is_overlay_action(action: &MouseAction) -> bool {
@@ -187,6 +188,15 @@ impl App {
             }
             MouseAction::OpsHint(hint) => self.dispatch_ops_hint(hint).await,
 
+            MouseAction::LogQueryEditorSplitDragStart => {
+                self.log_query.editor_dragging = true;
+                true
+            }
+            MouseAction::LogQueryResultsSplitDragStart => {
+                self.log_query.results_dragging = true;
+                true
+            }
+
             MouseAction::NodesDetailFocus => {
                 self.nodes.detail_focus = true;
                 true
@@ -242,6 +252,10 @@ impl App {
             }
             MouseAction::OrchestratorSaveSession => {
                 self.open_save_session();
+                true
+            }
+            MouseAction::OrchestratorPlanSplitDragStart => {
+                self.orchestrator.plan_dragging = true;
                 true
             }
             MouseAction::OrchestratorInputCursor { text_start } => {
@@ -433,33 +447,24 @@ impl App {
                     use ratatui::layout::{Constraint, Layout};
                     let outer =
                         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
-                    let node_chunks = if self.nodes.split_percent_user_set {
-                        Layout::horizontal([
-                            Constraint::Percentage(self.nodes.split_percent),
-                            Constraint::Percentage(100 - self.nodes.split_percent),
-                        ])
-                        .split(outer[0])
-                    } else {
-                        Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(outer[0])
-                    };
-                    let list_area = node_chunks[0];
-                    let detail_area = node_chunks[1];
+                    let panes = crate::ui::list_detail::layout(outer[0], self.nodes.split_percent);
                     self.nodes.split_percent = drag_split_percent(
-                        list_area.x,
-                        list_area.width.saturating_add(detail_area.width),
+                        panes.list.x,
+                        panes.list.width.saturating_add(panes.detail.width),
                         mouse.column,
                     );
                     self.nodes.split_percent_user_set = true;
                 } else if self.operations.dragging {
                     use ratatui::layout::{Constraint, Layout};
                     let ops_chunks = Layout::vertical([
-                        Constraint::Length(1),
-                        Constraint::Length(1),
-                        Constraint::Min(1),
-                        Constraint::Length(1),
+                        Constraint::Length(1), // tabs
+                        Constraint::Length(1), // divider
+                        Constraint::Length(1), // filter
+                        Constraint::Min(1),    // content
+                        Constraint::Length(1), // hints
                     ])
                     .split(content_area);
-                    let main_area = ops_chunks[2];
+                    let main_area = ops_chunks[3];
                     self.operations.split_percent = drag_split_percent(
                         main_area.x,
                         main_area.width,
@@ -479,6 +484,62 @@ impl App {
                             mouse.column,
                         );
                     }
+                } else if self.orchestrator.plan_dragging {
+                    //
+                    // Conversation | plan: same chrome as the render path
+                    // (tabs may take a row; main area is chunks[1]).
+                    //
+                    use ratatui::layout::{Constraint, Layout};
+                    let show_tabs = self.orchestrator.sessions.len() > 1;
+                    let tab_h = if show_tabs { 1u16 } else { 0 };
+                    let input_lines = crate::ui::orchestrator::input_content_rows(&self.orchestrator)
+                        .min(12);
+                    let input_h = (input_lines + 2).max(3);
+                    let chunks = Layout::vertical([
+                        Constraint::Length(tab_h),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                        Constraint::Length(input_h),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                    ])
+                    .split(content_area);
+                    let main = chunks[1];
+                    self.orchestrator.plan_split_percent =
+                        drag_split_percent(main.x, main.width, mouse.column);
+                } else if self.log_query.editor_dragging {
+                    //
+                    // Vertical drag: editor height from content top.
+                    // Leave room for results (min ~4) + hints (1).
+                    //
+                    let max_h = content_area
+                        .height
+                        .saturating_sub(5)
+                        .min(EDITOR_HEIGHT_MAX)
+                        .max(EDITOR_HEIGHT_MIN);
+                    self.log_query.editor_height = drag_top_height(
+                        content_area.y,
+                        mouse.row,
+                        EDITOR_HEIGHT_MIN,
+                        max_h,
+                    );
+                } else if self.log_query.results_dragging {
+                    use ratatui::layout::{Constraint, Layout};
+                    let show_error = self.log_query.last_error.is_some();
+                    let editor_h = self
+                        .log_query
+                        .editor_height
+                        .clamp(EDITOR_HEIGHT_MIN, EDITOR_HEIGHT_MAX);
+                    let chunks = Layout::vertical([
+                        Constraint::Length(editor_h),
+                        Constraint::Length(if show_error { 1 } else { 0 }),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                    ])
+                    .split(content_area);
+                    let results = chunks[2];
+                    self.log_query.results_split_percent =
+                        drag_split_percent(results.x, results.width, mouse.column);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -486,6 +547,9 @@ impl App {
                 self.intercept.match_dragging = false;
                 self.nodes.dragging = false;
                 self.operations.dragging = false;
+                self.log_query.editor_dragging = false;
+                self.log_query.results_dragging = false;
+                self.orchestrator.plan_dragging = false;
                 if let Some(recon) = self.nodes.recon.as_mut() {
                     recon.recon_dragging = false;
                 }

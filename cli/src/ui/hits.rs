@@ -53,12 +53,17 @@ pub enum MouseAction {
 
     LogQueryFocus(LogQueryFocus),
     LogQuerySchemaDismiss,
+    /// Drag the horizontal divider between editor and results.
+    LogQueryEditorSplitDragStart,
+    /// Drag the vertical divider between results table and row detail.
+    LogQueryResultsSplitDragStart,
 
     OrchestratorTab(usize),
     OrchestratorModelSelect,
     OrchestratorToolsCycle,
     OrchestratorSaveSession,
     OrchestratorInputCursor { text_start: u16 },
+    OrchestratorPlanSplitDragStart,
 
     // Confirm / popups
     ConfirmYes,
@@ -169,7 +174,6 @@ pub enum OpsHintAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionHintAction {
-    Send,
     Pause,
     Close,
 }
@@ -306,7 +310,7 @@ impl<'a> HintRegistrar<'a> {
     }
 }
 
-/// 3-column tolerance rect on the right edge of `left` for split-pane drags.
+/// 3-column tolerance rect on the right edge of `left` for horizontal split-pane drags.
 pub fn split_border_rect(left: Rect) -> Rect {
     let border_x = left.x.saturating_add(left.width);
     Rect::new(
@@ -315,4 +319,9 @@ pub fn split_border_rect(left: Rect) -> Rect {
         3,
         left.height,
     )
+}
+
+/// 3-row tolerance strip on the bottom edge of `top` for vertical splits.
+pub fn split_border_rect_horizontal(top: Rect) -> Rect {
+    crate::ui::common::split_border_rect_horizontal(top)
 }

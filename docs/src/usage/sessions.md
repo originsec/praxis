@@ -103,7 +103,7 @@ The TUI tracks messages per session:
 
 ## Ending a Session
 
-Press Ctrl+C in a chat view (when idle) or `d` on the Active Sessions
+Press Ctrl+C in a chat view (when idle) or `Ctrl+D` on the Active Sessions
 overlay to terminate. This sends `session/close` to the node, which
 drops the per-session Lua VM and any owned subprocess. Only the targeted
 session is affected — any other live sessions on the same connector keep
@@ -153,7 +153,7 @@ lists every live session with node, agent, session id preview, status
 (`idle` / `working`), and how long ago it was created.
 
 - `Enter` resumes the selected session
-- `d` or `Del` discards (sends `session/cancel` if the session is
+- `Ctrl+D` or `Del` discards (sends `session/cancel` if the session is
   mid-prompt, then `session/close`)
 - `Esc` or `Ctrl+W` dismisses the overlay
 

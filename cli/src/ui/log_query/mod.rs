@@ -16,20 +16,24 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::log_query::LogQueryFocus;
+use crate::app::log_query::{LogQueryFocus, EDITOR_HEIGHT_MAX, EDITOR_HEIGHT_MIN};
 use crate::app::{App, LogQueryState};
 use crate::ui::common::table_data_start_titled;
-use crate::ui::hits::{MouseAction, RowSelect, RowSelectKind};
-use crate::ui::theme::{ACCENT, MUTED, STATUS_FAIL, TEXT_BRIGHT};
-
-pub const EDITOR_HEIGHT: u16 = 9;
+use crate::ui::hits::{
+    split_border_rect, split_border_rect_horizontal, MouseAction, RowSelect, RowSelectKind,
+};
+use crate::ui::list_detail;
+use crate::ui::theme::STATUS_FAIL;
 
 /// Results table area — left pane when a row is expanded.
-pub fn results_table_area(results_area: ratatui::layout::Rect, row_expanded: bool, has_rows: bool) -> ratatui::layout::Rect {
-    use ratatui::layout::{Constraint, Layout};
+pub fn results_table_area(
+    results_area: Rect,
+    row_expanded: bool,
+    has_rows: bool,
+    split_percent: u16,
+) -> Rect {
     if row_expanded && has_rows {
-        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(results_area)[0]
+        list_detail::layout(results_area, split_percent).list
     } else {
         results_area
     }
@@ -38,9 +42,12 @@ pub fn results_table_area(results_area: ratatui::layout::Rect, row_expanded: boo
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let state = &app.log_query;
     let show_error = state.last_error.is_some();
+    let editor_h = state
+        .editor_height
+        .clamp(EDITOR_HEIGHT_MIN, EDITOR_HEIGHT_MAX);
 
     let chunks = Layout::vertical([
-        Constraint::Length(EDITOR_HEIGHT),                  // editor
+        Constraint::Length(editor_h),                       // editor
         Constraint::Length(if show_error { 1 } else { 0 }), // error banner
         Constraint::Min(1),                                 // results
         Constraint::Length(1),                              // hint line
@@ -75,10 +82,21 @@ fn register_focus_hits(
     results_area: Rect,
     state: &crate::app::LogQueryState,
 ) {
-    app.hits_register(editor_area, MouseAction::LogQueryFocus(LogQueryFocus::Editor));
-    app.hits_register(results_area, MouseAction::LogQueryFocus(LogQueryFocus::Results));
+    app.hits_register(
+        editor_area,
+        MouseAction::LogQueryFocus(LogQueryFocus::Editor),
+    );
+    app.hits_register(
+        results_area,
+        MouseAction::LogQueryFocus(LogQueryFocus::Results),
+    );
 
-    let table_area = results_table_area(results_area, state.row_expanded, !state.rows.is_empty());
+    let table_area = results_table_area(
+        results_area,
+        state.row_expanded,
+        !state.rows.is_empty(),
+        state.results_split_percent,
+    );
     app.hits_register(
         table_area,
         MouseAction::SelectRow(RowSelect {
@@ -87,6 +105,21 @@ fn register_focus_hits(
             data_start: table_data_start_titled(table_area),
         }),
     );
+
+    //
+    // Split borders last so drag wins on the divider strips.
+    //
+    app.hits_register(
+        split_border_rect_horizontal(editor_area),
+        MouseAction::LogQueryEditorSplitDragStart,
+    );
+    if state.row_expanded && !state.rows.is_empty() {
+        let panes = list_detail::layout(results_area, state.results_split_percent);
+        app.hits_register(
+            split_border_rect(panes.list),
+            MouseAction::LogQueryResultsSplitDragStart,
+        );
+    }
 }
 
 fn render_error(f: &mut Frame, area: Rect, state: &LogQueryState) {
@@ -106,89 +139,49 @@ fn render_error(f: &mut Frame, area: Rect, state: &LogQueryState) {
 }
 
 fn render_hints(f: &mut Frame, area: Rect, state: &LogQueryState) {
-    let mut spans: Vec<Span> = Vec::new();
-    let key = Style::default().fg(TEXT_BRIGHT);
-    let label = Style::default().fg(MUTED);
-    let gap = Span::raw("    ");
+    use crate::keymap::action;
+    use crate::ui::hint_row::{self, HintItem};
 
-    match state.focus {
+    let mut items: Vec<HintItem> = match state.focus {
         LogQueryFocus::Editor => {
             if state.autocomplete_open {
-                spans.extend([
-                    Span::styled("\u{2191}\u{2193}", key),
-                    Span::styled(" select", label),
-                    gap.clone(),
-                    Span::styled("\u{21B5}", key),
-                    Span::styled(" accept", label),
-                    gap.clone(),
-                    Span::styled("esc", key),
-                    Span::styled(" dismiss", label),
-                ]);
+                vec![
+                    HintItem::new(action::ARROWS, "select"),
+                    HintItem::new(action::ENTER, "accept"),
+                    HintItem::new(action::ESC, "dismiss"),
+                ]
             } else {
-                spans.extend([
-                    Span::styled("^r", key),
-                    Span::styled(" run", label),
-                    gap.clone(),
-                    Span::styled("tab", key),
-                    Span::styled(" autocomplete", label),
-                    gap.clone(),
-                    Span::styled("?", key),
-                    Span::styled(" schema", label),
-                    gap.clone(),
-                    Span::styled("^j", key),
-                    Span::styled(" results", label),
-                ]);
+                vec![
+                    HintItem::new(action::RUN, "run"),
+                    HintItem::new(action::TAB, "autocomplete"),
+                    HintItem::new("?", "schema"),
+                    HintItem::new(action::ESC, "results"),
+                    HintItem::new("^j", "results"),
+                ]
             }
         }
-        LogQueryFocus::Results => {
-            spans.extend([
-                Span::styled("\u{2191}\u{2193}", key),
-                Span::styled(" row", label),
-                gap.clone(),
-                Span::styled("\u{21B5}", key),
-                Span::styled(" expand", label),
-                gap.clone(),
-                Span::styled("/", key),
-                Span::styled(" filter", label),
-                gap.clone(),
-                Span::styled("s/S", key),
-                Span::styled(" sort", label),
-                gap.clone(),
-                Span::styled("r", key),
-                Span::styled(" rerun", label),
-                gap.clone(),
-                Span::styled("i", key),
-                Span::styled(" editor", label),
-                gap.clone(),
-                Span::styled("?", key),
-                Span::styled(" schema", label),
-            ]);
-        }
-        LogQueryFocus::RowSearch => {
-            spans.extend([
-                Span::styled("filter ", Style::default().fg(MUTED)),
-                Span::styled(
-                    state.search_input.clone(),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("\u{2588}", Style::default().fg(ACCENT)),
-                gap.clone(),
-                Span::styled("\u{21B5}", key),
-                Span::styled(" apply", label),
-                gap.clone(),
-                Span::styled("esc", key),
-                Span::styled(" clear", label),
-            ]);
-        }
-    }
+        LogQueryFocus::Results => vec![
+            HintItem::new(action::ARROWS, "row"),
+            HintItem::new(action::ENTER, "expand"),
+            HintItem::new(action::FILTER, "filter"),
+            HintItem::new("s/S", "sort"),
+            HintItem::new(action::REFRESH, "rerun"),
+            HintItem::new("i", "editor"),
+            HintItem::new("?", "schema"),
+        ],
+        LogQueryFocus::RowSearch => vec![
+            HintItem::new(format!("filter {}", state.search_input), "\u{2588}"),
+            HintItem::new(action::ENTER, "apply"),
+            HintItem::new(action::ESC, "clear"),
+        ],
+    };
 
     if state.is_running {
-        spans.push(gap);
-        spans.push(Span::styled(
-            format!("{} running…", crate::ui::common::spinner_char()),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        items.push(HintItem::new(
+            format!("{} running\u{2026}", crate::ui::common::spinner_char()),
+            "",
         ));
     }
 
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    hint_row::render(f, area, &items, None);
 }

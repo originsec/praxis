@@ -49,6 +49,9 @@ LLM-powered conversation interface for coordinating operations across the Praxis
 - Single orchestrator session per TUI run — the conversation lifetime equals the TUI process lifetime. Use `praxis --continue` or `praxis --resume` on the next launch to bring it back. `Ctrl+Alt+W` exports the transcript to markdown.
 - `Ctrl+C` cancels the in-flight prompt
 - `Ctrl+E` toggles the tools panel; `Ctrl+Alt+E` expands it fully
+- `Shift+Enter` (or `Alt+Enter`) inserts a newline in the prompt; bare
+  `Enter` sends. Multi-line drafts grow the input box; `↑`/`↓` move
+  between lines first, then through command history.
 
 ### Nodes (`Ctrl+L`)
 
@@ -56,13 +59,16 @@ Node and agent management with integrated session chat and terminal access:
 - Node list with status indicators (active/warning/inactive), OS details, and agent counts
 - Agent selection and concurrent ACP session management
 - **Session Chat** — direct conversation with agents, with YOLO mode and working directory selection
-- **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `d` / `Del` to discard, Esc to dismiss
+- **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `Ctrl+D` / `Del` to discard, Esc to dismiss
 - **Terminal** (`Ctrl+Y` to toggle) — full PTY terminal emulation with scrollback
 - **Recon** (`r` with an agent selected in the detail pane) — view reconnaissance results directly in the terminal
 
 Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
 running on the node; resume from the Active Sessions overlay). `Ctrl+C`
 cancels an in-flight prompt, or closes the session if the agent is idle.
+`Shift+Enter` (or `Alt+Enter`) inserts a newline; bare `Enter` sends.
+Multi-line drafts grow the input box; `↑`/`↓` move between lines first,
+then through history.
 The status bar shows `N sessions` whenever any concurrent sessions are
 live. On first connect, whenever you open the Nodes window, and after a
 node reset, the TUI calls `session/list` on each node to pick up
@@ -78,11 +84,14 @@ interface.
 |-----|--------|
 | `Tab` / `1` `2` `3` | Switch tab (Config / Tools / Sessions) |
 | `↑` / `↓` | Navigate left pane list |
+| `←` / `→` | Collapse / expand or focus detail |
 | `PgUp` / `PgDn` | Scroll right pane content |
-| `r` | Trigger static recon refresh |
-| `d` | Trigger semantic recon (Discover) |
+| `/` | Focus filter bar |
+| `r` | Static recon refresh |
+| `Ctrl+U` | Semantic recon (Discover) |
 | `Ctrl+E` | Edit selected Config file in `$EDITOR` (Config tab only) |
-| `Esc` / `q` | Close overlay |
+| `Esc` | Unfocus filter → clear filter → leave detail → close |
+| `Ctrl+Q` | Close overlay |
 
 When opened, the TUI first checks the service cache for existing recon
 data. If none is cached, it sends an ACP `_praxis/recon` request to the
@@ -123,17 +132,18 @@ Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch):
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Focus detail pane (then `↑`/`↓` scrolls detail) |
-| `Esc` | Unfocus detail / clear search |
-| `/` | Focus search box (regex, falls back to substring) |
-| `f` | Cycle protocol filter: all → http → ws → h2 |
-| `n` | Cycle node filter (no popup; `Esc` clears) |
+| `Enter` / `→` | Focus detail pane (then `↑`/`↓` scrolls detail) |
+| `Esc` / `←` | Unfocus detail / clear filter (Esc ladder) |
+| `/` | Focus filter box (regex, falls back to substring) |
+| `Ctrl+Enter` | Server-side traffic search (while filter focused) |
+| `n` | Cycle node filter |
 | `a` | Cycle agent filter |
 | `p` | Pause / resume the live stream |
+| `t` | Toggle follow-tail |
 | `r` | Re-request the initial page from the service |
-| `c` | Clear ALL traffic (with confirmation) |
-| `H` | Cycle body render mode: pretty → raw → hex |
-| `i` | Toggle interception on the selected entry's node |
+| `Ctrl+X` | Clear ALL traffic (with confirmation) |
+| `b` | Cycle body render mode: pretty → raw → hex |
+| `y` | Copy selected URL |
 
 Request and response bodies arrive via a second fetch on selection to
 keep the broadcast payload small — large bodies load within a few
@@ -143,12 +153,14 @@ hundred milliseconds after you navigate to an entry.
 
 | Key | Action |
 |-----|--------|
-| `n` | Create a new rule |
-| `e` | Edit the selected rule |
-| `d` | Delete the selected rule (with confirmation) |
+| `Ctrl+N` | Create a new rule |
+| `Ctrl+E` | Edit the selected rule |
+| `Ctrl+D` | Delete the selected rule (with confirmation) |
+| `Ctrl+U` | Duplicate selected rule |
 | `Space` | Toggle enabled / disabled |
 | `Enter` | Jump to the Matches tab filtered to this rule |
 | `r` | Refresh the rules list |
+| `/` | Filter rules by name/pattern |
 
 The rule form (open via `n` or `e`) fields: Name, Regex, Direction
 (`send` / `receive` / `both`), Scope (`all` / `node` / `agent`), and an
@@ -159,10 +171,14 @@ optional LLM summary prompt. `Tab` moves between fields, `Space` /
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Focus match detail pane |
+| `Enter` / `→` | Focus match detail pane |
 | `f` | Cycle rule filter |
-| `Esc` | Clear rule filter / unfocus detail |
+| `Esc` / `←` | Unfocus detail / clear filters |
 | `r` | Refresh |
+| `/` | Filter matches |
+| `y` | Copy URL |
+| `b` | Cycle body mode |
+| `Ctrl+N` | Create rule from match |
 
 ### Log Query (`Ctrl+G`)
 
@@ -171,8 +187,8 @@ logs, recon results, operations history, and more — 12 virtual tables in
 total). See [Log Query](./log-query.md) for the full query reference.
 
 - Multi-line editor with basic KQL keyword highlighting
-- `Ctrl+Enter` runs the query; the spinner in the hint line indicates
-  in-flight execution
+- `Ctrl+R` runs the query (`Ctrl+Enter` is kept as an alias); the spinner
+  in the hint line indicates in-flight execution
 - `Tab` opens a context-aware autocomplete popup (tables at start of
   query, operators after `|`, columns inside `where` / `project` /
   `sort`, functions & keywords inline). `↑`/`↓` navigate, `Enter`
@@ -180,7 +196,8 @@ total). See [Log Query](./log-query.md) for the full query reference.
 - `?` toggles a schema sidebar listing every available table with its
   columns and descriptions
 - `Esc` from the editor moves focus to the results; `i` from the results
-  moves focus back to the editor
+  moves focus back to the editor (Log Query is the exception to the
+  list/detail focus model — it is editor-first)
 
 Results pane:
 
@@ -188,11 +205,11 @@ Results pane:
 |-----|--------|
 | `↑` `↓` `PgUp` `PgDn` `g` `G` | Row navigation |
 | `Enter` | Expand the selected row into a key/value detail pane (JSON fields pretty-printed) |
-| `/` | Open a row-search filter (substring match across all cells) |
+| `/` | Open a row filter (substring match across all cells) |
 | `s` | Cycle the sort column |
 | `S` | Toggle sort direction |
 | `r` | Re-run the last query |
-| `Esc` | Close expanded row / clear search / return to editor |
+| `Esc` | Close expanded row / clear filter / return to editor |
 
 Response bodies in `TrafficLogs` and JSON columns like
 `ToolkitActionsLog.details_json` auto-pretty-print in the detail pane.
@@ -268,15 +285,34 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 |-----|--------|
 | `Ctrl+O` | Orchestrator window |
 | `Ctrl+L` | Nodes window |
-| `Ctrl+T` | Intercept window |
 | `Ctrl+P` | Operations window |
+| `Ctrl+T` | Intercept window |
+| `Ctrl+G` | Log Query window |
 | `Ctrl+S` | Settings window |
 | `Ctrl+Y` | Toggle terminal mode (Nodes) |
 | `Ctrl+Q` | Quit |
 
+Status bar short labels: `orchestrator · nodes · ops · intercept · logs · settings`.
+
 `Ctrl+W` is window-scoped: in Nodes it toggles the Active Sessions
-overlay (or pauses the current chat session), in Orchestrator it closes
-the active orchestrator session.
+overlay (or pauses the current chat session).
+
+### Keybinding grammar
+
+The TUI uses a consistent two-layer grammar:
+
+| Layer | Keys | Use |
+|-------|------|-----|
+| **Navigate / view** | bare keys, arrows, `Tab`, `/`, `Enter`, `Esc` | Move around lists, filter, soft toggles (pause, body mode, expand) |
+| **Change data / app** | always **Ctrl+** | Create (`^n`), edit (`^e`), delete (`^d`), run (`^r`), save (`^s`), clear-all (`^x`), windows, quit |
+
+Further conventions:
+
+- **`/`** opens a **filter** on list panes (local narrowing). Intercept Traffic also supports **server search** via `Ctrl+Enter` while the filter is focused.
+- **Esc ladder:** leave filter typing → clear filter → unfocus detail → close overlay.
+- **List + detail:** `Enter` / `→` focuses detail; `Esc` / `←` returns to the list (does not toggle).
+- **`r`** refreshes/reloads live data; **`Ctrl+R`** runs/executes (Operations Library, Log Query).
+- **Log Query exception:** `i` / `Esc` move between editor and results (editor-first window).
 
 ## Non-Interactive Mode
 

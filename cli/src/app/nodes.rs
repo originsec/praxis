@@ -763,7 +763,12 @@ impl App {
                     self.resume_session(&id);
                 }
             }
-            KeyCode::Char('d') | KeyCode::Delete => {
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(id) = self.selected_list_session_id() {
+                    self.discard_session(&id);
+                }
+            }
+            KeyCode::Delete => {
                 if let Some(id) = self.selected_list_session_id() {
                     self.discard_session(&id);
                 }
@@ -1112,6 +1117,19 @@ impl App {
             }
         }
 
+        //
+        // Shift+Enter / Alt+Enter insert a newline (same as orchestrator).
+        // Bare Enter still sends.
+        //
+        if input::wants_newline(key) {
+            if let Some(session) = self.nodes.active_session_mut() {
+                if session.session_id.is_some() && !session.is_waiting {
+                    input::insert_newline(&mut session.input, &mut session.cursor_pos);
+                }
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 //
@@ -1121,7 +1139,7 @@ impl App {
 
                 self.pause_active_session();
             }
-            KeyCode::Enter => {
+            KeyCode::Enter if input::wants_submit(key) => {
                 self.send_session_message();
             }
             KeyCode::Char(c) => {
@@ -1168,24 +1186,28 @@ impl App {
             }
             KeyCode::Up => {
                 if let Some(session) = self.nodes.active_session_mut() {
-                    input::history_up(
-                        &mut session.input,
-                        &mut session.cursor_pos,
-                        &session.history,
-                        &mut session.history_index,
-                        &mut session.saved_input,
-                    );
+                    if !input::move_line_up(&session.input, &mut session.cursor_pos) {
+                        input::history_up(
+                            &mut session.input,
+                            &mut session.cursor_pos,
+                            &session.history,
+                            &mut session.history_index,
+                            &mut session.saved_input,
+                        );
+                    }
                 }
             }
             KeyCode::Down => {
                 if let Some(session) = self.nodes.active_session_mut() {
-                    input::history_down(
-                        &mut session.input,
-                        &mut session.cursor_pos,
-                        &session.history,
-                        &mut session.history_index,
-                        &session.saved_input,
-                    );
+                    if !input::move_line_down(&session.input, &mut session.cursor_pos) {
+                        input::history_down(
+                            &mut session.input,
+                            &mut session.cursor_pos,
+                            &session.history,
+                            &mut session.history_index,
+                            &session.saved_input,
+                        );
+                    }
                 }
             }
             KeyCode::PageUp => {

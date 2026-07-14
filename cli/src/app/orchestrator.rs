@@ -142,6 +142,12 @@ pub struct OrchestratorState {
     pub recovery_attempts: u32,
     pub recovery_prompt: Option<String>,
     pub recovery_history: Option<Vec<(String, String)>>,
+    //
+    // When a plan is showing, conversation | plan horizontal split.
+    // Percentage is the conversation (left) share.
+    //
+    pub plan_split_percent: u16,
+    pub plan_dragging: bool,
 }
 
 //
@@ -189,6 +195,8 @@ impl Default for OrchestratorState {
             recovery_attempts: 0,
             recovery_prompt: None,
             recovery_history: None,
+            plan_split_percent: 67,
+            plan_dragging: false,
         }
     }
 }
@@ -432,15 +440,16 @@ impl App {
             }
         }
 
+        if input::wants_newline(key) {
+            input::insert_newline(
+                &mut self.orchestrator.input,
+                &mut self.orchestrator.cursor_pos,
+            );
+            return;
+        }
+
         match key.code {
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                input::insert_char(
-                    &mut self.orchestrator.input,
-                    &mut self.orchestrator.cursor_pos,
-                    '\n',
-                );
-            }
-            KeyCode::Enter => {
+            KeyCode::Enter if input::wants_submit(key) => {
                 let input = self.orchestrator.input.trim().to_string();
                 let is_streaming = self
                     .orchestrator
@@ -507,9 +516,10 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if c != '\n' => {
                 //
                 // Opening / at start of empty input opens command palette.
+                // Literal '\n' is handled by wants_newline above.
                 //
                 input::insert_char(
                     &mut self.orchestrator.input,
@@ -578,22 +588,36 @@ impl App {
                 input::move_end(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
             }
             KeyCode::Up => {
-                input::history_up(
-                    &mut self.orchestrator.input,
+                //
+                // Prefer line movement inside a multi-line draft; fall
+                // back to history when already on the first line.
+                //
+                if !input::move_line_up(
+                    &self.orchestrator.input,
                     &mut self.orchestrator.cursor_pos,
-                    &self.orchestrator.history,
-                    &mut self.orchestrator.history_index,
-                    &mut self.orchestrator.saved_input,
-                );
+                ) {
+                    input::history_up(
+                        &mut self.orchestrator.input,
+                        &mut self.orchestrator.cursor_pos,
+                        &self.orchestrator.history,
+                        &mut self.orchestrator.history_index,
+                        &mut self.orchestrator.saved_input,
+                    );
+                }
             }
             KeyCode::Down => {
-                input::history_down(
-                    &mut self.orchestrator.input,
+                if !input::move_line_down(
+                    &self.orchestrator.input,
                     &mut self.orchestrator.cursor_pos,
-                    &self.orchestrator.history,
-                    &mut self.orchestrator.history_index,
-                    &self.orchestrator.saved_input,
-                );
+                ) {
+                    input::history_down(
+                        &mut self.orchestrator.input,
+                        &mut self.orchestrator.cursor_pos,
+                        &self.orchestrator.history,
+                        &mut self.orchestrator.history_index,
+                        &self.orchestrator.saved_input,
+                    );
+                }
             }
             KeyCode::Esc => {
                 self.orchestrator.input.clear();
