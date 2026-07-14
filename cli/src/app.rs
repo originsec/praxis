@@ -34,7 +34,7 @@ use crossterm::event::{
 };
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -129,7 +129,17 @@ pub struct ReconOverlay {
     pub is_loading: bool,
     pub error: Option<String>,
     pub active_tab: ReconTab,
-    pub selected_left: usize,
+    /// Currently selected tree node (identity, not row index).
+    pub selected: Option<ReconNodeId>,
+    /// Expanded branch keys for the hierarchical browser.
+    pub expanded: HashSet<ReconExpandId>,
+    /// Fuzzy substring filter applied to the tree.
+    pub filter: String,
+    pub filter_focused: bool,
+    /// Scroll offset into the visible flattened tree rows.
+    pub tree_scroll: u16,
+    /// Visible-row index under the mouse (for hover highlight).
+    pub hovered_row: Option<usize>,
     pub selected_right_scroll: u16,
     pub right_pane_max_scroll: Cell<u16>,
     pub config_loading: bool,
@@ -152,6 +162,38 @@ pub enum ReconTab {
     Config,
     Tools,
     Sessions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ToolsSectionKind {
+    Mcp,
+    Skills,
+    Internal,
+}
+
+/// Stable identity for a row in the recon tree browser.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReconNodeId {
+    ToolsSection(ToolsSectionKind),
+    McpServer(usize),
+    McpTool { server: usize, tool: usize },
+    Skill(usize),
+    Internal(usize),
+    ConfigType(String),
+    ConfigItem(usize),
+    SessionProject(String),
+    SessionItem(usize),
+}
+
+/// Keys for expand/collapse state (subset of branch nodes).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReconExpandId {
+    ToolsMcp,
+    ToolsSkills,
+    ToolsInternal,
+    McpServer(usize),
+    ConfigType(String),
+    SessionProject(String),
 }
 
 pub struct TerminalState {
@@ -782,10 +824,14 @@ impl App {
                     if recon.node_id == node_id && recon.agent_short_name == agent_short_name {
                         recon.is_loading = false;
                         if let Some(result) = recon_result {
+                            recon.expanded = crate::ui::recon::tree::default_expanded(&result);
                             recon.recon_result = Some(result);
                             recon.performed_at = performed_at;
                             recon.is_semantic = is_semantic.unwrap_or(false);
                             recon.error = None;
+                            recon.selected = None;
+                            recon.tree_scroll = 0;
+                            Self::recon_select_first_visible(recon);
                         } else if recon.recon_result.is_none() {
                             recon.error = Some("No recon data available".to_string());
                         }
@@ -804,7 +850,11 @@ impl App {
                             item.contents = content.clone();
                         }
                     }
-                    if recon.selected_left == target_idx && recon.active_tab == ReconTab::Config {
+                    let still_selected =
+                        crate::ui::recon::tree::selected_config_idx(&recon.selected)
+                            == Some(target_idx)
+                            && recon.active_tab == ReconTab::Config;
+                    if still_selected {
                         recon.config_loading = false;
                         recon.config_content_error = error;
                     }
@@ -822,7 +872,11 @@ impl App {
                             session.content = content.clone();
                         }
                     }
-                    if recon.selected_left == target_idx && recon.active_tab == ReconTab::Sessions {
+                    let still_selected =
+                        crate::ui::recon::tree::selected_session_idx(&recon.selected)
+                            == Some(target_idx)
+                            && recon.active_tab == ReconTab::Sessions;
+                    if still_selected {
                         recon.session_loading = false;
                         recon.session_content_error = error;
                     }
@@ -1211,7 +1265,12 @@ impl App {
             is_loading: true,
             error: None,
             active_tab: ReconTab::Config,
-            selected_left: 0,
+            selected: None,
+            expanded: HashSet::new(),
+            filter: String::new(),
+            filter_focused: false,
+            tree_scroll: 0,
+            hovered_row: None,
             selected_right_scroll: 0,
             right_pane_max_scroll: Cell::new(0),
             config_loading: false,
@@ -1219,7 +1278,7 @@ impl App {
             session_loading: false,
             session_content_error: None,
             right_pane_focused: false,
-            recon_split_percent: 25,
+            recon_split_percent: 30,
             recon_dragging: false,
             config_edit_status: None,
         });
@@ -1342,122 +1401,201 @@ impl App {
         });
     }
 
+    fn recon_switch_tab(&mut self, tab: ReconTab) {
+        let Some(recon) = self.nodes.recon.as_mut() else {
+            return;
+        };
+        if recon.active_tab == tab {
+            return;
+        }
+        recon.active_tab = tab;
+        recon.selected = None;
+        recon.tree_scroll = 0;
+        recon.hovered_row = None;
+        recon.selected_right_scroll = 0;
+        recon.right_pane_focused = false;
+        recon.filter_focused = false;
+        recon.config_content_error = None;
+        recon.session_content_error = None;
+        recon.config_loading = false;
+        recon.session_loading = false;
+        Self::recon_select_first_visible(recon);
+    }
+
+    fn recon_select_first_visible(recon: &mut ReconOverlay) {
+        let rows = crate::ui::recon::tree::build_visible_rows(recon);
+        recon.selected = rows.first().map(|r| r.id.clone());
+        recon.tree_scroll = 0;
+    }
+
     async fn handle_recon_key(&mut self, key: KeyEvent) {
         let Some(ref mut recon) = self.nodes.recon else {
             return;
         };
 
-        let left_max = match recon.active_tab {
-            ReconTab::Config => recon
-                .recon_result
-                .as_ref()
-                .map_or(0, |r| r.config.items.len().saturating_sub(1)),
-            ReconTab::Tools => 2,
-            ReconTab::Sessions => recon
-                .recon_result
-                .as_ref()
-                .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
-        };
+        //
+        // Filter bar input mode — capture typing until Esc/Enter.
+        //
+
+        if recon.filter_focused {
+            match key.code {
+                KeyCode::Esc => {
+                    recon.filter_focused = false;
+                }
+                KeyCode::Enter => {
+                    recon.filter_focused = false;
+                    Self::recon_select_first_visible(recon);
+                    self.handle_recon_enter().await;
+                }
+                KeyCode::Backspace => {
+                    recon.filter.pop();
+                    Self::recon_select_first_visible(recon);
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    recon.filter.clear();
+                    Self::recon_select_first_visible(recon);
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    recon.filter.push(c);
+                    Self::recon_select_first_visible(recon);
+                }
+                _ => {}
+            }
+            return;
+        }
 
         match key.code {
             KeyCode::Esc => {
-                self.close_recon();
+                if !recon.filter.is_empty() {
+                    recon.filter.clear();
+                    Self::recon_select_first_visible(recon);
+                } else {
+                    self.close_recon();
+                }
             }
             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.close_recon();
             }
-            KeyCode::Char('1') => {
-                recon.active_tab = ReconTab::Config;
-                recon.selected_left = 0;
-                recon.selected_right_scroll = 0;
+            KeyCode::Char('/') => {
+                recon.filter_focused = true;
                 recon.right_pane_focused = false;
-                recon.config_content_error = None;
-                recon.session_content_error = None;
-                recon.config_loading = false;
-                recon.session_loading = false;
             }
-            KeyCode::Char('2') => {
-                recon.active_tab = ReconTab::Tools;
-                recon.selected_left = 0;
-                recon.selected_right_scroll = 0;
-                recon.right_pane_focused = false;
-                recon.config_content_error = None;
-                recon.session_content_error = None;
-                recon.config_loading = false;
-                recon.session_loading = false;
-            }
-            KeyCode::Char('3') => {
-                recon.active_tab = ReconTab::Sessions;
-                recon.selected_left = 0;
-                recon.selected_right_scroll = 0;
-                recon.right_pane_focused = false;
-                recon.config_content_error = None;
-                recon.session_content_error = None;
-                recon.config_loading = false;
-                recon.session_loading = false;
-            }
+            KeyCode::Char('1') => self.recon_switch_tab(ReconTab::Config),
+            KeyCode::Char('2') => self.recon_switch_tab(ReconTab::Tools),
+            KeyCode::Char('3') => self.recon_switch_tab(ReconTab::Sessions),
             KeyCode::Tab => {
-                recon.active_tab = match recon.active_tab {
+                let next = match recon.active_tab {
                     ReconTab::Config => ReconTab::Tools,
                     ReconTab::Tools => ReconTab::Sessions,
                     ReconTab::Sessions => ReconTab::Config,
                 };
-                recon.selected_left = 0;
-                recon.selected_right_scroll = 0;
-                recon.right_pane_focused = false;
-                recon.config_content_error = None;
-                recon.session_content_error = None;
-                recon.config_loading = false;
-                recon.session_loading = false;
+                self.recon_switch_tab(next);
             }
             KeyCode::BackTab => {
-                recon.active_tab = match recon.active_tab {
+                let prev = match recon.active_tab {
                     ReconTab::Config => ReconTab::Sessions,
                     ReconTab::Tools => ReconTab::Config,
                     ReconTab::Sessions => ReconTab::Tools,
                 };
-                recon.selected_left = 0;
-                recon.selected_right_scroll = 0;
-                recon.right_pane_focused = false;
-                recon.config_content_error = None;
-                recon.session_content_error = None;
-                recon.config_loading = false;
-                recon.session_loading = false;
+                self.recon_switch_tab(prev);
             }
-            KeyCode::Right => {
-                recon.right_pane_focused = true;
+            KeyCode::Char(' ') => {
+                if let Some(ref id) = recon.selected.clone() {
+                    if crate::ui::recon::tree::is_expandable(id) {
+                        crate::ui::recon::tree::toggle_expand(recon, id);
+                    }
+                }
             }
-            KeyCode::Left => {
-                recon.right_pane_focused = false;
+            KeyCode::Right | KeyCode::Char('l') => {
+                if recon.right_pane_focused {
+                    // already on detail
+                } else if let Some(ref id) = recon.selected.clone() {
+                    if crate::ui::recon::tree::is_expandable(id) {
+                        if let Some(eid) = crate::ui::recon::tree::expand_id_for(id) {
+                            if !recon.expanded.contains(&eid) {
+                                recon.expanded.insert(eid);
+                            } else {
+                                recon.right_pane_focused = true;
+                            }
+                        }
+                    } else {
+                        recon.right_pane_focused = true;
+                    }
+                } else {
+                    recon.right_pane_focused = true;
+                }
             }
-            KeyCode::Up => {
+            KeyCode::Left | KeyCode::Char('h') => {
+                if recon.right_pane_focused {
+                    recon.right_pane_focused = false;
+                } else if let Some(ref id) = recon.selected.clone() {
+                    if let Some(eid) = crate::ui::recon::tree::expand_id_for(id) {
+                        if recon.expanded.contains(&eid) {
+                            recon.expanded.remove(&eid);
+                        }
+                    }
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
                 if recon.right_pane_focused {
                     if recon.selected_right_scroll > 0 {
                         recon.selected_right_scroll -= 1;
                     }
                 } else {
-                    if recon.selected_left > 0 {
-                        recon.selected_left -= 1;
+                    let rows = crate::ui::recon::tree::build_visible_rows(recon);
+                    if let Some(idx) =
+                        crate::ui::recon::tree::selected_visible_index(recon, &rows)
+                    {
+                        if idx > 0 {
+                            recon.selected = Some(rows[idx - 1].id.clone());
+                            recon.config_content_error = None;
+                            recon.session_content_error = None;
+                            recon.selected_right_scroll = 0;
+                            crate::ui::recon::tree::sync_selection(recon, &rows, 20);
+                            self.handle_recon_enter().await;
+                        }
+                    } else if !rows.is_empty() {
+                        recon.selected = Some(rows[0].id.clone());
+                        self.handle_recon_enter().await;
                     }
-                    recon.config_content_error = None;
-                    recon.session_content_error = None;
-                    recon.selected_right_scroll = 0;
-                    self.handle_recon_enter().await;
                 }
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 if recon.right_pane_focused {
                     let max = recon.right_pane_max_scroll.get();
                     recon.selected_right_scroll =
                         recon.selected_right_scroll.saturating_add(1).min(max);
                 } else {
-                    if recon.selected_left < left_max {
-                        recon.selected_left += 1;
+                    let rows = crate::ui::recon::tree::build_visible_rows(recon);
+                    if rows.is_empty() {
+                        return;
                     }
-                    recon.config_content_error = None;
-                    recon.session_content_error = None;
-                    recon.selected_right_scroll = 0;
-                    self.handle_recon_enter().await;
+                    let idx = crate::ui::recon::tree::selected_visible_index(recon, &rows)
+                        .unwrap_or(0);
+                    if idx + 1 < rows.len() {
+                        recon.selected = Some(rows[idx + 1].id.clone());
+                        recon.config_content_error = None;
+                        recon.session_content_error = None;
+                        recon.selected_right_scroll = 0;
+                        crate::ui::recon::tree::sync_selection(recon, &rows, 20);
+                        self.handle_recon_enter().await;
+                    } else if recon.selected.is_none() {
+                        recon.selected = Some(rows[0].id.clone());
+                        self.handle_recon_enter().await;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(ref id) = recon.selected.clone() {
+                    if crate::ui::recon::tree::is_expandable(id) {
+                        crate::ui::recon::tree::toggle_expand(recon, id);
+                    } else {
+                        recon.right_pane_focused = true;
+                        self.handle_recon_enter().await;
+                    }
                 }
             }
             KeyCode::PageUp => {
@@ -1494,7 +1632,12 @@ impl App {
 
         match recon.active_tab {
             ReconTab::Config => {
-                let selected = recon.selected_left;
+                let Some(selected) =
+                    crate::ui::recon::tree::selected_config_idx(&recon.selected)
+                else {
+                    recon.config_loading = false;
+                    return;
+                };
                 let needs_fetch = if let Some(ref result) = recon.recon_result {
                     result
                         .config
@@ -1566,7 +1709,12 @@ impl App {
                 });
             }
             ReconTab::Sessions => {
-                let selected = recon.selected_left;
+                let Some(selected) =
+                    crate::ui::recon::tree::selected_session_idx(&recon.selected)
+                else {
+                    recon.session_loading = false;
+                    return;
+                };
                 let needs_fetch = if let Some(ref result) = recon.recon_result {
                     result
                         .sessions
@@ -1661,7 +1809,10 @@ impl App {
             let Some(ref result) = recon.recon_result else {
                 return;
             };
-            let Some(item) = result.config.items.get(recon.selected_left) else {
+            let Some(idx) = crate::ui::recon::tree::selected_config_idx(&recon.selected) else {
+                return;
+            };
+            let Some(item) = result.config.items.get(idx) else {
                 return;
             };
             (
@@ -1839,9 +1990,12 @@ impl App {
                             //
 
                             if let Some(ref mut result) = recon.recon_result {
-                                if let Some(item) = result.config.items.get_mut(recon.selected_left)
+                                if let Some(idx) =
+                                    crate::ui::recon::tree::selected_config_idx(&recon.selected)
                                 {
-                                    item.contents = None;
+                                    if let Some(item) = result.config.items.get_mut(idx) {
+                                        item.contents = None;
+                                    }
                                 }
                             }
                         } else {
@@ -1937,10 +2091,17 @@ impl App {
                                 recon.selected_right_scroll =
                                     recon.selected_right_scroll.saturating_sub(3);
                             } else {
-                                recon.selected_left = recon.selected_left.saturating_sub(3);
-                                recon.config_content_error = None;
-                                recon.session_content_error = None;
-                                recon.selected_right_scroll = 0;
+                                let rows = crate::ui::recon::tree::build_visible_rows(recon);
+                                if let Some(idx) =
+                                    crate::ui::recon::tree::selected_visible_index(recon, &rows)
+                                {
+                                    let new_idx = idx.saturating_sub(3);
+                                    recon.selected = Some(rows[new_idx].id.clone());
+                                    recon.config_content_error = None;
+                                    recon.session_content_error = None;
+                                    recon.selected_right_scroll = 0;
+                                    crate::ui::recon::tree::sync_selection(recon, &rows, 20);
+                                }
                             }
                         }
                     }
@@ -1983,26 +2144,23 @@ impl App {
                     }
                     Window::Nodes if self.nodes.recon.is_some() => {
                         if let Some(recon) = self.nodes.recon.as_mut() {
-                            let left_max = match recon.active_tab {
-                                ReconTab::Config => recon
-                                    .recon_result
-                                    .as_ref()
-                                    .map_or(0, |r| r.config.items.len().saturating_sub(1)),
-                                ReconTab::Tools => 2,
-                                ReconTab::Sessions => recon
-                                    .recon_result
-                                    .as_ref()
-                                    .map_or(0, |r| r.sessions.items.len().saturating_sub(1)),
-                            };
                             if recon.right_pane_focused {
                                 let max = recon.right_pane_max_scroll.get();
                                 recon.selected_right_scroll =
                                     recon.selected_right_scroll.saturating_add(3).min(max);
                             } else {
-                                recon.selected_left = (recon.selected_left + 3).min(left_max);
-                                recon.config_content_error = None;
-                                recon.session_content_error = None;
-                                recon.selected_right_scroll = 0;
+                                let rows = crate::ui::recon::tree::build_visible_rows(recon);
+                                if !rows.is_empty() {
+                                    let idx =
+                                        crate::ui::recon::tree::selected_visible_index(recon, &rows)
+                                            .unwrap_or(0);
+                                    let new_idx = (idx + 3).min(rows.len() - 1);
+                                    recon.selected = Some(rows[new_idx].id.clone());
+                                    recon.config_content_error = None;
+                                    recon.session_content_error = None;
+                                    recon.selected_right_scroll = 0;
+                                    crate::ui::recon::tree::sync_selection(recon, &rows, 20);
+                                }
                             }
                         }
                     }

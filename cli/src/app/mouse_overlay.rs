@@ -429,13 +429,32 @@ impl App {
                 self.dispatch_recon_tab(tab);
                 true
             }
-            MouseAction::ReconLeftPane { left_area } => {
-                self.dispatch_recon_left_pane(mouse, left_area).await;
+            MouseAction::ReconLeftPane => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.right_pane_focused = false;
+                    recon.filter_focused = false;
+                }
+                true
+            }
+            MouseAction::ReconTreeRow { row } => {
+                self.dispatch_recon_tree_row(row, false).await;
+                true
+            }
+            MouseAction::ReconTreeChevron { row } => {
+                self.dispatch_recon_tree_row(row, true).await;
+                true
+            }
+            MouseAction::ReconFilterBar => {
+                if let Some(recon) = self.nodes.recon.as_mut() {
+                    recon.filter_focused = true;
+                    recon.right_pane_focused = false;
+                }
                 true
             }
             MouseAction::ReconRightPane => {
                 if let Some(recon) = self.nodes.recon.as_mut() {
                     recon.right_pane_focused = true;
+                    recon.filter_focused = false;
                 }
                 true
             }
@@ -558,73 +577,42 @@ impl App {
     }
 
     fn dispatch_recon_tab(&mut self, tab: ReconTab) {
-        let Some(recon) = self.nodes.recon.as_mut() else {
-            return;
-        };
-        if recon.active_tab != tab {
-            recon.active_tab = tab;
-            recon.selected_left = 0;
-            recon.selected_right_scroll = 0;
-            recon.right_pane_focused = false;
-            recon.config_content_error = None;
-            recon.session_content_error = None;
-            recon.config_loading = false;
-            recon.session_loading = false;
-        }
+        self.recon_switch_tab(tab);
     }
 
-    async fn dispatch_recon_left_pane(&mut self, mouse: MouseEvent, left_area: Rect) {
-        let inner_x = left_area.x.saturating_add(1);
-        let inner_y = left_area.y.saturating_add(1);
-        let inner_w = left_area.width.saturating_sub(2);
-        let inner_h = left_area.height.saturating_sub(2);
-        let in_list = mouse.column >= inner_x
-            && mouse.column < inner_x + inner_w
-            && mouse.row >= inner_y
-            && mouse.row < inner_y + inner_h;
-
-        let mut fetch = false;
-        {
+    async fn dispatch_recon_tree_row(&mut self, row: usize, chevron_only: bool) {
+        let fetch = {
             let Some(recon) = self.nodes.recon.as_mut() else {
                 return;
             };
             recon.right_pane_focused = false;
-            if !in_list {
+            recon.filter_focused = false;
+            let rows = crate::ui::recon::tree::build_visible_rows(recon);
+            let Some(target) = rows.get(row) else {
                 return;
-            }
-            let (lines_per_item, max_items) = match recon.active_tab {
-                ReconTab::Config => (
-                    2usize,
-                    recon
-                        .recon_result
-                        .as_ref()
-                        .map_or(0, |r| r.config.items.len()),
-                ),
-                ReconTab::Tools => (1usize, 3usize),
-                ReconTab::Sessions => (
-                    3usize,
-                    recon
-                        .recon_result
-                        .as_ref()
-                        .map_or(0, |r| r.sessions.items.len()),
-                ),
             };
-            let visible_items = (inner_h as usize / lines_per_item).max(1);
-            let scroll_offset = if recon.selected_left >= visible_items {
-                recon.selected_left.saturating_sub(visible_items - 1)
+            let id = target.id.clone();
+            let expandable = target.expandable;
+
+            if chevron_only && expandable {
+                crate::ui::recon::tree::toggle_expand(recon, &id);
+                recon.selected = Some(id);
+                recon.selected_right_scroll = 0;
+                false
             } else {
-                0
-            };
-            let rel_row = (mouse.row - inner_y) as usize;
-            let item_idx = scroll_offset + rel_row / lines_per_item;
-            if item_idx < max_items && item_idx != recon.selected_left {
-                recon.selected_left = item_idx;
+                let same = recon.selected.as_ref() == Some(&id);
+                recon.selected = Some(id.clone());
                 recon.selected_right_scroll = 0;
                 recon.config_content_error = None;
                 recon.session_content_error = None;
-                fetch = true;
+                recon.hovered_row = Some(row);
+
+                if expandable && same {
+                    crate::ui::recon::tree::toggle_expand(recon, &id);
+                }
+                true
             }
-        }
+        };
         if fetch {
             self.handle_recon_enter().await;
         }

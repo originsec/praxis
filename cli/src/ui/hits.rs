@@ -36,10 +36,15 @@ pub enum MouseAction {
 
     // Recon overlay (nodes window)
     ReconTab(ReconTab),
-    ReconLeftPane { left_area: Rect },
+    ReconLeftPane,
     ReconRightPane,
     ReconSplitDragStart,
     ReconHint(ReconHintAction),
+    /// Click a flattened tree row (absolute index into visible rows).
+    ReconTreeRow { row: usize },
+    /// Click the chevron zone of a tree row (toggle expand only).
+    ReconTreeChevron { row: usize },
+    ReconFilterBar,
 
     SettingsTab(SettingsTab),
 

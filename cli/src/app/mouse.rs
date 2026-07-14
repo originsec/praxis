@@ -68,10 +68,13 @@ impl App {
                 | MouseAction::InterceptRuleSave
                 | MouseAction::InterceptRuleCancel
                 | MouseAction::ReconTab(_)
-                | MouseAction::ReconLeftPane { .. }
+                | MouseAction::ReconLeftPane
                 | MouseAction::ReconRightPane
                 | MouseAction::ReconSplitDragStart
                 | MouseAction::ReconHint(_)
+                | MouseAction::ReconTreeRow { .. }
+                | MouseAction::ReconTreeChevron { .. }
+                | MouseAction::ReconFilterBar
         )
     }
 
@@ -488,6 +491,21 @@ impl App {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             if let Some(action) = self.hits_lookup(mouse.column, mouse.row) {
                 let _ = self.dispatch_mouse_action(mouse, action).await;
+            }
+            return;
+        }
+
+        if matches!(mouse.kind, MouseEventKind::Moved) {
+            let hover = match self.hits_lookup(mouse.column, mouse.row) {
+                Some(MouseAction::ReconTreeRow { row })
+                | Some(MouseAction::ReconTreeChevron { row }) => Some(row),
+                _ => None,
+            };
+            if let Some(recon) = self.nodes.recon.as_mut() {
+                recon.hovered_row = hover;
+            }
+            if self.chain_form.is_some() {
+                self.handle_chain_form_motion(mouse);
             }
             return;
         }

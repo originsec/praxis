@@ -1,13 +1,14 @@
 mod config_tab;
 mod sessions_tab;
 mod tools_tab;
+pub mod tree;
 
 use crate::app::{App, ReconOverlay, ReconTab};
 use crate::ui::chrome;
 use crate::ui::common::short_id;
 use crate::ui::hits::{split_border_rect, HintRegistrar, MouseAction, ReconHintAction};
 use crate::ui::theme::{
-    ACCENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BG_ELEMENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -20,7 +21,7 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
         Constraint::Length(1), // header
         Constraint::Length(1), // divider
         Constraint::Length(1), // tabs
-        Constraint::Length(1), // spacer
+        Constraint::Length(1), // filter
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
@@ -30,13 +31,19 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
     render_divider(f, chunks[1]);
     render_tab_bar(f, chunks[2], overlay);
     register_tab_hits(app, chunks[2], overlay);
+    render_filter_bar(f, chunks[3], overlay);
+    app.hits_register(chunks[3], MouseAction::ReconFilterBar);
 
-    match overlay.active_tab {
-        ReconTab::Config => config_tab::render(f, chunks[4], overlay),
-        ReconTab::Tools => tools_tab::render(f, chunks[4], overlay),
-        ReconTab::Sessions => sessions_tab::render(f, chunks[4], overlay),
-    }
+    //
+    // Base pane hits first; tab renderers layer per-row hits on top
+    // so tree row / chevron clicks win the hit test.
+    //
     register_content_hits(app, chunks[4], overlay);
+    match overlay.active_tab {
+        ReconTab::Config => config_tab::render(f, chunks[4], app, overlay),
+        ReconTab::Tools => tools_tab::render(f, chunks[4], app, overlay),
+        ReconTab::Sessions => sessions_tab::render(f, chunks[4], app, overlay),
+    }
     register_hint_hits(app, chunks[5], overlay);
 
     render_hints(f, chunks[5], overlay);
@@ -76,10 +83,11 @@ fn register_content_hits(app: &App, content: Rect, overlay: &ReconOverlay) {
     let (left, right) = common_two_pane_layout(content, overlay.recon_split_percent);
     app.hits_register(split_border_rect(left), MouseAction::ReconSplitDragStart);
     app.hits_register(right, MouseAction::ReconRightPane);
-    app.hits_register(
-        left,
-        MouseAction::ReconLeftPane { left_area: left },
-    );
+    //
+    // Per-row hits are registered by each tab's left-pane renderer.
+    // Keep a fallback pane hit under them for focus-only clicks.
+    //
+    app.hits_register(left, MouseAction::ReconLeftPane);
 }
 
 fn register_hint_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
@@ -169,6 +177,37 @@ fn render_divider(f: &mut Frame, area: Rect) {
     );
 }
 
+fn render_filter_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
+    let focused = overlay.filter_focused;
+    let style = if focused {
+        Style::default().fg(TEXT_BRIGHT).bg(BG_ELEMENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let prompt_style = if focused {
+        Style::default().fg(ACCENT).bg(BG_ELEMENT)
+    } else {
+        Style::default().fg(DIM)
+    };
+    let text = if overlay.filter.is_empty() && !focused {
+        "filter…  (/ to focus)".to_string()
+    } else if overlay.filter.is_empty() {
+        " ".to_string()
+    } else {
+        overlay.filter.clone()
+    };
+    let line = Line::from(vec![
+        Span::styled(" / ", prompt_style),
+        Span::styled(text, style),
+        if focused {
+            Span::styled("█", Style::default().fg(ACCENT).bg(BG_ELEMENT))
+        } else {
+            Span::raw("")
+        },
+    ]);
+    f.render_widget(Paragraph::new(line), area);
+}
+
 fn render_hints(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     let key = Style::default().fg(TEXT_BRIGHT);
     let label = Style::default().fg(MUTED);
@@ -178,6 +217,12 @@ fn render_hints(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
         Span::raw("    "),
         Span::styled("^d", key),
         Span::styled(" discover", label),
+        Span::raw("    "),
+        Span::styled("/", key),
+        Span::styled(" filter", label),
+        Span::raw("    "),
+        Span::styled("space", key),
+        Span::styled(" expand", label),
     ];
     if overlay.active_tab == ReconTab::Config {
         spans.push(Span::raw("    "));
@@ -251,7 +296,7 @@ pub fn recon_areas(area: Rect) -> ReconAreas {
         Constraint::Length(1), // header
         Constraint::Length(1), // divider
         Constraint::Length(1), // tabs
-        Constraint::Length(1), // spacer
+        Constraint::Length(1), // filter
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
@@ -259,4 +304,103 @@ pub fn recon_areas(area: Rect) -> ReconAreas {
     ReconAreas {
         content: chunks[4],
     }
+}
+
+//
+// Shared left-tree renderer used by all three tabs.
+//
+
+pub fn render_tree_left(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    overlay: &ReconOverlay,
+    title: &str,
+) {
+    use crate::ui::common::focused_titled_panel;
+
+    let block = focused_titled_panel(title, !overlay.right_pane_focused);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if overlay.recon_result.is_none() {
+        let msg = if overlay.is_loading {
+            " Loading recon data..."
+        } else if overlay.error.is_some() {
+            " Error loading recon"
+        } else {
+            " No recon data available"
+        };
+        let style = if overlay.is_loading {
+            Style::default().fg(STATUS_RUNNING)
+        } else {
+            Style::default().fg(STATUS_FAIL)
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(msg, style))),
+            inner,
+        );
+        return;
+    }
+
+    let rows = tree::build_visible_rows(overlay);
+    if rows.is_empty() {
+        let msg = if overlay.filter.trim().is_empty() {
+            " Nothing discovered"
+        } else {
+            " No matches"
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                msg,
+                Style::default().fg(DIM),
+            ))),
+            inner,
+        );
+        return;
+    }
+
+    //
+    // Selection/scroll are mutated on the overlay through Cell-free
+    // interior — we only read here. Callers that navigate sync via
+    // tree::sync_selection before render when needed. For display we
+    // recompute a local scroll so the selected row stays visible.
+    //
+
+    let sel_idx = tree::selected_visible_index(overlay, &rows).unwrap_or(0);
+    let h = inner.height as usize;
+    let mut scroll = overlay.tree_scroll as usize;
+    if sel_idx < scroll {
+        scroll = sel_idx;
+    } else if h > 0 && sel_idx >= scroll + h {
+        scroll = sel_idx + 1 - h;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (vis_i, row) in rows.iter().enumerate().skip(scroll).take(h) {
+        let is_selected = overlay.selected.as_ref() == Some(&row.id);
+        let is_hovered = overlay.hovered_row == Some(vis_i);
+        lines.push(tree::row_line(row, is_selected, is_hovered, inner.width));
+
+        //
+        // Register per-row mouse targets. Chevron occupies the first
+        // few columns after the cursor glyph; rest of the row selects.
+        //
+
+        let row_y = inner.y.saturating_add((vis_i - scroll) as u16);
+        let chevron_w = 4u16.saturating_add((row.depth as u16).saturating_mul(2));
+        // Full row first, then chevron on top (last registered wins).
+        app.hits_register(
+            Rect::new(inner.x, row_y, inner.width, 1),
+            MouseAction::ReconTreeRow { row: vis_i },
+        );
+        if row.expandable {
+            app.hits_register(
+                Rect::new(inner.x, row_y, chevron_w.min(inner.width), 1),
+                MouseAction::ReconTreeChevron { row: vis_i },
+            );
+        }
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
