@@ -99,6 +99,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
         if let Some(session) = session {
             render_conversation(f, conv_area, session);
+
+            //
+            // Spacer row above the input: show a down-chevron when the
+            // transcript is scrolled up so the user knows live content
+            // is below the viewport.
+            //
+            if session.scroll_offset > 0 {
+                chrome::scroll_down_indicator(f, chunks[2]);
+            }
         }
 
         if let Some(plan_area) = plan_area {

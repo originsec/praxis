@@ -218,6 +218,15 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     f.render_widget(paragraph, msg_area);
 
     //
+    // Spacer row above the input: show a down-chevron when the
+    // transcript is scrolled up so the user knows live content is
+    // below the viewport.
+    //
+    if clamped_offset > 0 {
+        chrome::scroll_down_indicator(f, chunks[3]);
+    }
+
+    //
     // Input.
     //
     let block = Block::default()

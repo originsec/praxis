@@ -58,6 +58,23 @@ pub fn diamond(color: Color) -> Span<'static> {
 }
 
 //
+// Centered down-chevron shown above the input when a transcript is
+// scrolled up, signalling that newer content is below.
+//
+
+pub fn scroll_down_indicator(f: &mut Frame, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let line = Line::from(Span::styled(
+        "\u{25bc}",
+        Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+    ))
+    .centered();
+    f.render_widget(Paragraph::new(line), area);
+}
+
+//
 // Two-tone label/value pill. The label sits in `key_color` with the
 // page-background as foreground (so it punches like a sticker); the
 // value follows in `BG_ELEMENT` with muted text.
