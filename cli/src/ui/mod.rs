@@ -1,9 +1,12 @@
 pub mod chain_form;
 pub mod chrome;
 pub mod common;
+pub mod filter_bar;
 pub mod form_modal;
+pub mod hint_row;
 pub mod hits;
 pub mod intercept;
+pub mod list_detail;
 pub mod log_query;
 pub mod nodes;
 pub mod operations;

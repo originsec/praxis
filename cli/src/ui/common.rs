@@ -80,6 +80,31 @@ pub fn drag_split_percent(outer_x: u16, outer_width: u16, mouse_col: u16) -> u16
     ((rel * 100) / w).clamp(20, 80) as u16
 }
 
+//
+// Map a mouse row to a top-pane height for a vertical two-pane drag.
+// Clamped to [min_h, max_h].
+//
+pub fn drag_top_height(
+    outer_y: u16,
+    mouse_row: u16,
+    min_h: u16,
+    max_h: u16,
+) -> u16 {
+    let rel = mouse_row.saturating_sub(outer_y).saturating_add(1);
+    rel.clamp(min_h, max_h.max(min_h))
+}
+
+/// 3-row tolerance strip on the bottom edge of `top` for vertical splits.
+pub fn split_border_rect_horizontal(top: Rect) -> Rect {
+    let border_y = top.y.saturating_add(top.height);
+    Rect::new(
+        top.x,
+        border_y.saturating_sub(1),
+        top.width,
+        3,
+    )
+}
+
 pub fn point_in(rect: Rect, col: u16, row: u16) -> bool {
     col >= rect.x
         && col < rect.x.saturating_add(rect.width)

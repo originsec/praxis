@@ -1383,8 +1383,12 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                self.intercept.detail_focus = !self.intercept.detail_focus;
-                if self.intercept.detail_focus {
+                //
+                // Enter focuses detail (does not toggle). Esc / Left leave.
+                // Matches Nodes and Ops list+detail contract.
+                //
+                if !self.intercept.detail_focus {
+                    self.intercept.detail_focus = true;
                     self.fetch_body_for_selected().await;
                 }
             }
@@ -1418,7 +1422,7 @@ impl App {
             KeyCode::Char('m') => {
                 self.jump_traffic_to_matches();
             }
-            KeyCode::Char('c') => {
+            KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.confirm = Some(ConfirmAction {
                     message: "Clear ALL intercepted traffic and matches?".into(),
                     action: ConfirmKind::ClearAllTraffic,
@@ -1530,8 +1534,11 @@ impl App {
                 }
             }
             (KeyCode::Enter, _) => {
-                self.intercept.match_detail_focus = !self.intercept.match_detail_focus;
-                if self.intercept.match_detail_focus {
+                //
+                // Enter focuses detail (does not toggle). Esc / Left leave.
+                //
+                if !self.intercept.match_detail_focus {
+                    self.intercept.match_detail_focus = true;
                     self.fetch_body_for_match_selected().await;
                 }
             }

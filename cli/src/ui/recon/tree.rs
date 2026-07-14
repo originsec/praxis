@@ -69,12 +69,21 @@ pub fn default_expanded(result: &common::ReconResult) -> HashSet<ReconExpandId> 
     }
     // Internal often long / semantic-only — start collapsed.
 
-    let mut types: HashSet<String> = HashSet::new();
+    //
+    // Expand small config groups by default; large ones (e.g. dozens of
+    // project_instructions paths) stay collapsed so the tree stays
+    // scannable. Group key normalises `type: /path` → `type`.
+    //
+    let mut type_counts: BTreeMap<String, usize> = BTreeMap::new();
     for item in &result.config.items {
-        types.insert(item.config_type.clone());
+        *type_counts
+            .entry(config_group_key(&item.config_type))
+            .or_default() += 1;
     }
-    for t in types {
-        e.insert(ReconExpandId::ConfigType(t));
+    for (t, n) in type_counts {
+        if n <= 12 {
+            e.insert(ReconExpandId::ConfigType(t));
+        }
     }
 
     let mut projects: BTreeMap<String, usize> = BTreeMap::new();
@@ -314,6 +323,52 @@ fn build_tools_rows(
     rows
 }
 
+//
+// Connectors sometimes encode the project path into config_type
+// (`project_instructions: /home/...`). Collapse those under a single
+// group keyed by the type prefix so the tree is scannable.
+//
+fn config_group_key(config_type: &str) -> String {
+    if let Some((prefix, rest)) = config_type.split_once(':') {
+        let rest = rest.trim();
+        if rest.starts_with('/') || rest.starts_with('~') || rest.starts_with('.') {
+            return prefix.trim().to_string();
+        }
+    }
+    config_type.to_string()
+}
+
+fn config_item_in_group(item: &common::ConfigItem, group: &str) -> bool {
+    config_group_key(&item.config_type) == group
+}
+
+/// Prefer a path-like suffix from config_type when the file path alone
+/// is less informative (rare); otherwise show the file path.
+fn config_item_label(item: &common::ConfigItem) -> String {
+    if let Some((_, rest)) = item.config_type.split_once(':') {
+        let rest = rest.trim();
+        if (rest.starts_with('/') || rest.starts_with('~') || rest.starts_with('.'))
+            && !item.path.is_empty()
+            && item.path != rest
+        {
+            //
+            // Type carries a project root and path is the file — show
+            // the file path (truncated). Project root is implied by
+            // belonging to this group.
+            //
+            return truncate_path(&item.path, 48);
+        }
+        if item.path.is_empty() && !rest.is_empty() {
+            return truncate_path(rest, 48);
+        }
+    }
+    if item.path.is_empty() {
+        item.config_type.clone()
+    } else {
+        truncate_path(&item.path, 48)
+    }
+}
+
 fn build_config_rows(
     overlay: &ReconOverlay,
     result: &common::ReconResult,
@@ -327,9 +382,23 @@ fn build_config_rows(
             continue;
         }
         groups
-            .entry(item.config_type.clone())
+            .entry(config_group_key(&item.config_type))
             .or_default()
             .push(i);
+    }
+
+    //
+    // Stable order within a group: path, then original config_type so
+    // same-path variants stay deterministic.
+    //
+    for indices in groups.values_mut() {
+        indices.sort_by(|&a, &b| {
+            let ia = &result.config.items[a];
+            let ib = &result.config.items[b];
+            ia.path
+                .cmp(&ib.path)
+                .then_with(|| ia.config_type.cmp(&ib.config_type))
+        });
     }
 
     let mut rows = Vec::new();
@@ -355,7 +424,7 @@ fn build_config_rows(
                     depth: 1,
                     expandable: false,
                     expanded: false,
-                    label: truncate_path(&item.path, 48),
+                    label: config_item_label(item),
                     meta: String::new(),
                     badge: None,
                     trailing: String::new(),
@@ -878,7 +947,7 @@ pub fn config_type_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
         .config
         .items
         .iter()
-        .filter(|i| &i.config_type == t)
+        .filter(|i| config_item_in_group(i, t))
         .count();
     vec![
         Line::from(Span::styled(

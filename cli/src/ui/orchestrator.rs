@@ -55,25 +55,23 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     //
     // Input box grows by one row per extra line of content (Shift+Enter
-    // inserts \n) — but only once a session is live. While we're still
-    // waiting on SessionCreated the welcome logo sits in chunks[1] and
-    // the input keeps a stable 4-row footprint.
+    // inserts \n). Cap so a huge paste cannot starve the transcript.
     //
-    let input_lines = if no_sessions {
-        1
-    } else {
-        input_content_rows(state)
-    };
+    let input_lines = input_content_rows(state).min(12);
     let input_height = (input_lines + 2).max(3);
 
+    //
+    // tabs | conversation | scroll-hint | input | model meta | blank
+    // The trailing blank separates openrouter/tokens from the global
+    // status bar so those two rows don't butt together.
+    //
     let chunks = Layout::vertical([
         Constraint::Length(tab_height),
         Constraint::Min(1),
         Constraint::Length(1),
         Constraint::Length(input_height),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(1), // model / tokens meta
+        Constraint::Length(1), // blank above status bar
     ])
     .split(area);
 
@@ -86,13 +84,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     } else {
         //
         // Split the main area horizontally when a plan exists so the
-        // plan sits in a right-hand pane.
+        // plan sits in a right-hand pane. Percentage is user-draggable.
         //
         let (conv_area, plan_area) = if has_plan {
-            let plan_width = (chunks[1].width / 3).clamp(28, 42);
-            let split = Layout::horizontal([Constraint::Min(1), Constraint::Length(plan_width)])
-                .split(chunks[1]);
-            (split[0], Some(split[1]))
+            let panes =
+                crate::ui::list_detail::layout(chunks[1], state.plan_split_percent);
+            app.hits_register(
+                panes.border,
+                crate::ui::hits::MouseAction::OrchestratorPlanSplitDragStart,
+            );
+            (panes.list, Some(panes.detail))
         } else {
             (chunks[1], None)
         };
@@ -118,8 +119,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     render_input(f, chunks[3], state);
-    render_meta(f, chunks[5], app, state);
-    render_status_hints(f, chunks[6], state);
+    render_meta(f, chunks[4], app, state);
 
     register_input_hit(app, chunks[3], state);
 }
@@ -827,7 +827,7 @@ fn render_meta(f: &mut Frame, area: Rect, app: &App, state: &OrchestratorState) 
 // with Shift+Enter.
 //
 
-pub(super) fn input_content_rows(state: &OrchestratorState) -> u16 {
+pub fn input_content_rows(state: &OrchestratorState) -> u16 {
     state.input.split('\n').count().max(1) as u16
 }
 
@@ -907,8 +907,6 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     f.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
-
-fn render_status_hints(_f: &mut Frame, _area: Rect, _state: &OrchestratorState) {}
 
 fn _silence_unused() {
     let _ = BG_PANEL;

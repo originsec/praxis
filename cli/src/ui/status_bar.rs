@@ -55,13 +55,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     left.push(Span::raw("    "));
 
+    use crate::keymap::global;
     let nav_pairs: &[(&str, &str, Window)] = &[
-        ("^o", "orchestrator", Window::Orchestrator),
-        ("^l", "nodes", Window::Nodes),
-        ("^p", "ops", Window::Operations),
-        ("^t", "intercept", Window::Intercept),
-        ("^g", "logs", Window::LogQuery),
-        ("^s", "settings", Window::Settings),
+        (global::ORCHESTRATOR, "orchestrator", Window::Orchestrator),
+        (global::NODES, "nodes", Window::Nodes),
+        (global::OPERATIONS, "ops", Window::Operations),
+        (global::INTERCEPT, "intercept", Window::Intercept),
+        (global::LOG_QUERY, "logs", Window::LogQuery),
+        (global::SETTINGS, "settings", Window::Settings),
     ];
     for (i, (k, l, w)) in nav_pairs.iter().enumerate() {
         if i > 0 {
@@ -71,7 +72,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     left.push(chrome::mid_dot());
-    left.extend(chrome::dim_hint("^q", "quit"));
+    left.extend(chrome::dim_hint(global::QUIT, "quit"));
 
     let right = Line::from(vec![
         if app.connected {
@@ -123,13 +124,14 @@ fn register_nav_hits(app: &App, area: Rect) {
 
     col += 4;
 
+    use crate::keymap::global;
     let nav_pairs: &[(&str, &str, Window)] = &[
-        ("^o", "orchestrator", Window::Orchestrator),
-        ("^l", "nodes", Window::Nodes),
-        ("^p", "ops", Window::Operations),
-        ("^t", "intercept", Window::Intercept),
-        ("^g", "logs", Window::LogQuery),
-        ("^s", "settings", Window::Settings),
+        (global::ORCHESTRATOR, "orchestrator", Window::Orchestrator),
+        (global::NODES, "nodes", Window::Nodes),
+        (global::OPERATIONS, "ops", Window::Operations),
+        (global::INTERCEPT, "intercept", Window::Intercept),
+        (global::LOG_QUERY, "logs", Window::LogQuery),
+        (global::SETTINGS, "settings", Window::Settings),
     ];
     for (i, (k, l, w)) in nav_pairs.iter().enumerate() {
         if i > 0 {

@@ -8,7 +8,7 @@ use crate::ui::chrome;
 use crate::ui::common::short_id;
 use crate::ui::hits::{split_border_rect, HintRegistrar, MouseAction, ReconHintAction};
 use crate::ui::theme::{
-    ACCENT, BG_ELEMENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
+    ACCENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -36,7 +36,8 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
 
     //
     // Base pane hits first; tab renderers layer per-row hits on top
-    // so tree row / chevron clicks win the hit test.
+    // so tree row / chevron clicks win the hit test. Split border is
+    // registered last so drag still wins on the divider column.
     //
     register_content_hits(app, chunks[4], overlay);
     match overlay.active_tab {
@@ -44,6 +45,7 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
         ReconTab::Tools => tools_tab::render(f, chunks[4], app, overlay),
         ReconTab::Sessions => sessions_tab::render(f, chunks[4], app, overlay),
     }
+    register_split_border_hit(app, chunks[4], overlay);
     register_hint_hits(app, chunks[5], overlay);
 
     render_hints(f, chunks[5], overlay);
@@ -81,7 +83,6 @@ fn register_tab_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
 
 fn register_content_hits(app: &App, content: Rect, overlay: &ReconOverlay) {
     let (left, right) = common_two_pane_layout(content, overlay.recon_split_percent);
-    app.hits_register(split_border_rect(left), MouseAction::ReconSplitDragStart);
     app.hits_register(right, MouseAction::ReconRightPane);
     //
     // Per-row hits are registered by each tab's left-pane renderer.
@@ -90,20 +91,26 @@ fn register_content_hits(app: &App, content: Rect, overlay: &ReconOverlay) {
     app.hits_register(left, MouseAction::ReconLeftPane);
 }
 
+fn register_split_border_hit(app: &App, content: Rect, overlay: &ReconOverlay) {
+    let (left, _) = common_two_pane_layout(content, overlay.recon_split_percent);
+    app.hits_register(split_border_rect(left), MouseAction::ReconSplitDragStart);
+}
+
 fn register_hint_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
+    use crate::keymap::action;
     let mut reg = HintRegistrar::new(app, area);
-    reg.chip("^r", MouseAction::ReconHint(ReconHintAction::Refresh));
+    reg.chip(action::REFRESH, MouseAction::ReconHint(ReconHintAction::Refresh));
     reg.chip(" refresh", MouseAction::ReconHint(ReconHintAction::Refresh));
     reg.gap(4);
-    reg.chip("^d", MouseAction::ReconHint(ReconHintAction::Discover));
+    reg.chip(action::DISCOVER, MouseAction::ReconHint(ReconHintAction::Discover));
     reg.chip(" discover", MouseAction::ReconHint(ReconHintAction::Discover));
     if overlay.active_tab == ReconTab::Config {
         reg.gap(4);
-        reg.chip("^e", MouseAction::ReconHint(ReconHintAction::Edit));
+        reg.chip(action::EDIT, MouseAction::ReconHint(ReconHintAction::Edit));
         reg.chip(" edit", MouseAction::ReconHint(ReconHintAction::Edit));
     }
     reg.gap(4);
-    reg.chip("^q", MouseAction::ReconHint(ReconHintAction::Close));
+    reg.chip(action::ESC, MouseAction::ReconHint(ReconHintAction::Close));
     reg.chip(" close", MouseAction::ReconHint(ReconHintAction::Close));
 }
 
@@ -178,61 +185,50 @@ fn render_divider(f: &mut Frame, area: Rect) {
 }
 
 fn render_filter_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let focused = overlay.filter_focused;
-    let style = if focused {
-        Style::default().fg(TEXT_BRIGHT).bg(BG_ELEMENT)
-    } else {
-        Style::default().fg(MUTED)
-    };
-    let prompt_style = if focused {
-        Style::default().fg(ACCENT).bg(BG_ELEMENT)
-    } else {
-        Style::default().fg(DIM)
-    };
-    let text = if overlay.filter.is_empty() && !focused {
-        "filter…  (/ to focus)".to_string()
-    } else if overlay.filter.is_empty() {
-        " ".to_string()
-    } else {
-        overlay.filter.clone()
-    };
-    let line = Line::from(vec![
-        Span::styled(" / ", prompt_style),
-        Span::styled(text, style),
-        if focused {
-            Span::styled("█", Style::default().fg(ACCENT).bg(BG_ELEMENT))
-        } else {
-            Span::raw("")
+    use crate::ui::filter_bar::{self, FilterBarModel};
+    filter_bar::render(
+        f,
+        area,
+        &FilterBarModel {
+            focused: overlay.filter_focused,
+            query: &overlay.filter,
+            placeholder: "filter",
+            extra_pills: Vec::new(),
+            meta: None,
         },
-    ]);
-    f.render_widget(Paragraph::new(line), area);
+    );
 }
 
 fn render_hints(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let key = Style::default().fg(TEXT_BRIGHT);
-    let label = Style::default().fg(MUTED);
-    let mut spans = vec![
-        Span::styled("^r", key),
-        Span::styled(" refresh", label),
-        Span::raw("    "),
-        Span::styled("^d", key),
-        Span::styled(" discover", label),
-        Span::raw("    "),
-        Span::styled("/", key),
-        Span::styled(" filter", label),
-        Span::raw("    "),
-        Span::styled("space", key),
-        Span::styled(" expand", label),
+    use crate::keymap::action;
+    use crate::ui::hint_row::{self, HintItem};
+    use crate::ui::hits::ReconHintAction;
+
+    let mut items = vec![
+        HintItem::with_action(
+            action::REFRESH,
+            "refresh",
+            MouseAction::ReconHint(ReconHintAction::Refresh),
+        ),
+        HintItem::with_action(
+            action::DISCOVER,
+            "discover",
+            MouseAction::ReconHint(ReconHintAction::Discover),
+        ),
     ];
     if overlay.active_tab == ReconTab::Config {
-        spans.push(Span::raw("    "));
-        spans.push(Span::styled("^e", key));
-        spans.push(Span::styled(" edit", label));
+        items.push(HintItem::with_action(
+            action::EDIT,
+            "edit",
+            MouseAction::ReconHint(ReconHintAction::Edit),
+        ));
     }
-    spans.push(Span::raw("    "));
-    spans.push(Span::styled("^q", key));
-    spans.push(Span::styled(" close", label));
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    items.push(HintItem::with_action(
+        action::ESC,
+        "close",
+        MouseAction::ReconHint(ReconHintAction::Close),
+    ));
+    hint_row::render(f, area, &items, None);
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
@@ -274,11 +270,7 @@ fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 }
 
 pub fn common_two_pane_layout(area: Rect, split_percent: u16) -> (Rect, Rect) {
-    let left = split_percent.min(80).max(20);
-    let right = 100u16.saturating_sub(left);
-    let chunks = Layout::horizontal([Constraint::Percentage(left), Constraint::Percentage(right)])
-        .split(area);
-    (chunks[0], chunks[1])
+    crate::ui::list_detail::two_pane(area, split_percent)
 }
 
 //

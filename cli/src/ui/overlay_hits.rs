@@ -223,13 +223,15 @@ pub fn register_sessions_list_hits(app: &App, area: Rect, count: usize) {
     app.hits_register(area, MouseAction::SessionsListDismiss);
 }
 
-pub fn register_session_chat_hits(app: &App, area: Rect) {
+pub fn register_session_chat_hits(app: &App, area: Rect, input_line_count: usize) {
+    let input_lines = input_line_count.max(1).min(12) as u16;
+    let input_height = (input_lines + 2).max(3);
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // spacer
         Constraint::Min(1),    // messages
         Constraint::Length(1), // spacer
-        Constraint::Length(3), // input
+        Constraint::Length(input_height), // input
         Constraint::Length(1), // hints
     ])
     .split(area);
@@ -241,11 +243,8 @@ pub fn register_session_chat_hits(app: &App, area: Rect) {
         chunks[4],
         MouseAction::SessionInput { text_start },
     );
-    // Match render: "↵ send    ^w suspend    ^c close"
+    // Match render: "^w suspend    ^c close"
     let mut reg = HintRegistrar::new(app, chunks[5]);
-    reg.chip("\u{21b5}", MouseAction::SessionHint(SessionHintAction::Send));
-    reg.chip(" send", MouseAction::SessionHint(SessionHintAction::Send));
-    reg.gap(4);
     reg.chip("^w", MouseAction::SessionHint(SessionHintAction::Pause));
     reg.chip(" suspend", MouseAction::SessionHint(SessionHintAction::Pause));
     reg.gap(4);

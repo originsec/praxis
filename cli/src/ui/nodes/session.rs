@@ -24,12 +24,19 @@ const HEAVY_LEFT: border::Set = border::Set {
 };
 
 pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
+    //
+    // Input grows with Shift+Enter newlines (capped). Same chrome as
+    // orchestrator: content rows + top padding row inside the block.
+    //
+    let input_lines = session.input.split('\n').count().max(1).min(12) as u16;
+    let input_height = (input_lines + 2).max(3);
+
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // spacer
         Constraint::Min(1),    // messages
         Constraint::Length(1), // spacer between transcript and input
-        Constraint::Length(3), // input
+        Constraint::Length(input_height), // input
         Constraint::Length(1), // hints
     ])
     .split(area);
@@ -239,59 +246,95 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     let input_inner = block.inner(chunks[4]);
     f.render_widget(block, chunks[4]);
 
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(
-        "\u{276f}",
+    let prompt = Span::styled(
+        "\u{276f} ",
         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::raw(" "));
+    );
+    let cursor = Span::styled("\u{2588}", Style::default().fg(ACCENT));
+    let text_style = Style::default().fg(TEXT_BRIGHT);
 
     if session.session_id.is_none() {
-        spans.push(Span::styled("connecting…", Style::default().fg(DIM)));
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                prompt,
+                Span::styled("connecting…", Style::default().fg(DIM)),
+            ])),
+            input_inner,
+        );
     } else if session.is_waiting {
-        spans.push(Span::styled("^c to cancel", Style::default().fg(MUTED)));
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                prompt,
+                Span::styled("^c to cancel", Style::default().fg(MUTED)),
+            ])),
+            input_inner,
+        );
     } else if session.input.is_empty() {
-        spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
-        spans.push(Span::styled(
-            "  Send to agent…",
-            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-        ));
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                prompt,
+                cursor,
+                Span::styled(
+                    "  Send to agent…",
+                    Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+                ),
+            ])),
+            input_inner,
+        );
     } else {
         //
-        // Snap the cursor to a char boundary so slicing through the
-        // middle of a multibyte sequence (emoji, etc.) doesn't panic.
+        // Multi-line content: one row per line, cursor on the active
+        // line (same approach as the orchestrator input).
         //
         let mut pos = session.cursor_pos.min(session.input.len());
         while pos > 0 && !session.input.is_char_boundary(pos) {
             pos -= 1;
         }
-        let before = &session.input[..pos];
-        let after = &session.input[pos..];
-        if !before.is_empty() {
-            spans.push(Span::styled(
-                before.to_string(),
-                Style::default().fg(TEXT_BRIGHT),
-            ));
+        let text = &session.input;
+        let mut lines: Vec<Line> = Vec::new();
+        let mut byte_cursor = 0usize;
+        let total_lines = text.split('\n').count();
+
+        for (idx, line_str) in text.split('\n').enumerate() {
+            let line_start = byte_cursor;
+            let line_end = line_start + line_str.len();
+            let cursor_on_this = pos >= line_start
+                && (pos < line_end || (pos == line_end && idx + 1 == total_lines));
+
+            let lead = if idx == 0 {
+                prompt.clone()
+            } else {
+                Span::raw("  ")
+            };
+            let mut spans: Vec<Span> = vec![lead];
+
+            if cursor_on_this {
+                let rel = pos - line_start;
+                let (before, after) = line_str.split_at(rel);
+                if !before.is_empty() {
+                    spans.push(Span::styled(before.to_string(), text_style));
+                }
+                spans.push(cursor.clone());
+                if !after.is_empty() {
+                    spans.push(Span::styled(after.to_string(), text_style));
+                }
+            } else if !line_str.is_empty() {
+                spans.push(Span::styled(line_str.to_string(), text_style));
+            }
+
+            lines.push(Line::from(spans));
+            byte_cursor = line_end + 1;
         }
-        spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
-        if !after.is_empty() {
-            spans.push(Span::styled(
-                after.to_string(),
-                Style::default().fg(TEXT_BRIGHT),
-            ));
-        }
+
+        f.render_widget(Paragraph::new(Text::from(lines)), input_inner);
     }
 
-    f.render_widget(Paragraph::new(Line::from(spans)), input_inner);
-
+    use crate::keymap::action;
     let hints = Line::from(vec![
-        Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
-        Span::styled(" send", Style::default().fg(MUTED)),
-        Span::raw("    "),
-        Span::styled("^w", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(action::SESSIONS, Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" suspend", Style::default().fg(MUTED)),
         Span::raw("    "),
-        Span::styled("^c", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(action::CANCEL, Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" close", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[5]);

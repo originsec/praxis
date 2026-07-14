@@ -152,17 +152,6 @@ impl App {
                 true
             }
             MouseAction::SessionHint(hint) => match hint {
-                SessionHintAction::Send => {
-                    if let Some(session) = self.nodes.active_session_mut() {
-                        let ready = !session.input.trim().is_empty()
-                            && !session.is_waiting
-                            && session.session_id.is_some();
-                        if ready {
-                            self.send_session_message();
-                        }
-                    }
-                    true
-                }
                 SessionHintAction::Pause => {
                     self.pause_active_session();
                     true
