@@ -20,7 +20,7 @@ use crate::app::log_query::LogQueryFocus;
 use crate::app::{App, LogQueryState};
 use crate::ui::common::table_data_start_titled;
 use crate::ui::hits::{MouseAction, RowSelect, RowSelectKind};
-use crate::ui::theme::{ACCENT, MUTED, STATUS_FAIL, TEXT_BRIGHT};
+use crate::ui::theme::{ACCENT, BG, BORDER_SUBTLE, MUTED, STATUS_FAIL, TEXT_BRIGHT};
 
 pub const EDITOR_HEIGHT: u16 = 9;
 
@@ -39,8 +39,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let state = &app.log_query;
     let show_error = state.last_error.is_some();
 
+    //
+    // Editor sits on an elevated input surface; a 1-row rule separates it
+    // from the darker results table so the two regions don't blend.
+    //
     let chunks = Layout::vertical([
         Constraint::Length(EDITOR_HEIGHT),                  // editor
+        Constraint::Length(1),                              // separator
         Constraint::Length(if show_error { 1 } else { 0 }), // error banner
         Constraint::Min(1),                                 // results
         Constraint::Length(1),                              // hint line
@@ -48,14 +53,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     .split(area);
 
     editor::render(f, chunks[0], state);
+    render_separator(f, chunks[1]);
 
     if show_error {
-        render_error(f, chunks[1], state);
+        render_error(f, chunks[2], state);
     }
 
-    results::render(f, chunks[2], state);
+    results::render(f, chunks[3], state);
 
-    render_hints(f, chunks[3], state);
+    render_hints(f, chunks[4], state);
 
     if state.autocomplete_open {
         autocomplete::render(f, chunks[0], state);
@@ -65,8 +71,19 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         schema::render_popup(f, area, state);
         app.hits_register(area, MouseAction::LogQuerySchemaDismiss);
     } else {
-        register_focus_hits(app, chunks[0], chunks[2], state);
+        register_focus_hits(app, chunks[0], chunks[3], state);
     }
+}
+
+fn render_separator(f: &mut Frame, area: Rect) {
+    let rule = "─".repeat(area.width as usize);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            rule,
+            Style::default().fg(BORDER_SUBTLE).bg(BG),
+        ))),
+        area,
+    );
 }
 
 fn register_focus_hits(
@@ -128,6 +145,9 @@ fn render_hints(f: &mut Frame, area: Rect, state: &LogQueryState) {
                 spans.extend([
                     Span::styled("^r", key),
                     Span::styled(" run", label),
+                    gap.clone(),
+                    Span::styled("^e", key),
+                    Span::styled(" $EDITOR", label),
                     gap.clone(),
                     Span::styled("tab", key),
                     Span::styled(" autocomplete", label),

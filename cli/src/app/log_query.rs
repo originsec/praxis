@@ -442,6 +442,13 @@ impl crate::app::App {
         }
 
         match (key.code, key.modifiers) {
+            (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
+                //
+                // Open the current query in $VISUAL / $EDITOR. On a clean
+                // exit the saved buffer replaces the in-app editor text.
+                //
+                self.edit_log_query_in_editor();
+            }
             (KeyCode::Tab, _) => {
                 let suggestions =
                     autocomplete::suggestions_for(&self.log_query.editor.full_prefix());
@@ -604,5 +611,108 @@ impl crate::app::App {
                 let _ = tx.send(AppEvent::LogQueryResult(result));
             }
         });
+    }
+
+    //
+    // Open the current query text in $VISUAL / $EDITOR. On a clean exit,
+    // replace the in-app editor buffer with whatever was saved. Same
+    // terminal-suspend pattern as recon config and agent-script edits.
+    //
+    fn edit_log_query_in_editor(&mut self) {
+        use std::io::Write;
+
+        let initial_text = self.log_query.editor.as_text();
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            });
+
+        let tmp = match tempfile::Builder::new()
+            .prefix("praxis_log_query_")
+            .suffix(".kql")
+            .tempfile()
+        {
+            Ok(f) => f,
+            Err(e) => {
+                self.log_query.last_error =
+                    Some((format!("Failed to create temp file: {}", e), Instant::now()));
+                return;
+            }
+        };
+
+        if let Err(e) = tmp.as_file().write_all(initial_text.as_bytes()) {
+            self.log_query.last_error =
+                Some((format!("Failed to write temp file: {}", e), Instant::now()));
+            return;
+        }
+
+        let path = tmp.path().to_path_buf();
+
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        )
+        .ok();
+
+        let status = std::process::Command::new(&editor).arg(&path).status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+        )
+        .ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+        self.needs_full_redraw = true;
+
+        match status {
+            Ok(s) if s.success() => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    //
+                    // Editors commonly append a trailing newline; strip one
+                    // so a single-line query does not pick up a blank row.
+                    //
+                    let content = content
+                        .strip_suffix("\r\n")
+                        .or_else(|| content.strip_suffix('\n'))
+                        .unwrap_or(&content);
+                    self.log_query.editor = EditorBuffer::from_text(content);
+                    self.log_query.autocomplete_open = false;
+                    self.log_query.focus = LogQueryFocus::Editor;
+                }
+                Err(e) => {
+                    self.log_query.last_error =
+                        Some((format!("Failed to read editor file: {}", e), Instant::now()));
+                }
+            },
+            Ok(s) => {
+                self.log_query.last_error = Some((
+                    format!("Editor exited with status {}", s),
+                    Instant::now(),
+                ));
+            }
+            Err(e) => {
+                self.log_query.last_error =
+                    Some((format!("Failed to launch editor: {}", e), Instant::now()));
+            }
+        }
     }
 }

@@ -9,12 +9,15 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
-use crate::ui::common::{focused_titled_panel, spinner_char};
-use crate::ui::theme::{ACCENT, DIM, INPUT_BORDER, JSON_NUMBER, JSON_STRING, KEYWORD, MUTED, TEXT};
+use crate::ui::common::spinner_char;
+use crate::ui::theme::{
+    ACCENT, BG_ELEMENT, DIM, INPUT_BORDER, JSON_NUMBER, JSON_STRING, KEYWORD, MUTED, TEXT,
+    TEXT_BRIGHT,
+};
 
 const KEYWORDS: &[&str] = &[
     "where",
@@ -49,15 +52,26 @@ pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     let focused = state.focus == LogQueryFocus::Editor;
 
     //
-    // Title shows a spinner when a query is in flight.
+    // Query is styled as an elevated input surface (BG_ELEMENT) so it
+    // reads as distinct from the darker results table below — same fill
+    // used for other text-entry chrome. Title stays accent when focused.
     //
     let spinner = if state.is_running {
         format!(" {} ", spinner_char())
     } else {
         String::new()
     };
-    let title = format!(" Query{} ", spinner);
-    let block = focused_titled_panel(&title, focused);
+    let title_color = if focused { ACCENT } else { TEXT_BRIGHT };
+    let title_line = Line::from(Span::styled(
+        format!("  Query{} ", spinner),
+        Style::default()
+            .fg(title_color)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let block = Block::default()
+        .style(Style::default().bg(BG_ELEMENT))
+        .padding(Padding::new(2, 1, 0, 0))
+        .title(title_line);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -99,7 +113,7 @@ fn render_body(f: &mut Frame, area: Rect, state: &LogQueryState, focused: bool) 
 
     let body_block = Block::default()
         .borders(Borders::NONE)
-        .style(Style::default().bg(crate::ui::theme::BG_PANEL));
+        .style(Style::default().bg(BG_ELEMENT));
     let para = Paragraph::new(out).block(body_block).scroll((scroll, 0));
     f.render_widget(para, area);
 }
@@ -144,7 +158,7 @@ fn line_with_cursor(
                 out.push(Span::styled(
                     ch.to_string(),
                     Style::default()
-                        .fg(crate::ui::theme::BG_PANEL)
+                        .fg(BG_ELEMENT)
                         .bg(ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ));

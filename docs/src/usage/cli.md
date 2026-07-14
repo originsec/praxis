@@ -171,8 +171,11 @@ logs, recon results, operations history, and more — 12 virtual tables in
 total). See [Log Query](./log-query.md) for the full query reference.
 
 - Multi-line editor with basic KQL keyword highlighting
-- `Ctrl+Enter` runs the query; the spinner in the hint line indicates
-  in-flight execution
+- `Ctrl+R` runs the query (`Ctrl+Enter` still works); the spinner in the
+  hint line indicates in-flight execution
+- `Ctrl+E` opens the current query in `$VISUAL` / `$EDITOR` (falls back
+  to `vi` / `notepad`). Save and quit cleanly to replace the in-app
+  editor buffer with the saved text
 - `Tab` opens a context-aware autocomplete popup (tables at start of
   query, operators after `|`, columns inside `where` / `project` /
   `sort`, functions & keywords inline). `↑`/`↓` navigate, `Enter`
