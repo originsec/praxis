@@ -32,6 +32,7 @@ pub struct SettingsState {
     pub semantic_ops_model: String,
     pub semantic_parser_model: String,
     pub traffic_parser_model: String,
+    pub doc_helper_model: String,
     pub praxis_agent_model_ref: String,
     pub praxis_agent_thinking_effort: String,
     pub praxis_agent_enabled: bool,
@@ -124,6 +125,7 @@ impl Default for SettingsState {
             semantic_ops_model: String::new(),
             semantic_parser_model: String::new(),
             traffic_parser_model: String::new(),
+            doc_helper_model: String::new(),
             praxis_agent_model_ref: String::new(),
             praxis_agent_thinking_effort: String::new(),
             praxis_agent_enabled: false,
@@ -163,6 +165,7 @@ impl App {
             "llm_feature_semantic_ops".to_string(),
             "llm_feature_semantic_parser".to_string(),
             "llm_feature_traffic_parser".to_string(),
+            "llm_feature_doc_helper".to_string(),
             "mcp_server_enabled".to_string(),
             "mcp_server_port".to_string(),
             "application_logs_enabled".to_string(),
@@ -206,6 +209,10 @@ impl App {
                     .unwrap_or_default();
                 s.traffic_parser_model = config
                     .get("llm_feature_traffic_parser")
+                    .cloned()
+                    .unwrap_or_default();
+                s.doc_helper_model = config
+                    .get("llm_feature_doc_helper")
                     .cloned()
                     .unwrap_or_default();
                 s.mcp_enabled = config
@@ -410,7 +417,7 @@ impl App {
                 // and max tokens.
                 // Layout: [models...] + add_model + feature assignments.
                 //
-                self.settings.model_definitions.len() + 6
+                self.settings.model_definitions.len() + 7
             }
             SettingsTab::Agents => {
                 // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
@@ -481,8 +488,8 @@ impl App {
                     self.save_setting("llm_feature_traffic_parser", &name).await;
                 }
                 6 => {
-                    self.settings.praxis_agent_model_ref = name.clone();
-                    self.save_praxis_agent_settings().await;
+                    self.settings.doc_helper_model = name.clone();
+                    self.save_setting("llm_feature_doc_helper", &name).await;
                 }
                 _ => {}
             }
@@ -763,7 +770,7 @@ impl App {
                         0 => {
                             self.open_model_form(None);
                         }
-                        1 | 3 | 4 | 5 => {
+                        1 | 3 | 4 | 5 | 6 => {
                             //
                             // Model assignment fields — open dropdown.
                             //
@@ -772,6 +779,7 @@ impl App {
                                 3 => &self.settings.semantic_ops_model,
                                 4 => &self.settings.semantic_parser_model,
                                 5 => &self.settings.traffic_parser_model,
+                                6 => &self.settings.doc_helper_model,
                                 _ => unreachable!(),
                             };
                             let pos = self

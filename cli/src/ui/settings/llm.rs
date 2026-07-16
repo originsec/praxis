@@ -139,6 +139,13 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
         state.editing,
         &state.edit_buffer,
     ));
+    lines.push(setting_row(
+        "Documentation Helper Model",
+        &state.doc_helper_model,
+        state.selected == base + 5,
+        state.editing,
+        &state.edit_buffer,
+    ));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);

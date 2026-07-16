@@ -46,4 +46,65 @@ fn main() {
         "pub const EMBEDDED_LUA_SCRIPTS_VERSION: &str = env!(\"CARGO_PKG_VERSION\");"
     )
     .unwrap();
+
+    embed_docs(&manifest_dir, &out_dir);
+}
+
+//
+// Embed the mdBook documentation sources (docs/src/**/*.md) into the binary
+// so the documentation helper agent can be seeded with them at runtime with
+// no filesystem dependency. Emits a flat list of (relative_path, contents)
+// pairs; runtime chunking/retrieval happens in the doc_helper module.
+//
+fn embed_docs(manifest_dir: &str, out_dir: &str) {
+    let docs_dir = Path::new(manifest_dir)
+        .parent()
+        .unwrap()
+        .join("docs")
+        .join("src");
+
+    println!("cargo:rerun-if-changed={}", docs_dir.display());
+
+    let dest = Path::new(out_dir).join("embedded_docs.rs");
+    let mut out = fs::File::create(&dest).unwrap();
+
+    let mut docs: Vec<String> = Vec::new();
+    if docs_dir.exists() {
+        collect_markdown(&docs_dir, &docs_dir, &mut docs);
+    }
+    docs.sort();
+
+    writeln!(out, "pub const EMBEDDED_DOCS: &[(&str, &str)] = &[").unwrap();
+    for rel in &docs {
+        writeln!(
+            out,
+            "    (\"{0}\", include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../docs/src/{0}\"))),",
+            rel
+        )
+        .unwrap();
+    }
+    writeln!(out, "];").unwrap();
+}
+
+//
+// Recursively collect *.md files under `root`, recording each path relative
+// to `base` with forward-slash separators (so the generated include_str!
+// paths are portable across platforms).
+//
+fn collect_markdown(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_markdown(base, &path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            println!("cargo:rerun-if-changed={}", path.display());
+            if let Ok(rel) = path.strip_prefix(base) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                out.push(rel);
+            }
+        }
+    }
 }

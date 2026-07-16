@@ -17,6 +17,7 @@
 - [Interception](./usage/interception.md)
 - [Log Query](./usage/log-query.md)
 - [Orchestrator](./usage/orchestrator.md)
+- [Help Assistant](./usage/help-assistant.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [Toolkit](./usage/toolkit.md)
 - [MCP Server](./usage/mcp.md)

@@ -9,6 +9,7 @@ mod config;
 mod conversions;
 mod database;
 mod dispatch;
+mod doc_helper;
 mod handlers;
 mod intercept_targets;
 mod log_query;
@@ -29,14 +30,13 @@ include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientSignalMessage,
     NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE, NodeBroadcastMessage, NodeSignalMessage,
-    publish_json_exchange,
+    durable_queue_options, publish_json_exchange,
 };
 use futures_util::StreamExt;
 use lapin::{
     Connection, ConnectionProperties, ExchangeKind,
     options::{
-        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions,
-        QueuePurgeOptions,
+        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueuePurgeOptions,
     },
     types::FieldTable,
 };
@@ -127,7 +127,7 @@ async fn run_main_loop() -> Result<()> {
     node_signal_channel
         .queue_declare(
             NODE_SIGNAL_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -158,7 +158,7 @@ async fn run_main_loop() -> Result<()> {
     client_signal_channel
         .queue_declare(
             CLIENT_SIGNAL_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -484,6 +484,12 @@ async fn run_main_loop() -> Result<()> {
     common::log_info!("Initialized AgentChat manager");
 
     //
+    // Initialize the documentation helper manager.
+    //
+    let doc_helper_manager = Arc::new(crate::doc_helper::DocHelperManager::new());
+    common::log_info!("Initialized documentation helper manager");
+
+    //
     // Initialize Toolkit manager.
     //
     let toolkit_manager = Arc::new(ToolkitManager::new(
@@ -523,7 +529,7 @@ async fn run_main_loop() -> Result<()> {
     web_event_log_channel
         .queue_declare(
             common::WEB_EVENT_LOG_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -533,7 +539,7 @@ async fn run_main_loop() -> Result<()> {
     node_event_log_channel
         .queue_declare(
             common::NODE_EVENT_LOG_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -967,6 +973,7 @@ async fn run_main_loop() -> Result<()> {
         semantic_ops_manager,
         chain_executor,
         agent_chat_manager,
+        doc_helper_manager,
         acp_server,
         acp_node_proxy,
         toolkit_manager,

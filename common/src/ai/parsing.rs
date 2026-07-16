@@ -51,7 +51,9 @@ fn find_matching_brace(text: &str, start: usize) -> Option<usize> {
 ///
 /// Returns: (tool_name, tool_args, remaining_text_without_tool_call)
 ///
-/// Looks for JSON blocks in format: {"tool": "tool_name", "args": {...}}
+/// Looks for JSON blocks in either of these formats:
+/// {"tool": "tool_name", "args": {...}}
+/// {"tool": "tool_name", "argument_name": "value"}
 /// Supports both code-fenced and plain JSON formats
 pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
     //
@@ -82,10 +84,7 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
             // Try to parse as tool call.
             //
             if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                if let (Some(tool_name), Some(args)) = (
-                    parsed.get("tool").and_then(|v| v.as_str()),
-                    parsed.get("args"),
-                ) {
+                if let Some((tool_name, args)) = extract_tool_call_parts(&parsed) {
                     //
                     // Find the closing fence.
                     //
@@ -98,7 +97,7 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
                     let after = &text[remaining_text_start..];
                     let remaining_text = format!("{}{}", before, after).trim().to_string();
 
-                    return Some((tool_name.to_string(), args.clone(), remaining_text));
+                    return Some((tool_name, args, remaining_text));
                 }
             }
         }
@@ -124,21 +123,30 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
             // Try to parse as tool call.
             //
             if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                if let (Some(tool_name), Some(args)) = (
-                    parsed.get("tool").and_then(|v| v.as_str()),
-                    parsed.get("args"),
-                ) {
+                if let Some((tool_name, args)) = extract_tool_call_parts(&parsed) {
                     let before = &text[..json_start];
                     let after = &text[json_end + 1..];
                     let remaining_text = format!("{}{}", before, after).trim().to_string();
 
-                    return Some((tool_name.to_string(), args.clone(), remaining_text));
+                    return Some((tool_name, args, remaining_text));
                 }
             }
         }
     }
 
     None
+}
+
+fn extract_tool_call_parts(parsed: &Value) -> Option<(String, Value)> {
+    let tool_name = parsed.get("tool")?.as_str()?.to_string();
+
+    if let Some(args) = parsed.get("args") {
+        return Some((tool_name, args.clone()));
+    }
+
+    let mut args = parsed.as_object()?.clone();
+    args.remove("tool");
+    Some((tool_name, Value::Object(args)))
 }
 
 /// Parse completion signal from AI response text
@@ -293,6 +301,23 @@ This will help me understand."#;
         assert_eq!(tool_name, "node_list");
         assert!(remaining.contains("I'll use this tool"));
         assert!(remaining.contains("to get the list"));
+    }
+
+    #[test]
+    fn test_parse_tool_call_with_direct_arguments() {
+        let text = r#"I'll check the Interception documentation for that.
+{"tool": "search_docs", "query": "node not showing in intercept window"}"#;
+
+        let result = parse_manual_tool_call(text);
+        assert!(result.is_some());
+
+        let (tool_name, args, remaining) = result.unwrap();
+        assert_eq!(tool_name, "search_docs");
+        assert_eq!(args["query"], "node not showing in intercept window");
+        assert_eq!(
+            remaining,
+            "I'll check the Interception documentation for that."
+        );
     }
 
     #[test]

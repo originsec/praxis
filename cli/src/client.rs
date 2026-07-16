@@ -154,6 +154,13 @@ struct ClientState {
     // error message so the TUI can show it verbatim.
     //
     pending_log_query: Option<oneshot::Sender<Result<LogQueryResults, String>>>,
+
+    //
+    // Documentation helper agent: streamed responses are forwarded to this
+    // subscriber (set by the app's event loop). Correlated by request_id in
+    // the event payload, so overlapping requests remain distinguishable.
+    //
+    doc_helper_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::DocHelperEvent>>,
 }
 
 #[derive(Clone, Debug)]
@@ -978,6 +985,36 @@ impl Client {
                 }
             }
 
+            //
+            // Documentation helper streaming responses.
+            //
+            ClientDirectMessage::DocHelperChunk { request_id, delta } => {
+                if let Some(ref tx) = state.doc_helper_tx {
+                    let _ = tx.send(crate::event::DocHelperEvent::Chunk { request_id, delta });
+                }
+            }
+            ClientDirectMessage::DocHelperFollowUp { request_id } => {
+                if let Some(ref tx) = state.doc_helper_tx {
+                    let _ = tx.send(crate::event::DocHelperEvent::FollowUp { request_id });
+                }
+            }
+            ClientDirectMessage::DocHelperComplete { request_id } => {
+                if let Some(ref tx) = state.doc_helper_tx {
+                    let _ = tx.send(crate::event::DocHelperEvent::Complete { request_id });
+                }
+            }
+            ClientDirectMessage::DocHelperError {
+                request_id,
+                message,
+            } => {
+                if let Some(ref tx) = state.doc_helper_tx {
+                    let _ = tx.send(crate::event::DocHelperEvent::Error {
+                        request_id,
+                        message,
+                    });
+                }
+            }
+
             _ => {}
         }
     }
@@ -1643,6 +1680,46 @@ impl Client {
             state.lock().await.terminal_output_tx = Some(tx);
         });
         rx
+    }
+
+    pub fn subscribe_doc_helper(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<crate::event::DocHelperEvent> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.doc_helper_tx = Some(tx);
+        });
+        rx
+    }
+
+    //
+    // Submit a documentation-helper prompt. Responses arrive asynchronously
+    // via the doc-helper subscription, correlated by `request_id`.
+    //
+    pub async fn send_doc_helper_prompt(
+        &self,
+        request_id: String,
+        prompt: String,
+        history: Vec<(String, String)>,
+        context: Option<String>,
+    ) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::DocHelperPrompt {
+            client_id: self.client_id.clone(),
+            request_id,
+            prompt,
+            history,
+            context,
+        })
+        .await
+    }
+
+    pub async fn send_doc_helper_cancel(&self, request_id: String) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::DocHelperCancel {
+            client_id: self.client_id.clone(),
+            request_id,
+        })
+        .await
     }
 
     //

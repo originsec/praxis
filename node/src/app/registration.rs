@@ -6,8 +6,8 @@ use tokio_util::sync::CancellationToken;
 use crate::utils;
 use common::{
     InterceptTargetConfig, NODE_SIGNAL_QUEUE, NodeCapability, NodeDirectMessage, NodeRegistration,
-    NodeRegistrationAck, NodeSignalMessage, PraxisAgentConfig, node_queue_name, publish_json,
-    rabbitmq_url,
+    NodeRegistrationAck, NodeSignalMessage, PraxisAgentConfig, durable_queue_options,
+    node_queue_name, publish_json, rabbitmq_url,
 };
 
 pub struct RegistrationResult {
@@ -185,7 +185,7 @@ pub async fn register_with_service(
         if let Err(e) = channel
             .queue_declare(
                 node_queue.as_str().into(),
-                QueueDeclareOptions::default(),
+                durable_queue_options(),
                 FieldTable::default(),
             )
             .await

@@ -3,6 +3,7 @@ pub mod chrome;
 pub mod common;
 pub mod filter_bar;
 pub mod form_modal;
+pub mod help;
 pub mod hint_row;
 pub mod hits;
 pub mod intercept;
@@ -99,6 +100,14 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref confirm) = app.confirm {
         popup::render_confirm(f, confirm);
         overlay_hits::register_confirm_hits(app, terminal, confirm);
+    }
+
+    //
+    // Documentation-helper overlay renders on top of everything, including
+    // popups, since it is summonable from any window.
+    //
+    if app.help.open {
+        help::render(f, &app.help);
     }
 }
 

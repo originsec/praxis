@@ -16,6 +16,7 @@ pub const LLM_FEATURE_SEMANTIC_PARSER: &str = "llm_feature_semantic_parser";
 pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
+pub const LLM_FEATURE_DOC_HELPER: &str = "llm_feature_doc_helper";
 
 /// Praxis agent configuration keys.
 pub const PRAXIS_AGENT_SETTINGS: &str = "praxis_agent_settings";
@@ -56,6 +57,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_TRAFFIC_PARSER,
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
+    LLM_FEATURE_DOC_HELPER,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
     APPLICATION_LOGS_ENABLED,
@@ -183,6 +185,12 @@ impl ServiceConfig {
     /// Get the model definition assigned to orchestrator feature
     pub fn get_orchestrator_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_ORCHESTRATOR)
+            .and_then(|model_ref| self.find_model_definition(model_ref))
+    }
+
+    /// Get the model definition assigned to the documentation helper feature
+    pub fn get_doc_helper_model_def(&self) -> Option<ModelDefinition> {
+        self.get(LLM_FEATURE_DOC_HELPER)
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 

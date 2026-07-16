@@ -45,6 +45,7 @@ pub struct ServiceContext {
     pub semantic_ops_manager: Arc<SemanticOpsManager>,
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
+    pub doc_helper_manager: Arc<crate::doc_helper::DocHelperManager>,
     pub acp_server: Arc<AcpServer>,
     pub acp_node_proxy: Arc<AcpNodeProxy>,
     pub toolkit_manager: Arc<ToolkitManager>,

@@ -1,6 +1,7 @@
 mod agent_scripts;
 mod chain_form;
 mod forms;
+pub mod help;
 mod input;
 pub mod intercept;
 pub mod log_query;
@@ -29,9 +30,7 @@ use chrono::Utc;
 use common::{
     ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, REMOTE_NODE_KINDS, SystemState,
 };
-use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -52,6 +51,7 @@ pub enum Window {
 pub struct App {
     pub active_window: Window,
     pub orchestrator: OrchestratorState,
+    pub help: help::HelpState,
     pub nodes: NodesState,
     pub intercept: InterceptState,
     pub log_query: LogQueryState,
@@ -424,6 +424,7 @@ impl App {
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
+            help: help::HelpState::default(),
             nodes: NodesState::default(),
             intercept: InterceptState::default(),
             log_query: LogQueryState::default(),
@@ -525,6 +526,7 @@ impl App {
                 self.handle_acp_notification(notif).await;
                 true
             }
+            AppEvent::DocHelper(event) => self.apply_doc_helper_event(event),
             AppEvent::SessionListPoll => false,
             AppEvent::OrchestratorRetryRecovery => {
                 if self.orchestrator.recovering {
@@ -1120,6 +1122,7 @@ impl App {
             .map(|s| s.is_streaming)
             .unwrap_or(false)
             || self.nodes.sessions.values().any(|s| s.is_waiting)
+            || (self.help.open && self.help.is_streaming)
     }
 
     fn has_live_execution_timers(&self) -> bool {
@@ -1144,6 +1147,21 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        //
+        // Documentation-helper overlay: Ctrl+H summons it from any window and
+        // while it is open it captures all keys. Handled before every other
+        // intercept (including terminal raw mode) so help is reachable from
+        // every screen.
+        //
+        if self.help.open {
+            self.handle_help_key(key).await;
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('h') {
+            self.open_help();
+            return;
+        }
+
         //
         // Terminal mode intercepts all keys except ^q when Nodes window active.
         // ^y toggles the terminal closed from inside the PTY view.
@@ -2119,6 +2137,23 @@ impl App {
     }
 
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
+        //
+        // The Help overlay is modal. Do not let clicks or scrolling leak
+        // through to the screen underneath; the wheel scrolls its transcript.
+        //
+        if self.help.open {
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.help.scroll = self.help.scroll.saturating_add(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    self.help.scroll = self.help.scroll.saturating_sub(3);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         //
         // Terminal mode: scroll only (no HitLayer targets while in PTY view).
         //

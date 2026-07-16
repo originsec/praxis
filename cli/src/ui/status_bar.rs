@@ -72,6 +72,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     left.push(chrome::mid_dot());
+    left.extend(chrome::dim_hint("^h", "help"));
+    left.push(chrome::mid_dot());
     left.extend(chrome::dim_hint(global::QUIT, "quit"));
 
     let right = Line::from(vec![

@@ -5,6 +5,7 @@
 mod agent_chat;
 mod chains;
 mod config;
+mod doc_helper;
 pub(crate) mod intercept;
 mod intercept_targets;
 mod logs;
@@ -19,6 +20,7 @@ mod traffic;
 use agent_chat::*;
 use chains::*;
 use config::*;
+use doc_helper::*;
 use intercept::*;
 use intercept_targets::*;
 use logs::*;
@@ -49,6 +51,21 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         ClientSignalMessage::AddRemoteNode { kind, url, token } => {
             handle_add_remote_node(ctx, kind, url, token).await
         }
+
+        //
+        // Documentation helper agent.
+        //
+        ClientSignalMessage::DocHelperPrompt {
+            client_id,
+            request_id,
+            prompt,
+            history,
+            context,
+        } => handle_doc_helper_prompt(ctx, client_id, request_id, prompt, history, context).await,
+        ClientSignalMessage::DocHelperCancel {
+            client_id: _,
+            request_id,
+        } => handle_doc_helper_cancel(ctx, request_id).await,
 
         //
         // Semantic operations.
