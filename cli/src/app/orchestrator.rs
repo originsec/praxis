@@ -9,12 +9,14 @@ pub enum ConversationEntry {
     UserPrompt(String),
     AssistantText(String),
     //
-    // Single entry per tool call. `outcome` is `None` while the call
-    // is in flight (we've sent the request but the result hasn't come
-    // back yet) and is filled in when the result arrives. Render uses
-    // `outcome` to pick the indicator (→ pending / ✓ ok / ✗ failed).
+    // Single entry per tool call. `tool_id` pairs start/result under
+    // concurrency (including two calls with the same tool name).
+    // `outcome` is `None` while the call is in flight and is filled in
+    // when the result arrives. Render uses `outcome` to pick the
+    // indicator (→ pending / ✓ ok / ✗ failed).
     //
     Tool {
+        tool_id: String,
         name: String,
         input: Option<String>,
         outcome: Option<ToolOutcome>,
@@ -34,10 +36,12 @@ pub(crate) fn clone_conversation_entry(e: &ConversationEntry) -> ConversationEnt
         ConversationEntry::UserPrompt(s) => ConversationEntry::UserPrompt(s.clone()),
         ConversationEntry::AssistantText(s) => ConversationEntry::AssistantText(s.clone()),
         ConversationEntry::Tool {
+            tool_id,
             name,
             input,
             outcome,
         } => ConversationEntry::Tool {
+            tool_id: tool_id.clone(),
             name: name.clone(),
             input: input.clone(),
             outcome: outcome.clone(),
@@ -879,6 +883,7 @@ impl App {
                         session.active_tool = Some(name.clone());
                         session.active_tool_input = raw_input.clone();
                         session.messages.push(ConversationEntry::Tool {
+                            tool_id,
                             name,
                             input: raw_input,
                             outcome: None,
@@ -897,37 +902,22 @@ impl App {
                     return;
                 }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
-                    let tool_name = session.active_tool.take().unwrap_or(tool_id);
-                    session.active_tool_input = None;
-                    if tool_name != "report_plan" {
-                        //
-                        // Find the most recent in-flight Tool entry and
-                        // fill in its outcome. Falls back to a fresh
-                        // entry if we somehow received a result without
-                        // a preceding request.
-                        //
-                        let updated = session.messages.iter_mut().rev().find_map(|m| match m {
-                            ConversationEntry::Tool {
-                                name: n,
-                                outcome: outcome @ None,
-                                ..
-                            } if *n == tool_name => Some(outcome),
-                            _ => None,
-                        });
-                        if let Some(slot) = updated {
-                            *slot = Some(ToolOutcome {
-                                success,
-                                result: Some(result),
-                            });
-                        } else {
-                            session.messages.push(ConversationEntry::Tool {
-                                name: tool_name,
-                                input: None,
-                                outcome: Some(ToolOutcome {
-                                    success,
-                                    result: Some(result),
-                                }),
-                            });
+                    //
+                    // Pair strictly by tool_call_id. Unmatched results
+                    // (report_plan is never stored as a Tool entry; plan
+                    // arrives via PlanUpdate) are ignored — never fall
+                    // back to active_tool/name matching, which cross-wires
+                    // concurrent same-batch tools.
+                    //
+                    if apply_orchestrator_tool_result(
+                        &mut session.messages,
+                        &tool_id,
+                        success,
+                        result,
+                    ) {
+                        if !has_pending_orchestrator_tool(&session.messages) {
+                            session.active_tool = None;
+                            session.active_tool_input = None;
                         }
                     }
                 }
@@ -1142,4 +1132,154 @@ impl App {
         }
     }
 
+}
+
+//
+// Pair a tool-result notification to a pending Tool conversation entry by
+// tool_call_id only. Returns true when an entry was updated.
+//
+// Unmatched ids (e.g. report_plan, which is never pushed as a Tool entry)
+// are intentionally ignored — never match by name / active_tool, which
+// would attach a report_plan result onto a concurrent sibling tool.
+//
+fn apply_orchestrator_tool_result(
+    messages: &mut [ConversationEntry],
+    tool_id: &str,
+    success: bool,
+    result: String,
+) -> bool {
+    let matched = messages.iter_mut().find_map(|m| match m {
+        ConversationEntry::Tool {
+            tool_id: id,
+            outcome: outcome @ None,
+            ..
+        } if *id == tool_id => Some(outcome),
+        _ => None,
+    });
+    if let Some(slot) = matched {
+        *slot = Some(ToolOutcome {
+            success,
+            result: Some(result),
+        });
+        true
+    } else {
+        false
+    }
+}
+
+fn has_pending_orchestrator_tool(messages: &[ConversationEntry]) -> bool {
+    messages.iter().any(|m| {
+        matches!(
+            m,
+            ConversationEntry::Tool {
+                outcome: None,
+                ..
+            }
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pending_tool(tool_id: &str, name: &str) -> ConversationEntry {
+        ConversationEntry::Tool {
+            tool_id: tool_id.to_string(),
+            name: name.to_string(),
+            input: None,
+            outcome: None,
+        }
+    }
+
+    #[test]
+    fn pairs_result_by_tool_id_not_name() {
+        let mut messages = vec![
+            pending_tool("uuid-a", "node_list"),
+            pending_tool("uuid-b", "node_list"),
+        ];
+
+        assert!(apply_orchestrator_tool_result(
+            &mut messages,
+            "uuid-b",
+            true,
+            "second".into(),
+        ));
+
+        match &messages[0] {
+            ConversationEntry::Tool {
+                tool_id,
+                outcome: None,
+                ..
+            } => assert_eq!(tool_id, "uuid-a"),
+            other => panic!("first entry should still be pending: {:?}", other_debug(other)),
+        }
+        match &messages[1] {
+            ConversationEntry::Tool {
+                tool_id,
+                outcome: Some(o),
+                ..
+            } => {
+                assert_eq!(tool_id, "uuid-b");
+                assert!(o.success);
+                assert_eq!(o.result.as_deref(), Some("second"));
+            }
+            _ => panic!("second entry should be completed"),
+        }
+    }
+
+    #[test]
+    fn report_plan_result_does_not_consume_pending_sibling() {
+        //
+        // report_plan ToolCall is never stored; its ToolResult must be a
+        // no-op and must not fill the pending node_list entry.
+        //
+        let mut messages = vec![pending_tool("uuid-node", "node_list")];
+
+        assert!(!apply_orchestrator_tool_result(
+            &mut messages,
+            "uuid-plan",
+            true,
+            r#"{"status":"success"}"#.into(),
+        ));
+
+        match &messages[0] {
+            ConversationEntry::Tool {
+                tool_id,
+                name,
+                outcome: None,
+                ..
+            } => {
+                assert_eq!(tool_id, "uuid-node");
+                assert_eq!(name, "node_list");
+            }
+            _ => panic!("node_list must remain pending after unmatched report_plan result"),
+        }
+        assert!(has_pending_orchestrator_tool(&messages));
+    }
+
+    #[test]
+    fn unmatched_result_does_not_create_ghost_entry() {
+        let mut messages = vec![pending_tool("uuid-a", "agent_list")];
+        assert!(!apply_orchestrator_tool_result(
+            &mut messages,
+            "unknown-id",
+            false,
+            "err".into(),
+        ));
+        assert_eq!(messages.len(), 1);
+        assert!(has_pending_orchestrator_tool(&messages));
+    }
+
+    fn other_debug(entry: &ConversationEntry) -> String {
+        match entry {
+            ConversationEntry::Tool { tool_id, name, outcome, .. } => {
+                format!("Tool {{ tool_id={tool_id}, name={name}, outcome={} }}", outcome.is_some())
+            }
+            ConversationEntry::UserPrompt(_) => "UserPrompt".into(),
+            ConversationEntry::AssistantText(_) => "AssistantText".into(),
+            ConversationEntry::Info(_) => "Info".into(),
+            ConversationEntry::Error(_) => "Error".into(),
+        }
+    }
 }

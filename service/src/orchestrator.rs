@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
 use common::ai::{
     ChatCompletionRequest, Message, Provider, Tool, Usage, create_ai_client,
-    get_system_prompt_with_tools, parse_manual_tool_call,
+    get_system_prompt_with_tools, parse_manual_tool_calls,
 };
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use rmcp::{
@@ -415,62 +415,99 @@ impl OrchestratorManager {
                         send_buffer.clear();
                     }
 
-                    let mut response_text = full_response.clone();
-                    let mut tool_results: Vec<(String, String)> = Vec::new();
+                    //
+                    // Collect every tool call from this model response, announce
+                    // them, then run independent calls concurrently. Results are
+                    // re-ordered to match emission order before feeding the model.
+                    //
+                    let (tool_calls, _remaining_text) =
+                        parse_manual_tool_calls(&full_response);
 
-                    while let Some((tool_name, tool_args, remaining_text)) =
-                        parse_manual_tool_call(&response_text)
-                    {
+                    if !tool_calls.is_empty() {
                         if stop_flag_clone.load(Ordering::SeqCst)
                             || cancel_flag_clone.load(Ordering::SeqCst)
                         {
                             break;
                         }
 
-                        common::log_info!("Orchestrator executing tool: {}", tool_name);
+                        let tool_ids: Vec<String> = tool_calls
+                            .iter()
+                            .map(|_| uuid::Uuid::new_v4().to_string())
+                            .collect();
 
-                        let tool_input_value = serde_json::to_value(&tool_args).ok();
-
-                        send_msg!(session_update_tool_call(&sid, &tool_name, tool_input_value));
-
-                        let (result, is_error) = if let Some(local_result) =
-                            execute_local_tool(&tool_name, &tool_args).await
+                        for ((tool_name, tool_args), tool_id) in
+                            tool_calls.iter().zip(tool_ids.iter())
                         {
-                            let err = result_is_error(&local_result);
-                            (local_result, err)
-                        } else {
-                            execute_mcp_tool(&peer, &tool_name, &tool_args).await
+                            common::log_info!(
+                                "Orchestrator queuing tool {} ({})",
+                                tool_name,
+                                common::short_id(tool_id)
+                            );
+                            let tool_input_value = serde_json::to_value(tool_args).ok();
+                            send_msg!(session_update_tool_call(
+                                &sid,
+                                tool_id,
+                                tool_name,
+                                tool_input_value
+                            ));
+                        }
+
+                        let peer_for_batch = peer.clone();
+                        let batch = execute_tool_calls_concurrent(
+                            tool_calls,
+                            tool_ids,
+                            &cancel_flag_clone,
+                            &stop_flag_clone,
+                            |tool_name, tool_args| {
+                                let peer = peer_for_batch.clone();
+                                async move {
+                                    if let Some(local_result) =
+                                        execute_local_tool(&tool_name, &tool_args).await
+                                    {
+                                        let err = result_is_error(&local_result);
+                                        (local_result, err)
+                                    } else {
+                                        execute_mcp_tool(&peer, &tool_name, &tool_args).await
+                                    }
+                                }
+                            },
+                        )
+                        .await;
+
+                        let Some(tool_results) = batch else {
+                            //
+                            // Cancelled or stopped mid-batch — do not feed
+                            // partial tool results back into the model.
+                            //
+                            break;
                         };
 
-                        common::log_info!(
-                            "Tool {} result: {}",
-                            tool_name,
-                            common::truncate_str(&result, 100)
-                        );
+                        for (tool_id, tool_name, result, is_error) in &tool_results {
+                            common::log_info!(
+                                "Tool {} result: {}",
+                                tool_name,
+                                common::truncate_str(result, 100)
+                            );
 
-                        if tool_name == "report_plan" {
-                            if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
-                                if let Some(plan_obj) = result_json.get("plan") {
-                                    if let Ok(plan) =
-                                        serde_json::from_value::<OrchestratorPlan>(plan_obj.clone())
-                                    {
-                                        let plan_json =
-                                            serde_json::to_value(&plan).unwrap_or(Value::Null);
-                                        send_msg!(session_update_plan(&sid, &plan_json));
+                            if tool_name == "report_plan" {
+                                if let Ok(result_json) = serde_json::from_str::<Value>(result) {
+                                    if let Some(plan_obj) = result_json.get("plan") {
+                                        if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(
+                                            plan_obj.clone(),
+                                        ) {
+                                            let plan_json =
+                                                serde_json::to_value(&plan).unwrap_or(Value::Null);
+                                            send_msg!(session_update_plan(&sid, &plan_json));
+                                        }
                                     }
                                 }
                             }
+
+                            send_msg!(session_update_tool_result(
+                                &sid, tool_id, result, *is_error
+                            ));
                         }
 
-                        send_msg!(session_update_tool_result(
-                            &sid, &tool_name, &result, is_error
-                        ));
-
-                        tool_results.push((tool_name, result));
-                        response_text = remaining_text;
-                    }
-
-                    if !tool_results.is_empty() {
                         if let Some(usage) = &stream_usage {
                             send_msg!(session_update_usage(
                                 &sid,
@@ -484,7 +521,9 @@ impl OrchestratorManager {
 
                         let combined_results: String = tool_results
                             .iter()
-                            .map(|(name, result)| format!("Tool '{}' result:\n{}", name, result))
+                            .map(|(_id, name, result, _err)| {
+                                format!("Tool '{}' result:\n{}", name, result)
+                            })
                             .collect::<Vec<_>>()
                             .join("\n\n");
                         conversation_history.push(Message::user(combined_results));
@@ -864,4 +903,217 @@ fn convert_mcp_tools(mcp_tools: Vec<rmcp::model::Tool>) -> Vec<Tool> {
             }
         })
         .collect()
+}
+
+//
+// Run every tool call in `calls` concurrently. Results are returned in the
+// same order as `calls` / `tool_ids` (not completion order). Returns `None`
+// if cancel/stop is observed before the full batch finishes — in-flight
+// tasks are aborted so the session does not sit waiting on every tool.
+//
+async fn execute_tool_calls_concurrent<F, Fut>(
+    calls: Vec<(String, Value)>,
+    tool_ids: Vec<String>,
+    cancel: &AtomicBool,
+    stop: &AtomicBool,
+    mut execute_one: F,
+) -> Option<Vec<(String, String, String, bool)>>
+where
+    F: FnMut(String, Value) -> Fut,
+    Fut: std::future::Future<Output = (String, bool)> + Send + 'static,
+{
+    debug_assert_eq!(calls.len(), tool_ids.len());
+
+    if cancel.load(Ordering::SeqCst) || stop.load(Ordering::SeqCst) {
+        return None;
+    }
+
+    let n = calls.len();
+    if n == 0 {
+        return Some(Vec::new());
+    }
+
+    let names: Vec<String> = calls.iter().map(|(n, _)| n.clone()).collect();
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for (i, ((name, args), tool_id)) in calls.into_iter().zip(tool_ids.iter()).enumerate() {
+        if cancel.load(Ordering::SeqCst) || stop.load(Ordering::SeqCst) {
+            join_set.abort_all();
+            while join_set.join_next().await.is_some() {}
+            return None;
+        }
+        let tool_id = tool_id.clone();
+        let fut = execute_one(name, args);
+        join_set.spawn(async move {
+            let (result, is_error) = fut.await;
+            (i, tool_id, result, is_error)
+        });
+    }
+
+    let mut slots: Vec<Option<(String, String, bool)>> = (0..n).map(|_| None).collect();
+
+    let cancel_watch = async {
+        loop {
+            if cancel.load(Ordering::SeqCst) || stop.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    };
+    tokio::pin!(cancel_watch);
+
+    loop {
+        tokio::select! {
+            _ = &mut cancel_watch => {
+                join_set.abort_all();
+                while join_set.join_next().await.is_some() {}
+                return None;
+            }
+            joined = join_set.join_next() => {
+                match joined {
+                    Some(Ok((i, tool_id, result, is_error))) => {
+                        slots[i] = Some((tool_id, result, is_error));
+                    }
+                    Some(Err(_)) => {
+                        join_set.abort_all();
+                        while join_set.join_next().await.is_some() {}
+                        return None;
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(n);
+    for (name, slot) in names.into_iter().zip(slots.into_iter()) {
+        let (tool_id, result, is_error) = slot?;
+        ordered.push((tool_id, name, result, is_error));
+    }
+    Some(ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn concurrent_tools_overlap_in_time() {
+        let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
+        let calls = vec![
+            ("wait_a".to_string(), json!({})),
+            ("wait_b".to_string(), json!({})),
+        ];
+        let ids = vec!["id-a".to_string(), "id-b".to_string()];
+
+        let start = Instant::now();
+        let results = execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            (format!("ok-{name}"), false)
+        })
+        .await
+        .expect("batch should complete");
+
+        let elapsed = start.elapsed();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "id-a");
+        assert_eq!(results[0].1, "wait_a");
+        assert_eq!(results[0].2, "ok-wait_a");
+        assert_eq!(results[1].0, "id-b");
+        assert_eq!(results[1].1, "wait_b");
+        assert_eq!(results[1].2, "ok-wait_b");
+        //
+        // Sequential would be ~400ms; concurrent should finish near 200ms.
+        // Allow headroom for scheduler noise but stay clearly under sum.
+        //
+        assert!(
+            elapsed < Duration::from_millis(350),
+            "expected concurrent overlap, elapsed={elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_tools_preserve_input_order() {
+        let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
+        let calls = vec![
+            ("slow".to_string(), json!({})),
+            ("fast".to_string(), json!({})),
+        ];
+        let ids = vec!["id-slow".to_string(), "id-fast".to_string()];
+
+        let results = execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+            if name == "slow" {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            } else {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            (format!("result-{name}"), false)
+        })
+        .await
+        .expect("batch should complete");
+
+        assert_eq!(results[0].1, "slow");
+        assert_eq!(results[1].1, "fast");
+        assert_eq!(results[0].0, "id-slow");
+        assert_eq!(results[1].0, "id-fast");
+    }
+
+    #[tokio::test]
+    async fn concurrent_tools_cancel_aborts_batch() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = AtomicBool::new(false);
+        let cancel_flag = Arc::clone(&cancel);
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel_flag.store(true, Ordering::SeqCst);
+        });
+
+        let calls = vec![
+            ("long_a".to_string(), json!({})),
+            ("long_b".to_string(), json!({})),
+        ];
+        let ids = vec!["id-a".to_string(), "id-b".to_string()];
+
+        let start = Instant::now();
+        let results =
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |_name, _| async move {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                ("done".to_string(), false)
+            })
+            .await;
+
+        assert!(results.is_none(), "cancel should abort the batch");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "cancel should not wait for full tool duration"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_same_name_tools_keep_distinct_ids() {
+        let cancel = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
+        let calls = vec![
+            ("node_list".to_string(), json!({"a": 1})),
+            ("node_list".to_string(), json!({"a": 2})),
+        ];
+        let ids = vec!["uuid-1".to_string(), "uuid-2".to_string()];
+
+        let results =
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, args| async move {
+                let tag = args.get("a").and_then(|v| v.as_i64()).unwrap_or(0);
+                (format!("{name}-{tag}"), false)
+            })
+            .await
+            .expect("batch should complete");
+
+        assert_eq!(results[0].0, "uuid-1");
+        assert_eq!(results[1].0, "uuid-2");
+        assert_eq!(results[0].2, "node_list-1");
+        assert_eq!(results[1].2, "node_list-2");
+    }
 }

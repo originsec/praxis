@@ -611,12 +611,17 @@ pub fn session_update_user_text(session_id: &str, text: impl Into<String>) -> Cl
     )
 }
 
+//
+// `tool_call_id` must be the same value on start and result so clients can
+// pair concurrent calls (including same-name tools).
+//
 pub fn session_update_tool_call(
     session_id: &str,
+    tool_call_id: &str,
     tool_name: &str,
     tool_input: Option<Value>,
 ) -> ClientDirectMessage {
-    let mut tc = acp::schema::ToolCall::new(uuid::Uuid::new_v4().to_string(), tool_name);
+    let mut tc = acp::schema::ToolCall::new(tool_call_id.to_string(), tool_name);
     if let Some(input) = tool_input {
         tc = tc.raw_input(input);
     }
@@ -625,7 +630,7 @@ pub fn session_update_tool_call(
 
 pub fn session_update_tool_result(
     session_id: &str,
-    tool_name: &str,
+    tool_call_id: &str,
     result: &str,
     is_error: bool,
 ) -> ClientDirectMessage {
@@ -639,7 +644,7 @@ pub fn session_update_tool_result(
         .content(vec![acp::schema::ToolCallContent::Content(
             acp::schema::Content::new(result),
         )]);
-    let update = acp::schema::ToolCallUpdate::new(tool_name.to_string(), fields);
+    let update = acp::schema::ToolCallUpdate::new(tool_call_id.to_string(), fields);
     session_notification(
         session_id,
         acp::schema::SessionUpdate::ToolCallUpdate(update),

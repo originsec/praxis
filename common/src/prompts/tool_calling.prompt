@@ -9,28 +9,34 @@ Output the raw JSON object directly. Code fences will cause parsing errors.
 
 ## CRITICAL RULES - READ CAREFULLY
 
-### Rule 1: ONE TOOL CALL PER MESSAGE
-Output only ONE tool call JSON block per response. Never multiple.
+### Rule 1: MULTIPLE INDEPENDENT TOOLS MAY BE EMITTED TOGETHER
+When several tool calls do not depend on each other's results, output
+multiple tool-call JSON blocks in the same response. They will run
+concurrently and you will receive all results together in the next
+message.
 
-### Rule 2: STOP AFTER THE TOOL CALL
-After outputting the tool call JSON, OUTPUT NOTHING ELSE.
-Do not write any text after the tool call.
+When a later call needs the result of an earlier one, emit only the
+prerequisite call(s) first, wait for the result(s), then continue.
+
+### Rule 2: STOP AFTER THE TOOL CALL(S)
+After outputting the tool call JSON block(s), OUTPUT NOTHING ELSE.
+Do not write any text after the last tool call.
 Do not write a completion signal.
 Do not write "Task completed".
-Do not predict or guess what the tool will return.
+Do not predict or guess what the tool(s) will return.
 
 ### Rule 3: YOU CANNOT KNOW THE RESULT BEFORE RECEIVING IT
 When you call a tool, the system will:
-1. Parse your tool call
-2. Execute the tool
-3. Return the result to you in a new message
+1. Parse your tool call(s)
+2. Execute the tool(s) (concurrently when multiple)
+3. Return the result(s) to you in a new message
 
 Until you receive that response, you have NO IDEA what the result is.
 Making up a result is WRONG and will cause TASK FAILURE.
 
 ### Rule 4: WAIT FOR THE RESPONSE
-After calling a tool, your message ENDS. You will receive the tool result
-in a subsequent message. Only THEN can you know what happened.
+After calling tool(s), your message ENDS. You will receive the tool
+result(s) in a subsequent message. Only THEN can you know what happened.
 
 ## EXAMPLES
 
@@ -53,11 +59,19 @@ WHY IT'S WRONG: You wrote text after the tool call. You don't have the result ye
 
 WHY IT'S WRONG: You output completion BEFORE receiving the tool result. The result data is fabricated.
 
-### CORRECT:
+### CORRECT - single tool:
 I will query the remote agent to list network connections.
 {"tool": "session_prompt", "args": {"text": "show network connections"}}
 
 The message ends immediately after the tool call JSON. No more text. No completion. No guessing.
+
+### CORRECT - multiple independent tools in one response:
+I will list nodes and available operations in parallel.
+{"tool": "node_list", "args": {}}
+{"tool": "op_available", "args": {}}
+
+Both calls are independent, so they appear together and run concurrently.
+Do not invent either result; wait for the combined tool-result message.
 
 ### Rule 5: ESCAPE DOUBLE QUOTES IN JSON STRINGS
 When a tool argument value contains double quotes (e.g., shell commands), escape them as \" inside the JSON or use single quotes in the command itself.
