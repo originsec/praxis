@@ -2560,7 +2560,10 @@ fn copy_to_clipboard(text: &str) -> bool {
 #[cfg(test)]
 mod body_cache_tests {
     use super::*;
-    use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
+    use common::{
+        InterceptMethod, InterceptedTrafficEntry, TrafficDirection, TrafficMatch,
+        TrafficMatchWithDetails,
+    };
 
     fn entry(id: i64, req: Option<Vec<u8>>, resp: Option<Vec<u8>>) -> InterceptedTrafficEntry {
         InterceptedTrafficEntry {
@@ -2721,7 +2724,6 @@ mod body_cache_tests {
         assert_eq!(ids, vec![12]);
 
         // Matches: same late-append policy.
-        use common::{TrafficMatch, TrafficMatchWithDetails};
         use chrono::Utc;
         let mk = |id: i64| TrafficMatchWithDetails {
             match_info: TrafficMatch {
@@ -2865,5 +2867,96 @@ mod body_cache_tests {
         assert!(!should_apply_clear_boundary(Some("a"), "b"));
         assert!(should_apply_clear_boundary(Some("a"), ""));
         assert!(should_apply_clear_boundary(None, "a"));
+    }
+
+    fn match_entry(id: i64) -> TrafficMatchWithDetails {
+        TrafficMatchWithDetails {
+            match_info: TrafficMatch {
+                id,
+                traffic_id: id,
+                rule_id: 1,
+                rule_name: "r".into(),
+                matched_at: chrono::Utc::now(),
+                summary: None,
+            },
+            traffic: entry(id, None, None),
+        }
+    }
+
+    #[test]
+    fn paused_overflow_prunes_dropped_gen() {
+        //
+        // While paused, deferring more than BUFFER_CAP rows must evict the
+        // oldest and drop its generation so live_entry_gens stays bounded by
+        // the buffer, not by total traffic seen.
+        //
+        let mut state = InterceptState::default();
+        state.paused = true;
+        let batch: Vec<_> = (1..=(BUFFER_CAP as i64 + 1))
+            .map(|id| entry(id, None, None))
+            .collect();
+        state.push_entries_scoped(None, 0, batch);
+
+        assert_eq!(state.paused_pending.len(), BUFFER_CAP);
+        assert_eq!(
+            state.live_entry_gens.len(),
+            BUFFER_CAP,
+            "gen map must be bounded by the buffer cap"
+        );
+        assert!(
+            !state.live_entry_gens.contains_key(&1),
+            "evicted oldest id must lose its generation"
+        );
+        assert!(state.live_entry_gens.contains_key(&2));
+        assert!(state.live_entry_gens.contains_key(&(BUFFER_CAP as i64 + 1)));
+    }
+
+    #[test]
+    fn paused_overflow_keeps_gen_for_still_queued_id() {
+        //
+        // The same id can be deferred more than once while paused. Evicting
+        // one copy must not drop the generation while another copy remains
+        // queued.
+        //
+        let mut state = InterceptState::default();
+        state.paused = true;
+
+        // Two copies of id 1, then enough unique ids to force one eviction.
+        state.push_entries_scoped(None, 0, vec![entry(1, None, None), entry(1, None, None)]);
+        let filler: Vec<_> = (2..=(BUFFER_CAP as i64))
+            .map(|id| entry(id, None, None))
+            .collect();
+        state.push_entries_scoped(None, 0, filler);
+
+        assert_eq!(state.paused_pending.len(), BUFFER_CAP);
+        assert!(
+            state.live_entry_gens.contains_key(&1),
+            "gen for id 1 must survive while a second copy is still queued"
+        );
+        assert!(state.paused_pending.iter().any(|e| e.id == Some(1)));
+    }
+
+    #[test]
+    fn match_eviction_past_cap_prunes_gen() {
+        //
+        // Pushing more than MATCH_BUFFER_CAP unique matches must evict the
+        // oldest and drop its generation so live_match_gens stays bounded.
+        //
+        let mut state = InterceptState::default();
+        for id in 1..=(MATCH_BUFFER_CAP as i64 + 1) {
+            state.push_matches_with_generation(0, vec![match_entry(id)]);
+        }
+
+        assert_eq!(state.matches.len(), MATCH_BUFFER_CAP);
+        assert_eq!(
+            state.live_match_gens.len(),
+            MATCH_BUFFER_CAP,
+            "match gen map must be bounded by the buffer cap"
+        );
+        assert!(
+            !state.live_match_gens.contains_key(&1),
+            "evicted oldest match must lose its generation"
+        );
+        assert!(state.live_match_gens.contains_key(&(MATCH_BUFFER_CAP as i64 + 1)));
     }
 }

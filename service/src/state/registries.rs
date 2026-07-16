@@ -383,6 +383,88 @@ mod merge_status_tests {
     }
 }
 
+#[cfg(test)]
+mod registry_intercept_tests {
+    use super::NodeRegistry;
+    use common::{InterceptMethod, InterceptStatus, NodeRegistration};
+
+    async fn registry_with_node(node_id: &str) -> NodeRegistry {
+        let registry = NodeRegistry::new();
+        registry
+            .register(&NodeRegistration {
+                node_id: node_id.into(),
+                node_type: "test".into(),
+                machine_name: "m".into(),
+                os_details: "os".into(),
+                capabilities: vec![],
+            })
+            .await;
+        registry
+    }
+
+    fn retained_status(node_id: &str) -> InterceptStatus {
+        InterceptStatus {
+            node_id: node_id.into(),
+            enabled: true,
+            method: Some(InterceptMethod::Proxy),
+            proxy_port: Some(8443),
+            intercepted_domains: vec!["a.example".into()],
+            cleanup_required: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn command_enabled_clears_stale_cleanup_but_keeps_port_and_domains() {
+        let registry = registry_with_node("n1").await;
+        registry.set_intercept_status(retained_status("n1")).await;
+
+        registry
+            .note_intercept_command_enabled("n1", InterceptMethod::Vpn)
+            .await;
+
+        let st = registry.get_intercept_status("n1").await.unwrap();
+        assert!(st.enabled);
+        assert_eq!(st.method, Some(InterceptMethod::Vpn));
+        assert_eq!(st.proxy_port, Some(8443));
+        assert_eq!(st.intercepted_domains, vec!["a.example".to_string()]);
+        assert!(
+            !st.cleanup_required,
+            "a successful enable must clear a stale cleanup flag from a prior failed op"
+        );
+    }
+
+    #[tokio::test]
+    async fn command_disabled_clears_cleanup_and_sparse_fields() {
+        let registry = registry_with_node("n1").await;
+        registry.set_intercept_status(retained_status("n1")).await;
+
+        registry.note_intercept_command_disabled("n1").await;
+
+        let st = registry.get_intercept_status("n1").await.unwrap();
+        assert!(!st.enabled);
+        assert!(!st.cleanup_required);
+        assert!(st.method.is_none());
+        assert!(st.proxy_port.is_none());
+        assert!(st.intercepted_domains.is_empty());
+    }
+
+    #[tokio::test]
+    async fn command_enabled_without_retained_status_is_clean() {
+        let registry = registry_with_node("n1").await;
+
+        registry
+            .note_intercept_command_enabled("n1", InterceptMethod::Proxy)
+            .await;
+
+        let st = registry.get_intercept_status("n1").await.unwrap();
+        assert!(st.enabled);
+        assert_eq!(st.method, Some(InterceptMethod::Proxy));
+        assert!(st.proxy_port.is_none());
+        assert!(st.intercepted_domains.is_empty());
+        assert!(!st.cleanup_required);
+    }
+}
+
 /// Kind of pending command — used to shape the client-facing reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PendingCommandKind {
