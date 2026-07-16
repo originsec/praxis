@@ -39,6 +39,10 @@ pub fn silent_command(program: &str) -> Command {
 //
 
 pub fn output_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<Output> {
+    //
+    // Own a process group/session so timeout can kill the whole tree.
+    //
+    prepare_owned_process_group(cmd);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -51,7 +55,7 @@ pub fn output_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<O
     match rx.recv_timeout(timeout) {
         Ok(result) => result,
         Err(_) => {
-            kill_process_tree(pid);
+            kill_owned_process_tree(pid);
             //
             // Drain the waiter so we do not leave a zombie join forever.
             //
@@ -59,12 +63,69 @@ pub fn output_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<O
             Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
-                    "host command timed out after {}s (pid {}); treat host state as unknown",
+                    "host command timed out after {}s (pid {}); process tree kill attempted; treat host state as unknown",
                     timeout.as_secs(),
                     pid
                 ),
             ))
         }
+    }
+}
+
+/// Spawn children in their own process group (Unix) for tree kill on timeout.
+fn prepare_owned_process_group(cmd: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        //
+        // process_group(0) makes the child the leader of a new group equal to
+        // its pid so kill(-pid) targets the whole tree.
+        //
+        cmd.process_group(0);
+    }
+    let _ = cmd;
+}
+
+/// Kill the owned process tree created by [`prepare_owned_process_group`].
+fn kill_owned_process_tree(pid: u32) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            //
+            // Negative pid = process group. Also kill the pid directly in case
+            // process_group setup failed on a platform edge.
+            //
+            let _ = libc::kill(-(pid as i32), libc::SIGKILL);
+            let _ = libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        //
+        // Bounded taskkill: never hang the timeout path on an unbounded helper.
+        //
+        let mut kill_cmd = silent_command("taskkill");
+        kill_cmd
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut child) = kill_cmd.spawn() {
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let _ = tx.send(child.wait());
+            });
+            if rx.recv_timeout(Duration::from_secs(3)).is_err() {
+                //
+                // Last resort: kill taskkill itself by pid is unavailable;
+                // abandon after 3s so Reset/Disable stay responsive.
+                //
+            }
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
     }
 }
 
@@ -76,30 +137,7 @@ pub fn run_host_output(program: &str, args: &[&str]) -> io::Result<Output> {
     output_with_timeout(&mut cmd, HOST_CMD_TIMEOUT)
 }
 
-fn kill_process_tree(pid: u32) {
-    #[cfg(unix)]
-    {
-        //
-        // Best-effort: kill the process group if the child is session leader;
-        // otherwise kill the pid. SIGKILL so timeout always unblocks.
-        //
-        unsafe {
-            let _ = libc::kill(pid as i32, libc::SIGKILL);
-        }
-    }
-    #[cfg(windows)]
-    {
-        let _ = silent_command("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-    }
-}
+
 
 /// Pure: map I/O error from timed host commands to a cleanup-oriented message.
 #[allow(dead_code)] // pure helper for call sites and unit tests
@@ -108,6 +146,57 @@ pub fn host_cmd_timeout_message(err: &io::Error) -> Option<String> {
         Some(err.to_string())
     } else {
         None
+    }
+}
+
+///
+/// Classify a host-command I/O error for cleanup paths that claim restored
+/// state. TimedOut (and other hard I/O failures) must not be treated as
+/// success; NotFound is optional tooling absence.
+///
+pub fn host_cleanup_io_is_failure(err: &io::Error) -> bool {
+    match err.kind() {
+        io::ErrorKind::TimedOut => true,
+        io::ErrorKind::NotFound => false,
+        _ => true,
+    }
+}
+
+///
+/// Pure classification for systemd unset-environment results used by
+/// `unset_systemd_user_env`. Unit tests drive this shipped helper.
+///
+pub fn classify_systemd_unset_result(
+    result: Result<std::process::Output, io::Error>,
+) -> Result<(), String> {
+    match result {
+        Ok(o) if o.status.success() => Ok(()),
+        //
+        // systemctl --user unset-environment already succeeds when the
+        // variables are absent. A non-zero exit is a real failure (e.g. no
+        // user manager); do not claim cleanup succeeded.
+        //
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let detail = stderr.trim();
+            if detail.is_empty() {
+                Err(format!(
+                    "systemctl unset-environment exited with {}; host env state unknown",
+                    o.status
+                ))
+            } else {
+                Err(format!(
+                    "systemctl unset-environment failed ({}): {}; host env state unknown",
+                    o.status, detail
+                ))
+            }
+        }
+        Err(e) if !host_cleanup_io_is_failure(&e) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => Err(format!(
+            "systemctl unset-environment timed out; host env state unknown: {}",
+            e
+        )),
+        Err(e) => Err(format!("systemctl unset-environment failed: {}", e)),
     }
 }
 
@@ -137,6 +226,61 @@ mod host_cmd_tests {
         assert!(host_cmd_timeout_message(&err).is_some());
         let other = io::Error::new(io::ErrorKind::NotFound, "missing");
         assert!(host_cmd_timeout_message(&other).is_none());
+    }
+
+    #[test]
+    fn classify_systemd_unset_treats_timed_out_as_cleanup_failure() {
+        use super::{classify_systemd_unset_result, host_cleanup_io_is_failure};
+        let timed = io::Error::new(io::ErrorKind::TimedOut, "host command timed out");
+        assert!(host_cleanup_io_is_failure(&timed));
+        let err = classify_systemd_unset_result(Err(timed)).unwrap_err();
+        assert!(
+            err.contains("timed out") || err.contains("unknown"),
+            "expected timeout failure message, got: {err}"
+        );
+        // NotFound (no systemctl) is not a hard cleanup failure.
+        let missing = io::Error::new(io::ErrorKind::NotFound, "no systemctl");
+        assert!(!host_cleanup_io_is_failure(&missing));
+        assert!(classify_systemd_unset_result(Err(missing)).is_ok());
+    }
+
+    #[test]
+    fn classify_systemd_unset_treats_nonzero_exit_as_cleanup_failure() {
+        use super::classify_systemd_unset_result;
+        use std::process::Output;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            use std::process::ExitStatus;
+
+            let failed = Output {
+                status: ExitStatus::from_raw(1 << 8),
+                stdout: Vec::new(),
+                stderr: b"Failed to connect to bus".to_vec(),
+            };
+            let err = classify_systemd_unset_result(Ok(failed)).unwrap_err();
+            assert!(
+                err.contains("Failed to connect to bus") || err.contains("unknown"),
+                "expected non-zero failure message, got: {err}"
+            );
+
+            let ok = Output {
+                status: ExitStatus::from_raw(0),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            };
+            assert!(classify_systemd_unset_result(Ok(ok)).is_ok());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = classify_systemd_unset_result;
+            let _ = Output {
+                status: Default::default(),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            };
+        }
     }
 
     #[test]

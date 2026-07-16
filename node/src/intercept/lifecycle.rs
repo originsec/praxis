@@ -93,6 +93,33 @@ pub fn may_teardown_vpn_after_engine_join(engine_confirmed_stopped: bool) -> boo
     engine_confirmed_stopped
 }
 
+///
+/// Whether force_cleanup may run disk-based `cleanup_stale_state` / Drop may
+/// run `cleanup_vpn_sync`. False while a packet-engine JoinHandle is still
+/// owned (termination unconfirmed).
+///
+pub fn may_run_sync_vpn_or_stale_cleanup(packet_engine_task_owned: bool) -> bool {
+    !packet_engine_task_owned
+}
+
+///
+/// Whether Reset may discard the manager and re-register as clean after a
+/// force_cleanup attempt. False when cleanup was incomplete.
+///
+pub fn may_reset_reregister_after_force_cleanup(force_cleanup_ok: bool) -> bool {
+    force_cleanup_ok
+}
+
+/// Cleanup-required for status: lifecycle CleanupRequired, or Disabled with
+/// retained recovery ownership (disk) after incomplete process rebuild.
+pub fn status_shows_cleanup_required(
+    lifecycle: InterceptLifecycle,
+    has_recovery_state: bool,
+) -> bool {
+    matches!(lifecycle, InterceptLifecycle::CleanupRequired)
+        || (matches!(lifecycle, InterceptLifecycle::Disabled) && has_recovery_state)
+}
+
 /// Status/UI: incomplete cleanup is reported independently of `is_enabled`.
 pub fn status_cleanup_required(lifecycle: InterceptLifecycle) -> bool {
     matches!(lifecycle, InterceptLifecycle::CleanupRequired)
@@ -234,5 +261,21 @@ mod tests {
     fn vpn_teardown_requires_confirmed_engine_stop() {
         assert!(may_teardown_vpn_after_engine_join(true));
         assert!(!may_teardown_vpn_after_engine_join(false));
+        assert!(!may_run_sync_vpn_or_stale_cleanup(true));
+        assert!(may_run_sync_vpn_or_stale_cleanup(false));
+        assert!(!may_reset_reregister_after_force_cleanup(false));
+        assert!(may_reset_reregister_after_force_cleanup(true));
+        assert!(status_shows_cleanup_required(
+            InterceptLifecycle::CleanupRequired,
+            false
+        ));
+        assert!(status_shows_cleanup_required(
+            InterceptLifecycle::Disabled,
+            true
+        ));
+        assert!(!status_shows_cleanup_required(
+            InterceptLifecycle::Disabled,
+            false
+        ));
     }
 }

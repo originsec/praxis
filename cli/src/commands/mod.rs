@@ -98,6 +98,7 @@ mod find_node_tests {
             selected_agent: None,
             intercept_active: false,
             intercept_supported: false,
+            intercept_status: None,
             last_update: chrono::Utc::now(),
             status: common::NodeStatus::Online,
             active_terminal_id: None,

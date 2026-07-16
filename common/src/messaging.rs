@@ -2942,6 +2942,12 @@ pub struct NodeState {
     /// Whether interception is supported on this node (Windows + has agent with intercept domain)
     #[serde(default)]
     pub intercept_supported: bool,
+    ///
+    /// Latest full intercept status retained by the service (cleanup_required,
+    /// method, port, domains). Serde-default for older peers.
+    ///
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intercept_status: Option<InterceptStatus>,
     pub last_update: chrono::DateTime<chrono::Utc>,
     /// Connectivity status, set by the service
     #[serde(default = "default_node_status")]

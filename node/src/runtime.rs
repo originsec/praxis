@@ -466,6 +466,7 @@ async fn listen_to_queues(
 
                 crate::agent_connectors::lua::runtime::signal_reset();
 
+                let mut force_cleanup_ok = true;
                 {
                     let (terminal_manager, intercept_manager) = {
                         let state = node_state.read().await;
@@ -477,12 +478,30 @@ async fn listen_to_queues(
                     intercept_manager.request_cancel();
                     if intercept_manager.needs_cleanup() {
                         if let Err(e) = intercept_manager.force_cleanup().await {
+                            force_cleanup_ok = false;
                             common::log_error!(
                                 "Failed to cleanup intercept during reset: {}",
                                 e
                             );
                         }
                     }
+                }
+
+                //
+                // Incomplete force_cleanup must not drop the manager and
+                // re-register as clean (detached packet task risk). Exit the
+                // process instead so OS reclaims any retained engine work.
+                //
+                if !crate::intercept::lifecycle::may_reset_reregister_after_force_cleanup(
+                    force_cleanup_ok,
+                ) {
+                    common::log_error!(
+                        "Reset aborted: intercept cleanup incomplete; shutting down instead of re-register"
+                    );
+                    if let Some(forwarders) = forwarders.take() {
+                        forwarders.shutdown().await;
+                    }
+                    return Ok(RuntimeExit::Shutdown);
                 }
 
                 common::log_info!("Reset cleanup complete, will re-register");

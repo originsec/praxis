@@ -204,13 +204,10 @@ pub fn remove_intercept_env_vars() -> Result<()> {
         home_dirs.len()
     );
 
+    let mut failures = Vec::new();
     for home_dir in &home_dirs {
         if let Err(e) = remove_intercept_env_vars_for_home(home_dir) {
-            common::log_warn!(
-                "Failed to clean up env vars for {}: {}",
-                home_dir.display(),
-                e
-            );
+            failures.push(format!("{}: {}", home_dir.display(), e));
         }
     }
 
@@ -218,7 +215,7 @@ pub fn remove_intercept_env_vars() -> Result<()> {
     // Unset systemd user environment.
     //
     if let Err(e) = unset_systemd_user_env() {
-        common::log_warn!("Failed to unset systemd user environment: {}", e);
+        failures.push(format!("systemd user env: {}", e));
     }
 
     //
@@ -227,12 +224,19 @@ pub fn remove_intercept_env_vars() -> Result<()> {
     let cert_path = cert_export_path();
     if cert_path.exists() {
         if let Err(e) = std::fs::remove_file(&cert_path) {
-            common::log_warn!("Failed to remove exported CA cert: {}", e);
+            failures.push(format!("remove CA cert: {}", e));
         }
     }
 
-    common::log_info!("Removed intercept environment variables");
-    Ok(())
+    if failures.is_empty() {
+        common::log_info!("Removed intercept environment variables");
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "intercept env cleanup incomplete (host state may be unknown): {}",
+            failures.join("; ")
+        )
+    }
 }
 
 /// Remove intercept env vars for a specific home directory
@@ -500,15 +504,16 @@ fn unset_systemd_user_env() -> Result<()> {
         "no_proxy",
     ];
 
-    let output = std::process::Command::new("systemctl").args(&args).output_bounded();
+    let output = std::process::Command::new("systemctl")
+        .args(&args)
+        .output_bounded();
 
-    match output {
-        Ok(o) if o.status.success() => {
+    match crate::utils::classify_systemd_unset_result(output) {
+        Ok(()) => {
             common::log_info!("Unset systemd user environment variables");
             Ok(())
         }
-        Ok(_) => Ok(()),  // Ignore errors - vars might not have been set
-        Err(_) => Ok(()), // Ignore if systemctl not available
+        Err(msg) => Err(anyhow::anyhow!("{}", msg)),
     }
 }
 

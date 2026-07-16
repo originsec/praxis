@@ -22,6 +22,11 @@ pub(super) async fn handle_intercept_rule_create(
         name
     );
 
+    //
+    // Dirty before the DB write so concurrent ingest cannot keep using a
+    // clean snapshot that misses the new rule (or later match inserts).
+    //
+    ctx.rules_snapshot.mark_dirty();
     match ctx
         .database
         .insert_rule(
@@ -80,6 +85,19 @@ pub(super) async fn handle_intercept_rule_create(
             }
         }
         Err(e) => {
+            //
+            // DB unchanged; rebuild clean snapshot when possible.
+            //
+            if let Err(re) = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                common::log_warn!(
+                    "Failed to restore rules snapshot after create error: {}",
+                    re
+                );
+            }
             common::log_error!("Failed to create intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to create: {}", e),
@@ -108,6 +126,11 @@ pub(super) async fn handle_intercept_rule_update(
     );
 
     let sp_ref = summarization_prompt.as_ref().map(|opt| opt.as_deref());
+    //
+    // Dirty before the DB write so concurrent ingest cannot match against a
+    // stale clean snapshot across the mutation window.
+    //
+    ctx.rules_snapshot.mark_dirty();
     match ctx
         .database
         .update_rule(
@@ -152,12 +175,32 @@ pub(super) async fn handle_intercept_rule_update(
             }
         }
         Ok(None) => {
+            if let Err(re) = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                common::log_warn!(
+                    "Failed to restore rules snapshot after update not-found: {}",
+                    re
+                );
+            }
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Rule {} not found", id),
             };
             let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
         }
         Err(e) => {
+            if let Err(re) = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                common::log_warn!(
+                    "Failed to restore rules snapshot after update error: {}",
+                    re
+                );
+            }
             common::log_error!("Failed to update intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to update: {}", e),
@@ -174,6 +217,11 @@ pub(super) async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id
         id
     );
 
+    //
+    // Dirty before delete so concurrent ingest cannot match a deleted rule
+    // and abort the whole match pass on FK failure.
+    //
+    ctx.rules_snapshot.mark_dirty();
     match ctx.database.delete_rule(id).await {
         Ok(success) => {
             if success {
@@ -187,6 +235,15 @@ pub(super) async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id
                     ctx.rules_snapshot.mark_dirty();
                 }
                 common::log_info!("Deleted intercept rule: {}", id);
+            } else if let Err(re) = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                common::log_warn!(
+                    "Failed to restore rules snapshot after delete no-op: {}",
+                    re
+                );
             }
             let message = ClientDirectMessage::InterceptRuleDeleted { id, success };
             if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
@@ -198,6 +255,16 @@ pub(super) async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id
             }
         }
         Err(e) => {
+            if let Err(re) = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                common::log_warn!(
+                    "Failed to restore rules snapshot after delete error: {}",
+                    re
+                );
+            }
             common::log_error!("Failed to delete intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to delete: {}", e),

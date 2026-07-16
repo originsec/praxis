@@ -91,8 +91,9 @@ impl NodeInterceptManager {
 
         self.check_enable_cancelled()?;
         let mut tproxy_manager = TproxyManager::new();
+        let op_cancel = self.operation_cancel.clone();
         if let Err(error) = tproxy_manager
-            .start(proxy_port, &ipv4_ips)
+            .start(proxy_port, &ipv4_ips, op_cancel.as_ref())
             .context("Failed to start TPROXY manager")
         {
             self.tproxy_manager = Some(tproxy_manager);

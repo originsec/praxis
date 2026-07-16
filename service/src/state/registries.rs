@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use common::{
-    NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, NodeStatus, SystemState,
+    InterceptStatus, NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState,
+    NodeStatus, SystemState,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -21,6 +22,8 @@ pub struct RegisteredNode {
     pub intercept_active: bool,
     /// Whether interception is supported on this node (Windows + has agent with intercept domain)
     pub intercept_supported: bool,
+    /// Latest full intercept status (retained for reconnect / CLI status).
+    pub intercept_status: Option<InterceptStatus>,
     pub privileged: bool,
 }
 
@@ -31,6 +34,34 @@ impl RegisteredNode {
     //
     pub fn has_capability(&self, capability: &NodeCapability) -> bool {
         self.capabilities.is_empty() || self.capabilities.contains(capability)
+    }
+}
+
+///
+/// Pure merge of a CommandResponse enable into retained full status.
+/// Preserves proxy_port, domains, and cleanup_required from a prior
+/// InterceptStatusUpdate.
+///
+pub fn merge_command_enabled_into_status(
+    retained: Option<&InterceptStatus>,
+    node_id: &str,
+    method: common::InterceptMethod,
+) -> InterceptStatus {
+    match retained {
+        Some(st) => {
+            let mut next = st.clone();
+            next.enabled = true;
+            next.method = Some(method);
+            next
+        }
+        None => InterceptStatus {
+            node_id: node_id.to_string(),
+            enabled: true,
+            method: Some(method),
+            proxy_port: None,
+            intercepted_domains: Vec::new(),
+            cleanup_required: false,
+        },
     }
 }
 
@@ -60,6 +91,7 @@ impl NodeRegistry {
             last_update_received: now,
             intercept_active: false,
             intercept_supported: false,
+            intercept_status: None,
             privileged: false,
         };
 
@@ -98,6 +130,7 @@ impl NodeRegistry {
             last_update_received: now,
             intercept_active: false,
             intercept_supported: false,
+            intercept_status: None,
             privileged: false,
         };
 
@@ -143,7 +176,53 @@ impl NodeRegistry {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(node_id) {
             node.intercept_active = active;
+            if let Some(ref mut st) = node.intercept_status {
+                st.enabled = active;
+                if !active && !st.cleanup_required {
+                    st.method = None;
+                    st.proxy_port = None;
+                    st.intercepted_domains.clear();
+                }
+            }
         }
+    }
+
+    /// Retain full intercept status for reconnecting clients and CLI status.
+    pub async fn set_intercept_status(&self, status: InterceptStatus) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(&status.node_id) {
+            node.intercept_active = status.enabled;
+            node.intercept_status = Some(status);
+        }
+    }
+
+    pub async fn get_intercept_status(&self, node_id: &str) -> Option<InterceptStatus> {
+        let agents = self.agents.read().await;
+        agents.get(node_id).and_then(|n| n.intercept_status.clone())
+    }
+
+    ///
+    /// Apply enable/disable from CommandResponse without clobbering a fuller
+    /// InterceptStatusUpdate (port/domains/cleanup_required) already retained.
+    ///
+    pub async fn note_intercept_command_enabled(
+        &self,
+        node_id: &str,
+        method: common::InterceptMethod,
+    ) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            node.intercept_active = true;
+            node.intercept_status = Some(merge_command_enabled_into_status(
+                node.intercept_status.as_ref(),
+                node_id,
+                method,
+            ));
+        }
+    }
+
+    pub async fn note_intercept_command_disabled(&self, node_id: &str) {
+        self.set_intercept_active(node_id, false).await;
     }
 
     //
@@ -237,6 +316,7 @@ impl NodeRegistry {
                     selected_agent: update.and_then(|u| u.selected_agent.clone()),
                     intercept_active: node.intercept_active,
                     intercept_supported: node.intercept_supported,
+                    intercept_status: node.intercept_status.clone(),
                     last_update: node.last_update_received,
                     status: NodeStatus::from_age_seconds(age_seconds),
                     active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
@@ -249,6 +329,31 @@ impl NodeRegistry {
             timestamp: Utc::now(),
             nodes,
         }
+    }
+}
+
+#[cfg(test)]
+mod merge_status_tests {
+    use super::merge_command_enabled_into_status;
+    use common::{InterceptMethod, InterceptStatus};
+
+    #[test]
+    fn command_enable_preserves_port_domains_and_cleanup_flag() {
+        let retained = InterceptStatus {
+            node_id: "n1".into(),
+            enabled: false,
+            method: Some(InterceptMethod::Proxy),
+            proxy_port: Some(8443),
+            intercepted_domains: vec!["a.example".into()],
+            cleanup_required: true,
+        };
+        let merged =
+            merge_command_enabled_into_status(Some(&retained), "n1", InterceptMethod::Vpn);
+        assert!(merged.enabled);
+        assert_eq!(merged.method, Some(InterceptMethod::Vpn));
+        assert_eq!(merged.proxy_port, Some(8443));
+        assert_eq!(merged.intercepted_domains, vec!["a.example".to_string()]);
+        assert!(merged.cleanup_required);
     }
 }
 

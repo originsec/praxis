@@ -34,7 +34,8 @@ use common::{InterceptMethod, InterceptTargetConfig, InterceptedTrafficEntry};
 use dns_resolver::DomainResolver;
 use lifecycle::{
     after_rollback, begin_enable, enable_short_circuit, finish_clean, finish_enable,
-    needs_cleanup, status_cleanup_required,
+    may_run_sync_vpn_or_stale_cleanup, needs_cleanup, status_cleanup_required,
+    status_shows_cleanup_required,
     should_abort_enable, InterceptLifecycle,
 };
 use routing::{Ipv6Manager, RouteManager, VpnBypassManager};
@@ -1076,18 +1077,35 @@ impl NodeInterceptManager {
             }
         }
         //
-        // Best-effort recovery file cleanup for anything still recorded.
+        // Never run disk stale cleanup while the packet engine task is still
+        // owned (unconfirmed stop). That would remove recovery under a live task.
         //
+        let engine_owned = self.packet_engine_task_owned();
+        if !may_run_sync_vpn_or_stale_cleanup(engine_owned) {
+            self.lifecycle = InterceptLifecycle::CleanupRequired;
+            anyhow::bail!(
+                "force_cleanup incomplete: packet engine task still owned; recovery retained"
+            );
+        }
+        if incomplete {
+            //
+            // In-memory teardown failed earlier — keep recovery file.
+            //
+            self.lifecycle = InterceptLifecycle::CleanupRequired;
+            anyhow::bail!("force_cleanup incomplete; recovery state retained");
+        }
         if let Err(e) = state::cleanup_stale_state() {
             common::log_warn!("force_cleanup stale state: {}", e);
             self.lifecycle = InterceptLifecycle::CleanupRequired;
             return Err(e);
         }
-        if incomplete {
-            anyhow::bail!("force_cleanup incomplete; recovery state retained");
-        }
         self.lifecycle = finish_clean(self.lifecycle);
         Ok(())
+    }
+
+    /// Whether Drop/sync VPN teardown is safe (no owned packet-engine task).
+    pub fn packet_engine_task_owned(&self) -> bool {
+        self.packet_engine_task.is_some()
     }
 
     pub(super) fn check_enable_cancelled(&self) -> Result<()> {
@@ -1145,6 +1163,8 @@ impl NodeInterceptManager {
     }
 
     pub fn status(&self) -> common::InterceptStatus {
+        let has_recovery = self.intercept_state.is_some()
+            || state::load_state().ok().flatten().is_some();
         common::InterceptStatus {
             node_id: self.node_id.clone(),
             //
@@ -1155,7 +1175,8 @@ impl NodeInterceptManager {
             method: self.method,
             proxy_port: self.proxy_port,
             intercepted_domains: self.intercepted_domains(),
-            cleanup_required: status_cleanup_required(self.lifecycle),
+            cleanup_required: status_shows_cleanup_required(self.lifecycle, has_recovery)
+                || status_cleanup_required(self.lifecycle),
         }
     }
 
@@ -1330,9 +1351,26 @@ impl NodeInterceptManager {
 impl Drop for NodeInterceptManager {
     fn drop(&mut self) {
         //
-        // Partial VPN TunUp can leave managers on self before is_enabled is set.
-        // Always attempt VPN cleanup when live resources are present.
+        // Never tear down adapter/TUN under an unconfirmed packet-engine task.
+        // Abort the task handle without joining (Drop is sync) and leave host
+        // resources for process exit / next recovery — do not detach then
+        // destroy the device the task may still hold.
         //
+        let engine_owned = self.packet_engine_task.is_some();
+        if engine_owned {
+            if let Some(token) = self.shutdown_token.take() {
+                token.cancel();
+            }
+            if let Some(task) = self.packet_engine_task.take() {
+                task.abort();
+            }
+            common::log_error!(
+                "Drop: skipped VPN sync cleanup; packet engine was still owned (is_enabled={})",
+                self.is_enabled
+            );
+            return;
+        }
+
         if self.has_vpn_resources() {
             if let Err(e) = self.cleanup_vpn_sync() {
                 common::log_error!(
@@ -1350,9 +1388,6 @@ impl Drop for NodeInterceptManager {
         let method = self.method.unwrap_or(InterceptMethod::Proxy);
         let result = match method {
             InterceptMethod::Proxy => self.cleanup_proxy_sync(),
-            //
-            // VPN already handled above when resources were present.
-            //
             InterceptMethod::Vpn => Ok(()),
             InterceptMethod::Hosts => self.cleanup_hosts_sync(),
             InterceptMethod::Tproxy => self.cleanup_tproxy_sync(),

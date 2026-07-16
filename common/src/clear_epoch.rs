@@ -59,11 +59,11 @@ pub fn apply_clear_response(
 ///
 /// Whether a RegistrationAck may rebind (or confirm) client instance identity.
 ///
-/// - First bind (`current` is None): any non-empty ack instance is accepted.
-/// - Idempotent: ack equals current.
-/// - Rebind to a different instance only when `expected_from_service_online`
-///   matches the ack (announced by ServiceOnline for this attempt).
 /// - Nonce must match when the client set a non-empty expected nonce.
+/// - When `expected_from_service_online` is non-empty, the ack instance must
+///   match it even on first bind (ServiceOnline before initial register).
+/// - First bind with no expected: any non-empty ack instance is accepted.
+/// - Idempotent: ack equals current.
 ///
 pub fn may_accept_registration_ack(
     current: Option<&str>,
@@ -78,6 +78,14 @@ pub fn may_accept_registration_ack(
     if !expected_nonce.is_empty() && ack_nonce != expected_nonce {
         return false;
     }
+    //
+    // Expected instance is authoritative whenever announced.
+    //
+    if let Some(exp) = expected_from_service_online {
+        if !exp.is_empty() && exp != ack_instance {
+            return false;
+        }
+    }
     match current {
         None => true,
         Some(cur) if cur == ack_instance => true,
@@ -86,6 +94,42 @@ pub fn may_accept_registration_ack(
             _ => false,
         },
     }
+}
+
+///
+/// How the client should treat a rejected RegistrationAck for an in-flight
+/// attempt. Wrong-instance with matching nonce should retry (another service
+/// consumer may answer); nonce mismatch is ignore/wait.
+///
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationRejectAction {
+    /// Put pending back and wait for another ack (or worker re-publish).
+    Retry,
+    /// Permanent failure for this attempt.
+    Fail,
+}
+
+/// Marker returned on oneshot so the registration worker re-publishes.
+pub const REGISTRATION_RETRY_MARKER: &str = "__retry_wrong_instance__";
+
+pub fn registration_reject_action(
+    expected_nonce: &str,
+    ack_nonce: &str,
+    expected_instance: Option<&str>,
+    ack_instance: &str,
+) -> RegistrationRejectAction {
+    if expected_nonce != ack_nonce {
+        return RegistrationRejectAction::Retry; // ignore foreign attempt
+    }
+    if let Some(exp) = expected_instance {
+        if !exp.is_empty() && exp != ack_instance {
+            //
+            // Right nonce, wrong service (shared queue) — retry until B acks.
+            //
+            return RegistrationRejectAction::Retry;
+        }
+    }
+    RegistrationRejectAction::Fail
 }
 
 /// Whether a pending clear's expected instance accepts a TrafficCleared stamp.
@@ -122,6 +166,7 @@ mod tests {
     use super::{
         accept_live_batch, apply_clear_response, clear_pending_accepts_response,
         instance_matches_current, may_accept_registration_ack, rebind_service_instance,
+        registration_reject_action, RegistrationRejectAction,
     };
 
     #[test]
@@ -232,8 +277,31 @@ mod tests {
             "",
             ""
         ));
-        // First bind accepts any non-empty instance.
+        // First bind without expected accepts any non-empty instance.
         assert!(may_accept_registration_ack(None, "svc-a", None, "n0", "n0"));
+        // First bind with expected B rejects A (ServiceOnline-before-register).
+        assert!(!may_accept_registration_ack(
+            None,
+            "svc-a",
+            Some("svc-b"),
+            "n1",
+            "n1"
+        ));
+        assert!(may_accept_registration_ack(
+            None,
+            "svc-b",
+            Some("svc-b"),
+            "n1",
+            "n1"
+        ));
+        assert_eq!(
+            registration_reject_action("n1", "n1", Some("svc-b"), "svc-a"),
+            RegistrationRejectAction::Retry
+        );
+        assert_eq!(
+            registration_reject_action("n1", "n-other", Some("svc-b"), "svc-b"),
+            RegistrationRejectAction::Retry
+        );
     }
 
     #[test]

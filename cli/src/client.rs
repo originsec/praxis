@@ -214,62 +214,283 @@ impl Client {
         let client_id = self.client_id.clone();
         let timeout = self.timeout;
         self.register_worker = Some(tokio::spawn(async move {
-            while let Some(cmd) = rx.recv().await {
-                match cmd {
+            //
+            // Single serial worker. Newer ServiceOnline / Register cmds
+            // supersede an in-flight attempt (coalesce FIFO backlog) so a
+            // dead announced instance cannot block re-registration for the
+            // full timeout window.
+            //
+            enum PollCmd {
+                None,
+                Shutdown,
+                Supersede,
+            }
+
+            /// Drain queued cmds; Shutdown wins; otherwise keep newest Register.
+            fn drain_register_cmds(
+                rx: &mut mpsc::UnboundedReceiver<RegisterCmd>,
+                expected_instance: &mut Option<String>,
+                resp: &mut oneshot::Sender<Result<(), String>>,
+                deadline: &mut tokio::time::Instant,
+                timeout: Duration,
+            ) -> PollCmd {
+                let mut saw = PollCmd::None;
+                loop {
+                    match rx.try_recv() {
+                        Ok(RegisterCmd::Shutdown) => return PollCmd::Shutdown,
+                        Ok(RegisterCmd::Register {
+                            expected_instance: next_expected,
+                            resp: next_resp,
+                        }) => {
+                            let prev = std::mem::replace(resp, next_resp);
+                            let _ = prev.send(Err(
+                                "registration superseded by a newer ServiceOnline".into(),
+                            ));
+                            *expected_instance = next_expected;
+                            *deadline = tokio::time::Instant::now() + timeout;
+                            saw = PollCmd::Supersede;
+                        }
+                        Err(_) => return saw,
+                    }
+                }
+            }
+
+            let mut shutdown = false;
+            while !shutdown {
+                let Some(cmd) = rx.recv().await else {
+                    break;
+                };
+                let (mut expected_instance, mut resp) = match cmd {
                     RegisterCmd::Shutdown => break,
                     RegisterCmd::Register {
                         expected_instance,
                         resp,
-                    } => {
-                        let nonce = uuid::Uuid::new_v4().to_string();
-                        let (ack_tx, ack_rx) = oneshot::channel();
-                        {
-                            let mut s = state.lock().await;
-                            //
-                            // Only one registration in flight; drop a prior
-                            // incomplete slot so it cannot be completed late.
-                            //
-                            if let Some(prev) = s.pending_registration.take() {
-                                let _ = prev.resp.send(Err(
-                                    "registration superseded by a newer attempt".into(),
-                                ));
-                            }
-                            s.pending_registration = Some(PendingRegistration {
-                                nonce: nonce.clone(),
-                                expected_instance: expected_instance.clone(),
-                                resp: ack_tx,
-                            });
-                        }
-                        let registration = ClientRegistration {
-                            client_id: client_id.clone(),
-                            registration_nonce: nonce,
-                            expected_service_instance_id: expected_instance
-                                .clone()
-                                .unwrap_or_default(),
-                        };
-                        let message = ClientSignalMessage::Registration(registration);
-                        if let Err(e) = publish_json(&channel, CLIENT_SIGNAL_QUEUE, &message).await
-                        {
+                    } => (expected_instance, resp),
+                };
+
+                let mut deadline = tokio::time::Instant::now() + timeout;
+                match drain_register_cmds(
+                    &mut rx,
+                    &mut expected_instance,
+                    &mut resp,
+                    &mut deadline,
+                    timeout,
+                ) {
+                    PollCmd::Shutdown => {
+                        let _ = resp
+                            .send(Err("registration aborted: client shutting down".into()));
+                        break;
+                    }
+                    PollCmd::None | PollCmd::Supersede => {}
+                }
+
+                //
+                // Retry until deadline when a shared-queue consumer acks the
+                // wrong instance (nonce matched, expected not).
+                //
+                let mut last_err = String::from("registration failed");
+                let outcome = loop {
+                    match drain_register_cmds(
+                        &mut rx,
+                        &mut expected_instance,
+                        &mut resp,
+                        &mut deadline,
+                        timeout,
+                    ) {
+                        PollCmd::Shutdown => {
                             let mut s = state.lock().await;
                             s.pending_registration = None;
-                            let _ = resp.send(Err(format!("register publish failed: {}", e)));
+                            shutdown = true;
+                            break Err("registration aborted: client shutting down".into());
+                        }
+                        PollCmd::Supersede => {
+                            last_err = String::from("registration superseded; retrying");
+                        }
+                        PollCmd::None => {}
+                    }
+
+                    if tokio::time::Instant::now() >= deadline {
+                        let mut s = state.lock().await;
+                        s.pending_registration = None;
+                        break Err(format!(
+                            "registration timed out after {}s: {}",
+                            timeout.as_secs(),
+                            last_err
+                        ));
+                    }
+                    let nonce = uuid::Uuid::new_v4().to_string();
+                    let (ack_tx, mut ack_rx) = oneshot::channel();
+                    {
+                        let mut s = state.lock().await;
+                        if let Some(prev) = s.pending_registration.take() {
+                            let _ = prev
+                                .resp
+                                .send(Err("registration superseded by a newer attempt".into()));
+                        }
+                        s.pending_registration = Some(PendingRegistration {
+                            nonce: nonce.clone(),
+                            expected_instance: expected_instance.clone(),
+                            resp: ack_tx,
+                        });
+                    }
+                    let registration = ClientRegistration {
+                        client_id: client_id.clone(),
+                        registration_nonce: nonce,
+                        expected_service_instance_id: expected_instance
+                            .clone()
+                            .unwrap_or_default(),
+                    };
+                    let message = ClientSignalMessage::Registration(registration);
+                    if let Err(e) = publish_json(&channel, CLIENT_SIGNAL_QUEUE, &message).await {
+                        let mut s = state.lock().await;
+                        s.pending_registration = None;
+                        last_err = format!("register publish failed: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        continue;
+                    }
+
+                    //
+                    // Wait for ack in short slices so a newer ServiceOnline can
+                    // supersede without blocking for the full remaining timeout.
+                    //
+                    let ack_wait = loop {
+                        let left =
+                            deadline.saturating_duration_since(tokio::time::Instant::now());
+                        if left.is_zero() {
+                            break Err(());
+                        }
+                        let poll = left.min(std::time::Duration::from_millis(200));
+                        match tokio::time::timeout(poll, &mut ack_rx).await {
+                            Ok(Ok(r)) => break Ok(r),
+                            Ok(Err(_)) => {
+                                break Ok(Err(
+                                    "registration response channel closed; retrying".into(),
+                                ));
+                            }
+                            Err(_) => {
+                                match drain_register_cmds(
+                                    &mut rx,
+                                    &mut expected_instance,
+                                    &mut resp,
+                                    &mut deadline,
+                                    timeout,
+                                ) {
+                                    PollCmd::Shutdown => {
+                                        let mut s = state.lock().await;
+                                        s.pending_registration = None;
+                                        shutdown = true;
+                                        break Ok(Err(
+                                            "registration aborted: client shutting down".into(),
+                                        ));
+                                    }
+                                    PollCmd::Supersede => {
+                                        let mut s = state.lock().await;
+                                        s.pending_registration = None;
+                                        last_err =
+                                            String::from("registration superseded; retrying");
+                                        break Ok(Err(
+                                            common::clear_epoch::REGISTRATION_RETRY_MARKER.into(),
+                                        ));
+                                    }
+                                    PollCmd::None => {
+                                        if tokio::time::Instant::now() >= deadline {
+                                            break Err(());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    match ack_wait {
+                        Ok(Ok(())) => {
+                            //
+                            // Connect contract: successful registration implies
+                            // system_state is available for get_state() /
+                            // non-interactive commands. Service publishes
+                            // StateUpdate before ack; wait until registration
+                            // deadline, then fail.
+                            //
+                            let mut got_state = false;
+                            let mut state_superseded = false;
+                            loop {
+                                if state.lock().await.system_state.is_some() {
+                                    got_state = true;
+                                    break;
+                                }
+                                if tokio::time::Instant::now() >= deadline {
+                                    break;
+                                }
+                                match drain_register_cmds(
+                                    &mut rx,
+                                    &mut expected_instance,
+                                    &mut resp,
+                                    &mut deadline,
+                                    timeout,
+                                ) {
+                                    PollCmd::Shutdown => {
+                                        shutdown = true;
+                                        break;
+                                    }
+                                    PollCmd::Supersede => {
+                                        state_superseded = true;
+                                        last_err =
+                                            String::from("registration superseded; retrying");
+                                        break;
+                                    }
+                                    PollCmd::None => {}
+                                }
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            }
+                            if shutdown {
+                                break Err("registration aborted: client shutting down".into());
+                            }
+                            if state_superseded {
+                                continue;
+                            }
+                            if got_state {
+                                break Ok(());
+                            }
+                            break Err(
+                                "registration ack received but initial system state never arrived"
+                                    .into(),
+                            );
+                        }
+                        Ok(Err(e))
+                            if e == common::clear_epoch::REGISTRATION_RETRY_MARKER =>
+                        {
+                            last_err = e;
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                             continue;
                         }
-                        let outcome = match tokio::time::timeout(timeout, ack_rx).await {
-                            Ok(Ok(r)) => r,
-                            Ok(Err(_)) => Err("registration response channel closed".into()),
-                            Err(_) => {
-                                let mut s = state.lock().await;
-                                s.pending_registration = None;
-                                Err(format!(
-                                    "registration timed out after {}s",
-                                    timeout.as_secs()
-                                ))
-                            }
-                        };
-                        let _ = resp.send(outcome);
+                        Ok(Err(e)) if e.contains("shutting down") => {
+                            break Err(e);
+                        }
+                        Ok(Err(e)) if e.contains("channel closed") => {
+                            last_err = e;
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            continue;
+                        }
+                        Ok(Err(e)) => {
+                            last_err = e;
+                            break Err(last_err.clone());
+                        }
+                        Err(()) => {
+                            let mut s = state.lock().await;
+                            s.pending_registration = None;
+                            last_err = format!(
+                                "registration timed out after {}s",
+                                timeout.as_secs()
+                            );
+                            break Err(last_err.clone());
+                        }
                     }
-                }
+                };
+                //
+                // Always complete the active waiter (including shutdown abort).
+                // Superseded waiters were already notified in drain_register_cmds.
+                //
+                let _ = resp.send(outcome);
             }
             //
             // Drop the state-held sender so we do not leak a cycle.
@@ -327,18 +548,38 @@ impl Client {
                     &ack.registration_nonce,
                 );
                 if !accept {
-                    //
-                    // Wrong attempt (e.g. delayed A after B): keep waiting if
-                    // nonce did not match; fail the attempt if nonce matched
-                    // but instance was wrong.
-                    //
-                    if pending.nonce != ack.registration_nonce {
-                        state.pending_registration = Some(pending);
-                    } else {
-                        let _ = pending.resp.send(Err(format!(
-                            "registration ack rejected (instance={} expected={:?})",
-                            ack.service_instance_id, pending.expected_instance
-                        )));
+                    match common::clear_epoch::registration_reject_action(
+                        &pending.nonce,
+                        &ack.registration_nonce,
+                        pending.expected_instance.as_deref(),
+                        &ack.service_instance_id,
+                    ) {
+                        common::clear_epoch::RegistrationRejectAction::Retry
+                            if pending.nonce != ack.registration_nonce =>
+                        {
+                            // Foreign attempt: keep waiting on the same oneshot.
+                            state.pending_registration = Some(pending);
+                        }
+                        common::clear_epoch::RegistrationRejectAction::Retry => {
+                            //
+                            // Right nonce, wrong instance (shared signal queue):
+                            // signal worker to re-publish before deadline.
+                            //
+                            common::log_warn!(
+                                "Registration ack rejected (instance={} expected={:?}); will retry",
+                                ack.service_instance_id,
+                                pending.expected_instance
+                            );
+                            let _ = pending.resp.send(Err(
+                                common::clear_epoch::REGISTRATION_RETRY_MARKER.into(),
+                            ));
+                        }
+                        common::clear_epoch::RegistrationRejectAction::Fail => {
+                            let _ = pending.resp.send(Err(format!(
+                                "registration ack rejected (instance={} expected={:?})",
+                                ack.service_instance_id, pending.expected_instance
+                            )));
+                        }
                     }
                     return;
                 }
@@ -357,16 +598,33 @@ impl Client {
                         let _ = tx.send(inst);
                     }
                 }
+                //
+                // Completing only after StateUpdate would be ideal; service
+                // now publishes state before ack. If state is still missing,
+                // signal waiters via pending_initial_state path is not used
+                // here — worker polls system_state after Ok.
+                //
                 let _ = pending.resp.send(Ok(()));
             }
             ClientDirectMessage::StateUpdate(system_state) => {
-                state.system_state = Some(system_state);
                 //
-                // Legacy: complete initial wait if still used. Prefer
-                // RegistrationAck correlation for new clients.
+                // Direct StateUpdate is registration bootstrap only. Accept
+                // while a registration is in flight, or until the first state
+                // arrives after a successful ack. Once bound with state and
+                // not re-registering, ignore late direct updates so a stale
+                // overlapping service cannot overwrite the accepted instance.
+                // Ongoing node changes arrive via broadcast StateUpdate.
                 //
-                if let Some(tx) = state.pending_initial_state.take() {
-                    let _ = tx.send(());
+                let accept = state.pending_registration.is_some() || state.system_state.is_none();
+                if accept {
+                    state.system_state = Some(system_state);
+                    //
+                    // Legacy: complete initial wait if still used. Prefer
+                    // RegistrationAck correlation for new clients.
+                    //
+                    if let Some(tx) = state.pending_initial_state.take() {
+                        let _ = tx.send(());
+                    }
                 }
             }
 
@@ -855,14 +1113,15 @@ impl Client {
             } => {
                 //
                 // Control plane: serialized re-register with announced instance.
+                // Observe outcome (do not drop the response future).
                 //
                 let expected = if service_instance_id.is_empty() {
                     None
                 } else {
-                    Some(service_instance_id)
+                    Some(service_instance_id.clone())
                 };
                 if let Some(ref tx) = state.register_cmd_tx {
-                    let (resp_tx, _resp_rx) = oneshot::channel();
+                    let (resp_tx, resp_rx) = oneshot::channel();
                     if tx
                         .send(RegisterCmd::Register {
                             expected_instance: expected,
@@ -871,6 +1130,31 @@ impl Client {
                         .is_err()
                     {
                         common::log_warn!("ServiceOnline: registration worker gone");
+                    } else {
+                        let announced = service_instance_id;
+                        tokio::spawn(async move {
+                            match resp_rx.await {
+                                Ok(Ok(())) => {
+                                    common::log_info!(
+                                        "ServiceOnline re-registration complete (instance={})",
+                                        announced
+                                    );
+                                }
+                                Ok(Err(e)) => {
+                                    common::log_warn!(
+                                        "ServiceOnline re-registration failed (instance={}): {}",
+                                        announced,
+                                        e
+                                    );
+                                }
+                                Err(_) => {
+                                    common::log_warn!(
+                                        "ServiceOnline re-registration channel closed (instance={})",
+                                        announced
+                                    );
+                                }
+                            }
+                        });
                     }
                 } else {
                     common::log_warn!(

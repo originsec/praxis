@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use crate::utils::CommandOutputBounded;
 use std::net::Ipv4Addr;
 use std::process::Command;
+use tokio_util::sync::CancellationToken;
 
 const TPROXY_MARK: u32 = 0x1;
 const TPROXY_TABLE: u32 = 100;
@@ -118,7 +119,16 @@ impl TproxyManager {
     /// 1. Policy routing table and rule for marked packets
     /// 2. route_localnet sysctl to allow local routing of external IPs
     /// 3. iptables TPROXY rules in mangle table
-    pub fn start(&mut self, proxy_port: u16, intercept_ips: &[Ipv4Addr]) -> Result<()> {
+    ///
+    /// When `cancel` is set, checked between host-mutating steps (including
+    /// per-IP rule install) so Reset/Ctrl+C can abort without waiting for
+    /// every address's command timeout.
+    pub fn start(
+        &mut self,
+        proxy_port: u16,
+        intercept_ips: &[Ipv4Addr],
+        cancel: Option<&CancellationToken>,
+    ) -> Result<()> {
         if self.has_resources() {
             common::log_info!("TPROXY already active");
             return Ok(());
@@ -128,7 +138,7 @@ impl TproxyManager {
         self.proxy_port = proxy_port;
         self.intercept_ips = intercept_ips.to_vec();
 
-        if let Err(cause) = self.start_inner() {
+        if let Err(cause) = self.start_inner(cancel) {
             return match self.stop() {
                 Ok(()) => Err(cause),
                 Err(cleanup_error) => Err(anyhow::anyhow!(
@@ -148,7 +158,15 @@ impl TproxyManager {
         Ok(())
     }
 
-    fn start_inner(&mut self) -> Result<()> {
+    fn check_start_cancelled(cancel: Option<&CancellationToken>) -> Result<()> {
+        if cancel.is_some_and(|t| t.is_cancelled()) {
+            anyhow::bail!("TPROXY setup cancelled");
+        }
+        Ok(())
+    }
+
+    fn start_inner(&mut self, cancel: Option<&CancellationToken>) -> Result<()> {
+        Self::check_start_cancelled(cancel)?;
 
         //
         // 1. Enable route_localnet to allow routing external IPs through loopback.
@@ -159,6 +177,7 @@ impl TproxyManager {
         run_command("sysctl", &["-w", "net.ipv4.conf.lo.route_localnet=1"])
             .context("Failed to enable route_localnet")?;
         self.route_localnet_changed = true;
+        Self::check_start_cancelled(cancel)?;
 
         //
         // 2. Add policy routing table for TPROXY marked packets.
@@ -177,6 +196,7 @@ impl TproxyManager {
         )
         .context("Failed to add ip rule")?;
         self.policy_rule_added = true;
+        Self::check_start_cancelled(cancel)?;
 
         run_command(
             "ip",
@@ -193,6 +213,7 @@ impl TproxyManager {
         )
         .context("Failed to add ip route")?;
         self.policy_route_added = true;
+        Self::check_start_cancelled(cancel)?;
 
         //
         // 3. Add bypass rule so proxy's outgoing connections aren't intercepted.
@@ -220,14 +241,16 @@ impl TproxyManager {
         )
         .context("Failed to add bypass rule")?;
         self.bypass_rule_added = true;
+        Self::check_start_cancelled(cancel)?;
 
         //
         // 4. Add iptables TPROXY rules for each intercept IP.
         //
 
         self.target_rules_started = true;
-        for ip in &self.intercept_ips {
-            self.add_tproxy_rule(*ip)?;
+        for ip in self.intercept_ips.clone() {
+            Self::check_start_cancelled(cancel)?;
+            self.add_tproxy_rule(ip)?;
         }
 
         Ok(())

@@ -177,32 +177,42 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 if let common::NodeCommandResult::Intercept(ref result) = response.result {
                     match result {
                         common::InterceptCommandResult::Enabled { method } => {
+                            //
+                            // Merge into retained status — do not replace a full
+                            // InterceptStatusUpdate (port/domains/cleanup) with
+                            // a sparse CommandResponse-derived object.
+                            //
                             ctx.node_registry
-                                .set_intercept_active(&response.node_id, true)
+                                .note_intercept_command_enabled(
+                                    &response.node_id,
+                                    *method,
+                                )
                                 .await;
                             should_broadcast_state = true;
-                            intercept_status = Some(common::InterceptStatus {
-                                node_id: response.node_id.clone(),
-                                enabled: true,
-                                method: Some(*method),
-                                proxy_port: None,
-                                intercepted_domains: Vec::new(),
-                                cleanup_required: false,
-                            });
+                            intercept_status = ctx
+                                .node_registry
+                                .get_intercept_status(&response.node_id)
+                                .await;
                         }
                         common::InterceptCommandResult::Disabled => {
                             ctx.node_registry
-                                .set_intercept_active(&response.node_id, false)
+                                .note_intercept_command_disabled(&response.node_id)
                                 .await;
                             should_broadcast_state = true;
-                            intercept_status = Some(common::InterceptStatus {
-                                node_id: response.node_id.clone(),
-                                enabled: false,
-                                method: None,
-                                proxy_port: None,
-                                intercepted_domains: Vec::new(),
-                                cleanup_required: false,
-                            });
+                            intercept_status = ctx
+                                .node_registry
+                                .get_intercept_status(&response.node_id)
+                                .await
+                                .or_else(|| {
+                                    Some(common::InterceptStatus {
+                                        node_id: response.node_id.clone(),
+                                        enabled: false,
+                                        method: None,
+                                        proxy_port: None,
+                                        intercepted_domains: Vec::new(),
+                                        cleanup_required: false,
+                                    })
+                                });
                         }
                     }
                 }
@@ -414,7 +424,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 status.enabled
             );
             ctx.node_registry
-                .set_intercept_active(&status.node_id, status.enabled)
+                .set_intercept_status(status.clone())
                 .await;
 
             //
