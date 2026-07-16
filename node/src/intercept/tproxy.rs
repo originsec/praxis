@@ -7,6 +7,7 @@
 //
 
 use anyhow::{Context, Result};
+use crate::utils::CommandOutputBounded;
 use std::net::Ipv4Addr;
 use std::process::Command;
 
@@ -23,6 +24,13 @@ pub struct TproxyManager {
     intercept_ips: Vec<Ipv4Addr>,
     /// Whether TPROXY is active.
     is_active: bool,
+    route_localnet_original: Option<String>,
+    route_localnet_changed: bool,
+    policy_rule_added: bool,
+    policy_route_added: bool,
+    bypass_rule_added: bool,
+    target_rules_started: bool,
+    rules_tagged: bool,
 }
 
 impl TproxyManager {
@@ -31,7 +39,77 @@ impl TproxyManager {
             proxy_port: 0,
             intercept_ips: Vec::new(),
             is_active: false,
+            route_localnet_original: None,
+            route_localnet_changed: false,
+            policy_rule_added: false,
+            policy_route_added: false,
+            bypass_rule_added: false,
+            target_rules_started: false,
+            rules_tagged: true,
         }
+    }
+
+    pub fn ensure_resources_available() -> Result<()> {
+        let rules = Command::new("ip")
+            .args(["rule", "show"])
+            .output_bounded()
+            .context("Failed to inspect policy routing rules")?;
+        if !rules.status.success() {
+            anyhow::bail!(
+                "Failed to inspect policy routing rules: {}",
+                String::from_utf8_lossy(&rules.stderr).trim()
+            );
+        }
+        let rules = String::from_utf8_lossy(&rules.stdout).to_ascii_lowercase();
+        if rules.lines().any(|line| {
+            line.contains("fwmark 0x1")
+                && (line.contains("lookup 100") || line.contains("lookup tproxy"))
+        }) {
+            anyhow::bail!("policy rule for mark 0x1/table 100 already exists");
+        }
+
+        let routes = Command::new("ip")
+            .args(["route", "show", "table", &TPROXY_TABLE.to_string()])
+            .output_bounded()
+            .context("Failed to inspect TPROXY routing table")?;
+        if routes.status.success() && !routes.stdout.iter().all(u8::is_ascii_whitespace) {
+            anyhow::bail!("routing table 100 is not empty");
+        }
+        if !routes.status.success() && !cleanup_error_missing(&routes.stderr) {
+            anyhow::bail!(
+                "Failed to inspect TPROXY routing table: {}",
+                String::from_utf8_lossy(&routes.stderr).trim()
+            );
+        }
+
+        let iptables = Command::new("iptables")
+            .args(["-t", "mangle", "-S", "OUTPUT"])
+            .output_bounded()
+            .context("Failed to inspect existing TPROXY rules")?;
+        if !iptables.status.success() {
+            anyhow::bail!(
+                "Failed to inspect existing TPROXY rules: {}",
+                String::from_utf8_lossy(&iptables.stderr).trim()
+            );
+        }
+        if String::from_utf8_lossy(&iptables.stdout).contains("PRAXIS-INTERCEPT") {
+            anyhow::bail!("Praxis-tagged TPROXY rules already exist");
+        }
+        Ok(())
+    }
+
+    pub fn current_route_localnet() -> Result<String> {
+        let output = Command::new("sysctl")
+            .args(["-n", "net.ipv4.conf.lo.route_localnet"])
+            .output_bounded()
+            .context("Failed to read route_localnet")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to read route_localnet: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     /// Start TPROXY interception.
@@ -41,7 +119,7 @@ impl TproxyManager {
     /// 2. route_localnet sysctl to allow local routing of external IPs
     /// 3. iptables TPROXY rules in mangle table
     pub fn start(&mut self, proxy_port: u16, intercept_ips: &[Ipv4Addr]) -> Result<()> {
-        if self.is_active {
+        if self.has_resources() {
             common::log_info!("TPROXY already active");
             return Ok(());
         }
@@ -50,12 +128,37 @@ impl TproxyManager {
         self.proxy_port = proxy_port;
         self.intercept_ips = intercept_ips.to_vec();
 
+        if let Err(cause) = self.start_inner() {
+            return match self.stop() {
+                Ok(()) => Err(cause),
+                Err(cleanup_error) => Err(anyhow::anyhow!(
+                    "{}; TPROXY rollback also failed: {}",
+                    cause,
+                    cleanup_error
+                )),
+            };
+        }
+
+        self.is_active = true;
+        common::log_info!(
+            "TPROXY interception started for {} IPs",
+            self.intercept_ips.len()
+        );
+
+        Ok(())
+    }
+
+    fn start_inner(&mut self) -> Result<()> {
+
         //
         // 1. Enable route_localnet to allow routing external IPs through loopback.
         //
 
+        self.route_localnet_original = Some(Self::current_route_localnet()?);
+
         run_command("sysctl", &["-w", "net.ipv4.conf.lo.route_localnet=1"])
             .context("Failed to enable route_localnet")?;
+        self.route_localnet_changed = true;
 
         //
         // 2. Add policy routing table for TPROXY marked packets.
@@ -73,6 +176,7 @@ impl TproxyManager {
             ],
         )
         .context("Failed to add ip rule")?;
+        self.policy_rule_added = true;
 
         run_command(
             "ip",
@@ -88,6 +192,7 @@ impl TproxyManager {
             ],
         )
         .context("Failed to add ip route")?;
+        self.policy_route_added = true;
 
         //
         // 3. Add bypass rule so proxy's outgoing connections aren't intercepted.
@@ -105,32 +210,32 @@ impl TproxyManager {
                 "mark",
                 "--mark",
                 &TPROXY_BYPASS_MARK.to_string(),
+                "-m",
+                "comment",
+                "--comment",
+                "PRAXIS-INTERCEPT",
                 "-j",
                 "RETURN",
             ],
         )
         .context("Failed to add bypass rule")?;
+        self.bypass_rule_added = true;
 
         //
         // 4. Add iptables TPROXY rules for each intercept IP.
         //
 
+        self.target_rules_started = true;
         for ip in &self.intercept_ips {
             self.add_tproxy_rule(*ip)?;
         }
-
-        self.is_active = true;
-        common::log_info!(
-            "TPROXY interception started for {} IPs",
-            self.intercept_ips.len()
-        );
 
         Ok(())
     }
 
     /// Stop TPROXY interception and clean up rules.
     pub fn stop(&mut self) -> Result<()> {
-        if !self.is_active {
+        if !self.has_resources() {
             return Ok(());
         }
 
@@ -140,9 +245,15 @@ impl TproxyManager {
         // Remove iptables TPROXY rules.
         //
 
-        for ip in &self.intercept_ips.clone() {
-            if let Err(e) = self.remove_tproxy_rule(*ip) {
-                common::log_warn!("Failed to remove TPROXY rule for {}: {}", ip, e);
+        let mut failures = Vec::new();
+        if self.target_rules_started {
+            for ip in &self.intercept_ips.clone() {
+                if let Err(e) = self.remove_tproxy_rule(*ip) {
+                    failures.push(format!("target {}: {}", ip, e));
+                }
+            }
+            if failures.is_empty() {
+                self.target_rules_started = false;
             }
         }
 
@@ -150,29 +261,31 @@ impl TproxyManager {
         // Remove bypass rule.
         //
 
-        let _ = run_command(
-            "iptables",
-            &[
-                "-t",
-                "mangle",
-                "-D",
-                "OUTPUT",
-                "-m",
-                "mark",
-                "--mark",
-                &TPROXY_BYPASS_MARK.to_string(),
-                "-j",
-                "RETURN",
-            ],
-        );
+        if self.bypass_rule_added {
+            let result = if self.rules_tagged {
+                run_cleanup_command("iptables", &[
+                    "-t", "mangle", "-D", "OUTPUT", "-m", "mark", "--mark",
+                    &TPROXY_BYPASS_MARK.to_string(), "-m", "comment", "--comment",
+                    "PRAXIS-INTERCEPT", "-j", "RETURN",
+                ])
+            } else {
+                run_cleanup_command("iptables", &[
+                    "-t", "mangle", "-D", "OUTPUT", "-m", "mark", "--mark",
+                    &TPROXY_BYPASS_MARK.to_string(), "-j", "RETURN",
+                ])
+            };
+            match result {
+                Ok(()) => self.bypass_rule_added = false,
+                Err(error) => failures.push(format!("bypass rule: {}", error)),
+            }
+        }
 
         //
         // Remove policy routing.
         //
 
-        let _ = run_command(
-            "ip",
-            &[
+        if self.policy_route_added {
+            match run_cleanup_command("ip", &[
                 "route",
                 "del",
                 "local",
@@ -181,32 +294,84 @@ impl TproxyManager {
                 "lo",
                 "table",
                 &TPROXY_TABLE.to_string(),
-            ],
-        );
+            ]) {
+                Ok(()) => self.policy_route_added = false,
+                Err(e) => failures.push(format!("policy route: {}", e)),
+            }
+        }
 
-        let _ = run_command(
-            "ip",
-            &[
+        if self.policy_rule_added {
+            match run_cleanup_command("ip", &[
                 "rule",
                 "del",
                 "fwmark",
                 &TPROXY_MARK.to_string(),
                 "lookup",
                 &TPROXY_TABLE.to_string(),
-            ],
-        );
+            ]) {
+                Ok(()) => self.policy_rule_added = false,
+                Err(e) => failures.push(format!("policy rule: {}", e)),
+            }
+        }
 
         //
         // Disable route_localnet (restore default).
         //
 
-        let _ = run_command("sysctl", &["-w", "net.ipv4.conf.lo.route_localnet=0"]);
+        if self.route_localnet_changed {
+            let original = self.route_localnet_original.as_deref().unwrap_or("0");
+            match run_command(
+                "sysctl",
+                &["-w", &format!("net.ipv4.conf.lo.route_localnet={}", original)],
+            ) {
+                Ok(()) => {
+                    self.route_localnet_changed = false;
+                    self.route_localnet_original = None;
+                }
+                Err(e) => failures.push(format!("route_localnet restore: {}", e)),
+            }
+        }
+
+        if !failures.is_empty() {
+            anyhow::bail!(failures.join("; "));
+        }
 
         self.intercept_ips.clear();
         self.is_active = false;
-
         common::log_info!("TPROXY interception stopped");
         Ok(())
+    }
+
+    fn has_resources(&self) -> bool {
+        self.is_active
+            || self.route_localnet_changed
+            || self.policy_rule_added
+            || self.policy_route_added
+            || self.bypass_rule_added
+            || self.target_rules_started
+    }
+
+    pub fn route_localnet_original(&self) -> Option<&str> {
+        self.route_localnet_original.as_deref()
+    }
+
+    pub fn cleanup_stale(
+        proxy_port: u16,
+        intercept_ips: Vec<Ipv4Addr>,
+        route_localnet_original: Option<String>,
+        rules_tagged: bool,
+    ) -> Result<()> {
+        let mut manager = Self::new();
+        manager.proxy_port = proxy_port;
+        manager.intercept_ips = intercept_ips;
+        manager.route_localnet_original = route_localnet_original;
+        manager.route_localnet_changed = manager.route_localnet_original.is_some();
+        manager.policy_rule_added = true;
+        manager.policy_route_added = true;
+        manager.bypass_rule_added = true;
+        manager.target_rules_started = true;
+        manager.rules_tagged = rules_tagged;
+        manager.stop()
     }
 
     /// Add a TPROXY rule for a specific IP.
@@ -232,6 +397,10 @@ impl TproxyManager {
                 &ip_str,
                 "--dport",
                 "443",
+                "-m",
+                "comment",
+                "--comment",
+                "PRAXIS-INTERCEPT",
                 "-j",
                 "MARK",
                 "--set-mark",
@@ -259,6 +428,10 @@ impl TproxyManager {
                 &ip_str,
                 "--dport",
                 "443",
+                "-m",
+                "comment",
+                "--comment",
+                "PRAXIS-INTERCEPT",
                 "-j",
                 "TPROXY",
                 "--on-port",
@@ -279,50 +452,58 @@ impl TproxyManager {
         let port_str = self.proxy_port.to_string();
         let mark_str = format!("{}", TPROXY_MARK);
 
-        let _ = run_command(
-            "iptables",
-            &[
-                "-t",
-                "mangle",
-                "-D",
-                "OUTPUT",
-                "-p",
-                "tcp",
-                "-d",
-                &ip_str,
-                "--dport",
-                "443",
-                "-j",
-                "MARK",
-                "--set-mark",
-                &mark_str,
-            ],
-        );
+        let mut failures = Vec::new();
+        let output_cleanup = if self.rules_tagged {
+            run_cleanup_command(
+                "iptables",
+                &[
+                    "-t", "mangle", "-D", "OUTPUT", "-p", "tcp", "-d", &ip_str,
+                    "--dport", "443", "-m", "comment", "--comment", "PRAXIS-INTERCEPT",
+                    "-j", "MARK", "--set-mark", &mark_str,
+                ],
+            )
+        } else {
+            run_cleanup_command(
+                "iptables",
+                &[
+                    "-t", "mangle", "-D", "OUTPUT", "-p", "tcp", "-d", &ip_str,
+                    "--dport", "443", "-j", "MARK", "--set-mark", &mark_str,
+                ],
+            )
+        };
+        if let Err(e) = output_cleanup {
+            failures.push(format!("OUTPUT mark: {}", e));
+        }
 
-        let _ = run_command(
-            "iptables",
-            &[
-                "-t",
-                "mangle",
-                "-D",
-                "PREROUTING",
-                "-p",
-                "tcp",
-                "-d",
-                &ip_str,
-                "--dport",
-                "443",
-                "-j",
-                "TPROXY",
-                "--on-port",
-                &port_str,
-                "--tproxy-mark",
-                &mark_str,
-            ],
-        );
+        let prerouting_cleanup = if self.rules_tagged {
+            run_cleanup_command(
+                "iptables",
+                &[
+                    "-t", "mangle", "-D", "PREROUTING", "-p", "tcp", "-d", &ip_str,
+                    "--dport", "443", "-m", "comment", "--comment", "PRAXIS-INTERCEPT",
+                    "-j", "TPROXY", "--on-port", &port_str, "--tproxy-mark", &mark_str,
+                ],
+            )
+        } else {
+            run_cleanup_command(
+                "iptables",
+                &[
+                    "-t", "mangle", "-D", "PREROUTING", "-p", "tcp", "-d", &ip_str,
+                    "--dport", "443", "-j", "TPROXY", "--on-port", &port_str,
+                    "--tproxy-mark", &mark_str,
+                ],
+            )
+        };
+        if let Err(e) = prerouting_cleanup {
+            failures.push(format!("PREROUTING redirect: {}", e));
+        }
 
-        common::log_debug!("Removed TPROXY rule for {}", ip);
-        Ok(())
+        if failures.is_empty() {
+            common::log_debug!("Removed TPROXY rule for {}", ip);
+            Ok(())
+        } else {
+            anyhow::bail!(failures.join("; "))
+        }
     }
 
     #[allow(dead_code)]
@@ -372,7 +553,7 @@ impl Default for TproxyManager {
 
 impl Drop for TproxyManager {
     fn drop(&mut self) {
-        if self.is_active {
+        if self.has_resources() {
             if let Err(e) = self.stop() {
                 common::log_error!("Failed to stop TPROXY on drop: {}", e);
             }
@@ -387,7 +568,7 @@ impl Drop for TproxyManager {
 fn run_command(cmd: &str, args: &[&str]) -> Result<()> {
     let output = Command::new(cmd)
         .args(args)
-        .output()
+        .output_bounded()
         .context(format!("Failed to execute {}", cmd))?;
 
     if !output.status.success() {
@@ -398,55 +579,32 @@ fn run_command(cmd: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-//
-// SO_ORIGINAL_DST support for getting the real destination from TPROXY.
-//
+fn run_cleanup_command(cmd: &str, args: &[&str]) -> Result<()> {
+    let output = Command::new(cmd)
+        .args(args)
+        .output_bounded()
+        .with_context(|| format!("Failed to execute {}", cmd))?;
 
-use std::net::SocketAddr;
-use std::os::fd::AsRawFd;
-
-/// Get the original destination address from a socket using SO_ORIGINAL_DST.
-///
-/// This is used with TPROXY to determine where the connection was originally
-/// going before it was redirected to the proxy.
-pub fn get_original_dst(socket: &tokio::net::TcpStream) -> Result<SocketAddr> {
-    use std::mem;
-
-    let fd = socket.as_raw_fd();
-
-    //
-    // SO_ORIGINAL_DST = 80 (defined in linux/netfilter_ipv4.h)
-    // SOL_IP = 0
-    //
-
-    const SOL_IP: libc::c_int = 0;
-    const SO_ORIGINAL_DST: libc::c_int = 80;
-
-    let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
-    let mut len: libc::socklen_t = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-
-    let ret = unsafe {
-        libc::getsockopt(
-            fd,
-            SOL_IP,
-            SO_ORIGINAL_DST,
-            &mut addr as *mut _ as *mut libc::c_void,
-            &mut len,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error()).context("getsockopt SO_ORIGINAL_DST failed");
+    if output.status.success() {
+        return Ok(());
     }
 
-    //
-    // Convert to SocketAddr.
-    //
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if cleanup_error_missing(&output.stderr) {
+        return Ok(());
+    }
 
-    let ip = Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr));
-    let port = u16::from_be(addr.sin_port);
+    anyhow::bail!("{} {:?} failed: {}", cmd, args, stderr.trim())
+}
 
-    Ok(SocketAddr::new(std::net::IpAddr::V4(ip), port))
+fn cleanup_error_missing(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    stderr.contains("no such file or directory")
+        || stderr.contains("no chain/target/match")
+        || stderr.contains("bad rule")
+        || stderr.contains("cannot find device")
+        || stderr.contains("no such process")
+        || stderr.contains("fib table does not exist")
 }
 
 //

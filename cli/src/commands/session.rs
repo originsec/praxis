@@ -76,7 +76,7 @@ async fn create_session(
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let prompt_timeout_secs = match timeout {
         Some(t) => Some(t),
@@ -149,7 +149,7 @@ async fn send_prompt(client: &Client, node_prefix: &str, text: &str) -> Result<(
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let cli_state = CliState::load().unwrap_or_default();
     let session_id = cli_state
@@ -177,7 +177,7 @@ async fn close_session(client: &Client, node_prefix: &str) -> Result<()> {
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let mut cli_state = CliState::load().unwrap_or_default();
     let session_id = cli_state

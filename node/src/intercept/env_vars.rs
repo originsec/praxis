@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use crate::utils::CommandOutputBounded;
 #[allow(unused_imports)]
 
 /// Path where we store the exported root CA certificate
@@ -469,7 +470,7 @@ fn set_systemd_user_env(cert_path: &str, proxy_addr: Option<&str>) -> Result<()>
         args.push("no_proxy=localhost,127.0.0.1".to_string());
     }
 
-    let output = std::process::Command::new("systemctl").args(&args).output();
+    let output = std::process::Command::new("systemctl").args(&args).output_bounded();
 
     match output {
         Ok(o) if o.status.success() => {
@@ -499,7 +500,7 @@ fn unset_systemd_user_env() -> Result<()> {
         "no_proxy",
     ];
 
-    let output = std::process::Command::new("systemctl").args(&args).output();
+    let output = std::process::Command::new("systemctl").args(&args).output_bounded();
 
     match output {
         Ok(o) if o.status.success() => {

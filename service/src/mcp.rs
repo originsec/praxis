@@ -50,7 +50,8 @@ struct ClientState {
     system_state: Option<SystemState>,
     pending_acp: HashMap<String, PendingAcp>,
     pending_semantic_ops: HashMap<String, Option<String>>,
-    pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
+    pending_traffic_search:
+        HashMap<String, Result<(Vec<InterceptedTrafficEntry>, usize), String>>,
     pending_recon_get: Option<Option<ReconResult>>,
     pending_op_def_add: Option<Result<String, String>>,
     pending_op_def_delete: Option<Result<String, String>>,
@@ -141,10 +142,18 @@ impl ServiceMcpClient {
                 state.operations = operations;
             }
             ClientDirectMessage::TrafficSearchResponse {
+                request_id,
                 entries,
                 total_count,
+                error,
             } => {
-                state.pending_traffic_search = Some((entries, total_count));
+                state.pending_traffic_search.insert(
+                    request_id,
+                    match error {
+                        Some(error) => Err(error),
+                        None => Ok((entries, total_count)),
+                    },
+                );
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 state.operation_definitions = definitions;
@@ -340,6 +349,8 @@ impl ServiceMcpClient {
     async fn register(&self) -> Result<()> {
         let registration = ClientRegistration {
             client_id: self.client_id.clone(),
+            registration_nonce: String::new(),
+            expected_service_instance_id: String::new(),
         };
         let message = ClientSignalMessage::Registration(registration);
         self.publish_signal(message).await?;
@@ -561,24 +572,23 @@ impl McpClient for ServiceMcpClient {
         &self,
         filters: TrafficSearchFilters,
     ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_search = None;
-        }
-
+        let request_id = Uuid::new_v4().to_string();
         let message = ClientSignalMessage::TrafficSearchRequest {
             client_id: self.client_id.clone(),
+            request_id: request_id.clone(),
             filters,
         };
 
         self.publish_signal(message).await?;
 
+        let request_id_for_poll = request_id.clone();
         self.poll_pending(
             100,
-            |s| s.pending_traffic_search.take(),
+            move |s| s.pending_traffic_search.remove(&request_id_for_poll),
             "traffic search response",
         )
-        .await
+        .await?
+        .map_err(anyhow::Error::msg)
     }
 
     async fn run_semantic_op(

@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use anyhow::{Context, Result};
 #[allow(unused_imports)]
+use crate::utils::CommandOutputBounded;
 
 /// Saved proxy settings for restoration
 #[derive(Debug, Clone)]
@@ -225,7 +226,7 @@ fn notify_proxy_change() {
             $type::InternetSetOption([IntPtr]::Zero, $INTERNET_OPTION_REFRESH, [IntPtr]::Zero, 0) | Out-Null
             "#,
         ])
-        .output();
+        .output_bounded();
 }
 
 #[allow(dead_code)]

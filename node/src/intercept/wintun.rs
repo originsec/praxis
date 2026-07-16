@@ -100,9 +100,10 @@ impl WintunManager {
             unsafe { wintun::load_from_path(&dll_path).context("Failed to load wintun.dll")? };
 
         //
-        // Always create a new adapter. The wintun crate logs errors when open()
-        // fails to find an existing adapter, which is noisy. Creating always
-        // works and will reuse an existing adapter with the same name if present.
+        // Create a new adapter rather than opening an existing one. Wintun
+        // removes adapters created by WintunCreateAdapter when their handle is
+        // closed, so the manager owns the adapter for exactly this session. A
+        // name collision fails creation instead of modifying another adapter.
         //
         common::log_info!("Creating Praxis VPN adapter");
         let adapter = wintun::Adapter::create(&wintun, ADAPTER_NAME, TUNNEL_TYPE, None)

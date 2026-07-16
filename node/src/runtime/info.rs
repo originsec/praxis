@@ -82,9 +82,13 @@ pub async fn send_node_information_update(
             state.terminal_manager.clone(),
         )
     };
-    let (intercept_enabled, intercept_method) = {
+    let (intercept_enabled, intercept_method, intercept_status) = {
         let intercept_manager = intercept_manager.lock().await;
-        (intercept_manager.is_enabled(), intercept_manager.method())
+        (
+            intercept_manager.is_enabled(),
+            intercept_manager.method(),
+            intercept_manager.status(),
+        )
     };
     let active_terminal_id = terminal_manager.lock().await.get_active_terminal_id();
 
@@ -102,7 +106,9 @@ pub async fn send_node_information_update(
 
     let message = NodeSignalMessage::InformationUpdate(update);
     publish_json(channel, NODE_SIGNAL_QUEUE, &message).await?;
+    let status_message = NodeSignalMessage::InterceptStatusUpdate(intercept_status);
+    publish_json(channel, NODE_SIGNAL_QUEUE, &status_message).await?;
 
-    common::log_info!("Sent NodeInformationUpdate to service");
+    common::log_info!("Sent NodeInformationUpdate and InterceptStatus to service");
     Ok(())
 }

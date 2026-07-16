@@ -25,70 +25,100 @@ impl NodeInterceptManager {
     /// This sets up:
     /// 1. iptables TPROXY rules to redirect traffic to proxy
     /// 2. Policy routing for marked packets
-    /// 3. SO_ORIGINAL_DST used by proxy to get real destination
+    /// 3. Accepted socket local_addr used by proxy as real destination
     #[cfg(target_os = "linux")]
     pub(super) async fn enable_tproxy_mode(&mut self, proxy_port: u16) -> Result<()> {
         common::log_info!("Setting up TPROXY intercept mode (Linux)");
 
         //
-        // 0. Disable IPv6 to avoid routing issues.
-        //    TPROXY rules only handle IPv4 currently.
-        //
-        let mut ipv6_manager = Ipv6Manager::new();
-        ipv6_manager.disable().context("Failed to disable IPv6")?;
-        self.ipv6_manager = Some(ipv6_manager);
-
-        //
-        // 1. Resolve domain IPs.
+        // 1. Resolve domain IPs before making any system changes.
         //
 
+        self.check_enable_cancelled()?;
         let dns_resolver = Arc::new(
-            DomainResolver::new()
+            self.race_cancel(DomainResolver::new())
                 .await
                 .context("Failed to create DNS resolver")?,
         );
 
-        for domain in &self.domains {
-            match dns_resolver.resolve_domain(domain).await {
-                Ok(ips) => {
-                    common::log_debug!("Resolved {} to {:?}", domain, ips);
-                }
-                Err(e) => {
-                    common::log_warn!("Failed to resolve {}: {}", domain, e);
-                }
-            }
-        }
+        self.check_enable_cancelled()?;
+        let resolved = self
+            .race_cancel(dns_resolver.resolve_required_domains(&self.domains))
+            .await
+            .context("Failed to resolve TPROXY intercept targets")?;
 
         //
         // 2. Get IPv4 addresses for TPROXY rules.
         //
 
-        let intercept_ips = dns_resolver.get_all_intercept_ips();
-        let ipv4_ips: Vec<std::net::Ipv4Addr> = intercept_ips
-            .iter()
+        let ipv4_ips: Vec<std::net::Ipv4Addr> = resolved
+            .into_values()
+            .flatten()
             .filter_map(|ip| match ip {
-                std::net::IpAddr::V4(v4) => Some(*v4),
+                std::net::IpAddr::V4(v4) => Some(v4),
                 std::net::IpAddr::V6(_) => None,
             })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
             .collect();
 
+        if ipv4_ips.is_empty() {
+            anyhow::bail!("TPROXY interception requires at least one resolved IPv4 target");
+        }
+
         common::log_info!("Setting up TPROXY for {} IPv4 addresses", ipv4_ips.len());
+
+        self.check_enable_cancelled()?;
+        let ipv6_original = Ipv6Manager::current_value()
+            .context("Failed to read IPv6 state for TPROXY recovery")?;
+        let route_localnet_original = TproxyManager::current_route_localnet()
+            .context("Failed to read route_localnet for TPROXY recovery")?;
+        TproxyManager::ensure_resources_available()
+            .context("TPROXY policy-routing resources are already in use")?;
+        super::state::update_state(|state| {
+            state.tproxy_enabled = true;
+            state.tproxy_port = proxy_port;
+            state.tproxy_ips = ipv4_ips.iter().map(ToString::to_string).collect();
+            state.ipv6_original_value = Some(ipv6_original);
+            state.route_localnet_original_value = Some(route_localnet_original);
+            state.tproxy_rules_tagged = true;
+        })
+        .context("Failed to persist recovery state before TPROXY changes")?;
 
         //
         // 3. Start TPROXY manager (sets up iptables rules + policy routing).
         //
 
+        self.check_enable_cancelled()?;
         let mut tproxy_manager = TproxyManager::new();
-        tproxy_manager
+        if let Err(error) = tproxy_manager
             .start(proxy_port, &ipv4_ips)
-            .context("Failed to start TPROXY manager")?;
+            .context("Failed to start TPROXY manager")
+        {
+            self.tproxy_manager = Some(tproxy_manager);
+            return Err(error);
+        }
+        self.tproxy_manager = Some(tproxy_manager);
+
+        //
+        // TPROXY is IPv4-only. Disable IPv6 only after all target resolution
+        // and rule setup succeeded; dropping the manager rolls the rules back
+        // if this final system change fails.
+        //
+
+        self.check_enable_cancelled()?;
+        let mut ipv6_manager = Ipv6Manager::new();
+        if let Err(error) = ipv6_manager.disable().context("Failed to disable IPv6") {
+            self.ipv6_manager = Some(ipv6_manager);
+            return Err(error);
+        }
 
         //
         // Store components.
         //
 
-        self.tproxy_manager = Some(tproxy_manager);
         self.tproxy_dns_resolver = Some(dns_resolver);
+        self.ipv6_manager = Some(ipv6_manager);
 
         Ok(())
     }
@@ -101,30 +131,19 @@ impl NodeInterceptManager {
 
     /// Disable TPROXY mode and clean up components (Linux).
     #[cfg(target_os = "linux")]
-    pub(super) async fn disable_tproxy_mode(&mut self) {
-        common::log_info!("Disabling TPROXY mode");
-
+    pub(super) async fn disable_tproxy_mode(&mut self) -> Result<()> {
         //
-        // Stop TPROXY manager (removes iptables rules + policy routing).
+        // Same cleanup as Drop path: remove iptables rules and restore
+        // IPv6. Must restore IPv6 here — after disable() sets
+        // is_enabled=false, Drop skips method cleanup entirely.
         //
-
-        if let Some(mut tproxy_manager) = self.tproxy_manager.take() {
-            if let Err(e) = tproxy_manager.stop() {
-                common::log_error!("Failed to stop TPROXY manager: {}", e);
-            }
-        }
-
-        //
-        // Clear DNS resolver.
-        //
-
-        self.tproxy_dns_resolver = None;
+        self.cleanup_tproxy_sync()
     }
 
     /// Non-Linux stub for TPROXY mode cleanup.
     #[cfg(not(target_os = "linux"))]
-    pub(super) async fn disable_tproxy_mode(&mut self) {
-        // No-op on non-Linux
+    pub(super) async fn disable_tproxy_mode(&mut self) -> Result<()> {
+        Ok(())
     }
 
     //
@@ -132,36 +151,61 @@ impl NodeInterceptManager {
     //
 
     #[cfg(target_os = "linux")]
-    pub(super) fn cleanup_tproxy_sync(&mut self) {
+    pub(super) fn cleanup_tproxy_sync(&mut self) -> Result<()> {
+        let mut failures = Vec::new();
         //
         // Stop TPROXY manager (removes iptables rules + policy routing).
         //
 
-        if let Some(mut tproxy_manager) = self.tproxy_manager.take() {
+        let tproxy_cleaned = if let Some(tproxy_manager) = self.tproxy_manager.as_mut() {
             if let Err(e) = tproxy_manager.stop() {
-                common::log_error!("Failed to stop TPROXY manager: {}", e);
+                failures.push(format!("TPROXY rules: {}", e));
+                false
+            } else {
+                true
             }
+        } else {
+            false
+        };
+        if tproxy_cleaned {
+            self.tproxy_manager = None;
         }
 
         //
         // Restore IPv6.
         //
 
-        if let Some(mut ipv6_manager) = self.ipv6_manager.take() {
+        let ipv6_cleaned = if let Some(ipv6_manager) = self.ipv6_manager.as_mut() {
             if let Err(e) = ipv6_manager.restore() {
-                common::log_error!("Failed to restore IPv6: {}", e);
+                failures.push(format!("IPv6 restore: {}", e));
+                false
+            } else {
+                true
             }
+        } else {
+            false
+        };
+        if ipv6_cleaned {
+            self.ipv6_manager = None;
         }
 
         //
         // Clear DNS resolver.
         //
 
-        self.tproxy_dns_resolver = None;
+        if failures.is_empty() {
+            self.tproxy_dns_resolver = None;
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            anyhow::bail!(failures.join("; "))
+        }
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub(super) fn cleanup_tproxy_sync(&mut self) {
-        // No-op on non-Linux
+    pub(super) fn cleanup_tproxy_sync(&mut self) -> Result<()> {
+        Ok(())
     }
 }

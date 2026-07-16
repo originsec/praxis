@@ -3,6 +3,7 @@ use common::{
     NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, NodeStatus, SystemState,
 };
 use std::collections::HashMap;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 /// A registered node in the system
@@ -251,10 +252,23 @@ impl NodeRegistry {
     }
 }
 
+/// Kind of pending command — used to shape the client-facing reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PendingCommandKind {
+    #[default]
+    Generic,
+    Intercept,
+}
+
 /// A pending command waiting for a response
 #[derive(Clone)]
 pub struct PendingCommand {
     pub client_id: String,
+    pub kind: PendingCommandKind,
+    pub node_id: Option<String>,
+    /// When the command was registered — used to reap entries whose node
+    /// never responded (disconnect, crash) so the map can't grow unbounded.
+    pub created_at: Instant,
 }
 
 /// Tracks pending commands waiting for responses from nodes
@@ -269,14 +283,92 @@ impl PendingCommands {
         }
     }
 
-    pub async fn add(&self, command_id: String, client_id: String) {
+    pub async fn add(
+        &self,
+        command_id: String,
+        client_id: String,
+        node_id: String,
+    ) -> bool {
         let mut commands = self.commands.write().await;
-        commands.insert(command_id, PendingCommand { client_id });
+        if commands.contains_key(&command_id) {
+            return false;
+        }
+        commands.insert(
+            command_id,
+            PendingCommand {
+                client_id,
+                kind: PendingCommandKind::Generic,
+                node_id: Some(node_id),
+                created_at: Instant::now(),
+            },
+        );
+        true
+    }
+
+    pub async fn add_intercept(
+        &self,
+        command_id: String,
+        client_id: String,
+        node_id: String,
+    ) -> bool {
+        let mut commands = self.commands.write().await;
+        if commands.contains_key(&command_id) {
+            return false;
+        }
+        commands.insert(
+            command_id,
+            PendingCommand {
+                client_id,
+                kind: PendingCommandKind::Intercept,
+                node_id: Some(node_id),
+                created_at: Instant::now(),
+            },
+        );
+        true
     }
 
     pub async fn remove(&self, command_id: &str) -> Option<PendingCommand> {
         let mut commands = self.commands.write().await;
         commands.remove(command_id)
+    }
+
+    pub async fn remove_for_response(
+        &self,
+        command_id: &str,
+        node_id: &str,
+    ) -> Result<Option<PendingCommand>, String> {
+        let mut commands = self.commands.write().await;
+        let Some(pending) = commands.get(command_id) else {
+            return Ok(None);
+        };
+        if let Some(expected_node) = pending.node_id.as_deref()
+            && expected_node != node_id
+        {
+            return Err(expected_node.to_string());
+        }
+        Ok(commands.remove(command_id))
+    }
+
+    //
+    // Drop and return any commands older than `max_age` — used by the reaper
+    // to clean up after nodes that received a command but never replied.
+    //
+
+    pub async fn reap_older_than(
+        &self,
+        max_age: std::time::Duration,
+    ) -> Vec<(String, PendingCommand)> {
+        let now = Instant::now();
+        let mut commands = self.commands.write().await;
+        let expired: Vec<String> = commands
+            .iter()
+            .filter(|(_, c)| now.duration_since(c.created_at) >= max_age)
+            .map(|(id, _)| id.clone())
+            .collect();
+        expired
+            .into_iter()
+            .filter_map(|id| commands.remove(&id).map(|command| (id, command)))
+            .collect()
     }
 }
 

@@ -535,6 +535,8 @@ impl App {
             AppEvent::StateUpdate(state) => {
                 let had_no_nodes = self.nodes.nodes.is_empty();
                 self.handle_state_update(state);
+                self.intercept
+                    .sync_status_from_nodes(&self.nodes.nodes);
                 //
                 // On the first state update (empty → populated), also pull
                 // existing sessions from each node. This ensures a fresh
@@ -798,19 +800,85 @@ impl App {
                 }
                 true
             }
-            AppEvent::InterceptEntriesAppended(entries) => {
-                self.intercept.push_entries(entries);
+            AppEvent::InterceptEntriesAppended {
+                generation,
+                service_instance_id,
+                entries,
+            } => {
+                self.intercept.push_entries_scoped(
+                    Some(service_instance_id.as_str()).filter(|s| !s.is_empty()),
+                    generation,
+                    entries,
+                );
                 self.active_window == Window::Intercept
             }
-            AppEvent::InterceptMatchesAppended(matches) => {
-                self.intercept.push_matches(matches);
+            AppEvent::InterceptMatchesAppended {
+                generation,
+                service_instance_id,
+                matches,
+            } => {
+                self.intercept.push_matches_scoped(
+                    Some(service_instance_id.as_str()).filter(|s| !s.is_empty()),
+                    generation,
+                    matches,
+                );
                 self.active_window == Window::Intercept
                     && self.intercept.tab == crate::app::intercept::InterceptTab::Matches
             }
-            AppEvent::InterceptStatusChanged(status) => {
+            AppEvent::ServiceInstanceRebind(id) => {
+                self.intercept.note_service_instance(&id);
+                //
+                // note_service_instance marks pages unloaded; reload persistent
+                // history when the intercept window is active (or next enter).
+                //
+                if self.active_window == Window::Intercept {
+                    self.enter_intercept().await;
+                }
+                self.active_window == Window::Intercept
+            }
+            AppEvent::InterceptClearBoundary {
+                service_instance_id,
+                generation,
+            } => {
+                //
+                // Late clear success: same gate as clear_intercept_traffic.
+                //
                 self.intercept
-                    .intercept_statuses
-                    .insert(status.node_id.clone(), status);
+                    .apply_validated_clear_boundary(&service_instance_id, generation);
+                self.active_window == Window::Intercept
+            }
+            AppEvent::InterceptStatusChanged(status) => {
+                self.intercept.apply_status(status);
+                self.active_window == Window::Intercept
+            }
+            AppEvent::InterceptBodyFetchEmpty(id) => {
+                self.intercept.complete_empty_body_fetch(id);
+                self.active_window == Window::Intercept
+            }
+            AppEvent::InterceptBodyFetchFailed { id, message } => {
+                self.intercept.note_body_fetch_failed(id);
+                self.intercept.set_error(message);
+                true
+            }
+            AppEvent::InterceptToggleResult {
+                node_id,
+                enable,
+                result,
+            } => {
+                self.intercept.pending_toggles.remove(&node_id);
+                match result {
+                    Ok(()) => {
+                        let msg = if enable {
+                            "Interception enabled"
+                        } else {
+                            "Interception disabled"
+                        };
+                        self.intercept.set_status_message(msg);
+                    }
+                    Err(e) => {
+                        self.intercept.set_error(format!("Intercept toggle: {}", e));
+                    }
+                }
                 self.active_window == Window::Intercept
             }
             AppEvent::ReconGetResponse {

@@ -1,7 +1,6 @@
-#[cfg(target_os = "windows")]
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::net::IpAddr;
+use crate::utils::CommandOutputBounded;
 
 #[allow(dead_code)]
 /// Mark for proxy's outgoing connections to bypass VPN/TUN routing.
@@ -49,6 +48,38 @@ impl RouteManager {
         }
     }
 
+    pub fn ensure_routes_available(
+        routes: &std::collections::HashSet<IpAddr>,
+    ) -> Result<()> {
+        for route in routes {
+            let IpAddr::V4(ip) = route else {
+                continue;
+            };
+            let prefix = format!("{}/32", ip);
+            let script = format!(
+                "$route = Get-NetRoute -DestinationPrefix '{}' -ErrorAction SilentlyContinue; if ($route) {{ exit 2 }}",
+                prefix
+            );
+            let output = crate::utils::silent_command("powershell")
+                .args(["-NoProfile", "-Command", &script])
+                .output_bounded()
+                .context(format!("Failed to inspect route {}", prefix))?;
+            match output.status.code() {
+                Some(0) => {}
+                Some(2) => anyhow::bail!(
+                    "Refusing to replace existing route {}; remove the conflict before enabling interception",
+                    prefix
+                ),
+                _ => anyhow::bail!(
+                    "Failed to inspect route {}: {}",
+                    prefix,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            }
+        }
+        Ok(())
+    }
+
     /// Configure the TUN interface with an IP address
     ///
     /// Runs: netsh interface ipv4 set address name="Praxis VPN" static 10.255.0.1 255.255.255.0
@@ -71,22 +102,17 @@ impl RouteManager {
                 TUN_IP,
                 TUN_NETMASK,
             ])
-            .output()
+            .output_bounded()
             .context("Failed to execute netsh command")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            //
-            // Sometimes netsh returns non-zero even when it works.
-            //
-            if !stderr.is_empty() || !stdout.is_empty() {
-                common::log_warn!(
-                    "netsh set address output: stdout={}, stderr={}",
-                    stdout.trim(),
-                    stderr.trim()
-                );
-            }
+            anyhow::bail!(
+                "netsh failed to configure interface: stdout={}, stderr={}",
+                stdout.trim(),
+                stderr.trim()
+            );
         }
 
         self.interface_configured = true;
@@ -126,25 +152,18 @@ impl RouteManager {
                 TUN_IP,
                 "metric=1",
             ])
-            .output()
+            .output_bounded()
             .context(format!("Failed to add route for {}", ip_str))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            //
-            // Check if route already exists.
-            //
-            if stderr.contains("exists") || stdout.contains("exists") {
-                common::log_debug!("Route for {} already exists", ip_str);
-            } else if !stderr.is_empty() || !stdout.is_empty() {
-                common::log_warn!(
-                    "netsh add route for {} output: stdout={}, stderr={}",
-                    ip_str,
-                    stdout.trim(),
-                    stderr.trim()
-                );
-            }
+            anyhow::bail!(
+                "netsh failed to add route for {}: stdout={}, stderr={}",
+                ip_str,
+                stdout.trim(),
+                stderr.trim()
+            );
         }
 
         self.added_routes.push(destination_ip);
@@ -170,7 +189,7 @@ impl RouteManager {
                 &format!("{}/32", ip_str),
                 &self.interface_name,
             ])
-            .output()
+            .output_bounded()
             .context(format!("Failed to remove route for {}", ip_str))?;
 
         if !output.status.success() {
@@ -179,7 +198,7 @@ impl RouteManager {
             // Ignore "not found" errors during cleanup.
             //
             if !stderr.contains("not found") && !stderr.contains("Element not found") {
-                common::log_warn!("Failed to remove route for {}: {}", ip_str, stderr.trim());
+                anyhow::bail!("Failed to remove route for {}: {}", ip_str, stderr.trim());
             }
         }
 
@@ -190,14 +209,30 @@ impl RouteManager {
     pub fn remove_all_routes(&mut self) -> Result<()> {
         common::log_info!("Removing {} routes", self.added_routes.len());
 
-        let routes_to_remove: Vec<_> = self.added_routes.drain(..).collect();
+        let routes_to_remove = std::mem::take(&mut self.added_routes);
+        let mut failures = Vec::new();
         for ip in routes_to_remove {
             if let Err(e) = self.remove_route(&ip) {
-                common::log_error!("Error removing route for {}: {}", ip, e);
+                failures.push(format!("{}: {}", ip, e));
+                self.added_routes.push(ip);
             }
         }
 
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            anyhow::bail!(failures.join("; "))
+        }
+    }
+
+    pub fn added_routes(&self) -> &[IpAddr] {
+        &self.added_routes
+    }
+
+    pub fn cleanup_stale(interface_name: &str, routes: Vec<IpAddr>) -> Result<()> {
+        let mut manager = Self::new(interface_name);
+        manager.added_routes = routes;
+        manager.remove_all_routes()
     }
 
     #[allow(dead_code)]
@@ -240,20 +275,46 @@ impl RouteManager {
         }
     }
 
-    /// Configure the TUN interface with IPv4 and IPv6 addresses.
+    pub fn ensure_routes_available(
+        routes: &std::collections::HashSet<IpAddr>,
+    ) -> Result<()> {
+        for route in routes {
+            let IpAddr::V4(ip) = route else {
+                continue;
+            };
+            let prefix = format!("{}/32", ip);
+            let output = crate::utils::silent_command("ip")
+                .args(["-4", "route", "show", "exact", &prefix])
+                .output_bounded()
+                .context(format!("Failed to inspect route {}", prefix))?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "Failed to inspect route {}: {}",
+                    prefix,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            if !output.stdout.is_empty() {
+                anyhow::bail!(
+                    "Refusing to replace existing route {}; remove the conflict before enabling interception",
+                    prefix
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Configure the IPv4-only TUN interface.
     ///
     /// Runs: ip addr add 10.255.0.1/24 dev <interface>
-    ///       ip -6 addr add fd00:255:0::1/64 dev <interface>
     ///       ip link set <interface> up
     pub fn configure_interface(&mut self) -> Result<()> {
         use anyhow::Context;
 
         common::log_info!(
-            "Configuring interface {} with IPv4 {}/24 and IPv6 {}/{}",
+            "Configuring interface {} with IPv4 {}/24",
             self.interface_name,
-            TUN_IP,
-            TUN_IP6,
-            TUN_IP6_PREFIX
+            TUN_IP
         );
 
         //
@@ -267,42 +328,12 @@ impl RouteManager {
                 "dev",
                 &self.interface_name,
             ])
-            .output()
+            .output_bounded()
             .context("Failed to execute ip addr add command")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            //
-            // Ignore "already exists" errors.
-            //
-            if !stderr.contains("RTNETLINK answers: File exists") {
-                common::log_error!("ip addr add (IPv4) failed: {}", stderr.trim());
-            }
-        }
-
-        //
-        // Add IPv6 address to interface.
-        //
-        let output = crate::utils::silent_command("ip")
-            .args([
-                "-6",
-                "addr",
-                "add",
-                &format!("{}/{}", TUN_IP6, TUN_IP6_PREFIX),
-                "dev",
-                &self.interface_name,
-            ])
-            .output()
-            .context("Failed to execute ip -6 addr add command")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            //
-            // Ignore "already exists" errors.
-            //
-            if !stderr.contains("RTNETLINK answers: File exists") {
-                common::log_debug!("ip addr add (IPv6) warning: {}", stderr.trim());
-            }
+            anyhow::bail!("ip addr add (IPv4) failed: {}", stderr.trim());
         }
 
         //
@@ -310,12 +341,12 @@ impl RouteManager {
         //
         let output = crate::utils::silent_command("ip")
             .args(["link", "set", &self.interface_name, "up"])
-            .output()
+            .output_bounded()
             .context("Failed to execute ip link set up command")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            common::log_warn!("ip link set up warning: {}", stderr.trim());
+            anyhow::bail!("ip link set up failed: {}", stderr.trim());
         }
 
         //
@@ -335,37 +366,31 @@ impl RouteManager {
             format!("net.ipv4.conf.{}.rp_filter=0", self.interface_name),
             format!("net.ipv4.conf.{}.accept_local=1", self.interface_name),
             format!("net.ipv4.conf.{}.route_localnet=1", self.interface_name),
-            //
-            // Also set on "all" to ensure defaults don't override.
-            //
-            "net.ipv4.conf.all.rp_filter=0".to_string(),
         ];
 
         for setting in &sysctl_settings {
             let output = crate::utils::silent_command("sysctl")
                 .args(["-w", setting])
-                .output();
+                .output_bounded();
 
             match output {
                 Ok(o) if o.status.success() => {
                     common::log_debug!("Set {}", setting);
                 }
-                Ok(o) => {
-                    let stderr = String::from_utf8_lossy(&o.stderr);
-                    common::log_warn!("Failed to set {}: {}", setting, stderr.trim());
-                }
-                Err(e) => {
-                    common::log_warn!("Failed to run sysctl for {}: {}", setting, e);
-                }
+                Ok(o) => anyhow::bail!(
+                    "Failed to set {}: {}",
+                    setting,
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ),
+                Err(e) => anyhow::bail!("Failed to run sysctl for {}: {}", setting, e),
             }
         }
 
         self.interface_configured = true;
         common::log_info!(
-            "Interface {} configured with IPv4 {} and IPv6 {}",
+            "Interface {} configured with IPv4 {}",
             self.interface_name,
-            TUN_IP,
-            TUN_IP6
+            TUN_IP
         );
         Ok(())
     }
@@ -396,19 +421,12 @@ impl RouteManager {
                 "dev",
                 &self.interface_name,
             ])
-            .output()
+            .output_bounded()
             .context(format!("Failed to add route for {}", ip_str))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            //
-            // Ignore "already exists" errors.
-            //
-            if stderr.contains("RTNETLINK answers: File exists") {
-                common::log_debug!("Route for {} already exists", ip_str);
-            } else if !stderr.is_empty() {
-                common::log_warn!("ip route add for {} warning: {}", ip_str, stderr.trim());
-            }
+            anyhow::bail!("ip route add for {} failed: {}", ip_str, stderr.trim());
         }
 
         self.added_routes.push(destination_ip);
@@ -438,7 +456,7 @@ impl RouteManager {
                 "dev",
                 &self.interface_name,
             ])
-            .output()
+            .output_bounded()
             .context(format!("Failed to remove route for {}", ip_str))?;
 
         if !output.status.success() {
@@ -446,8 +464,11 @@ impl RouteManager {
             //
             // Ignore "not found" errors during cleanup.
             //
-            if !stderr.contains("No such process") && !stderr.contains("not found") {
-                common::log_warn!("Failed to remove route for {}: {}", ip_str, stderr.trim());
+            if !stderr.contains("No such process")
+                && !stderr.contains("not found")
+                && !stderr.contains("Cannot find device")
+            {
+                anyhow::bail!("Failed to remove route for {}: {}", ip_str, stderr.trim());
             }
         }
 
@@ -457,14 +478,30 @@ impl RouteManager {
     pub fn remove_all_routes(&mut self) -> Result<()> {
         common::log_info!("Removing {} routes", self.added_routes.len());
 
-        let routes_to_remove: Vec<_> = self.added_routes.drain(..).collect();
+        let routes_to_remove = std::mem::take(&mut self.added_routes);
+        let mut failures = Vec::new();
         for ip in routes_to_remove {
             if let Err(e) = self.remove_route(&ip) {
-                common::log_error!("Error removing route for {}: {}", ip, e);
+                failures.push(format!("{}: {}", ip, e));
+                self.added_routes.push(ip);
             }
         }
 
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            anyhow::bail!(failures.join("; "))
+        }
+    }
+
+    pub fn added_routes(&self) -> &[IpAddr] {
+        &self.added_routes
+    }
+
+    pub fn cleanup_stale(interface_name: &str, routes: Vec<IpAddr>) -> Result<()> {
+        let mut manager = Self::new(interface_name);
+        manager.added_routes = routes;
+        manager.remove_all_routes()
     }
 
     #[allow(dead_code)]
@@ -518,6 +555,14 @@ impl RouteManager {
         Ok(())
     }
 
+    pub fn added_routes(&self) -> &[IpAddr] {
+        &self.added_routes
+    }
+
+    pub fn cleanup_stale(_interface_name: &str, _routes: Vec<IpAddr>) -> Result<()> {
+        Ok(())
+    }
+
     pub fn interface_name(&self) -> &str {
         "N/A"
     }
@@ -544,6 +589,8 @@ pub struct VpnBypassManager {
     default_gateway: Option<String>,
     /// The interface for the default gateway.
     default_interface: Option<String>,
+    rule_added: bool,
+    route_added: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -553,7 +600,47 @@ impl VpnBypassManager {
             is_active: false,
             default_gateway: None,
             default_interface: None,
+            rule_added: false,
+            route_added: false,
         }
+    }
+
+    pub fn ensure_resources_available() -> Result<()> {
+        use anyhow::Context;
+
+        let rules = crate::utils::silent_command("ip")
+            .args(["rule", "show"])
+            .output_bounded()
+            .context("Failed to inspect policy routing rules")?;
+        if !rules.status.success() {
+            anyhow::bail!(
+                "Failed to inspect policy routing rules: {}",
+                String::from_utf8_lossy(&rules.stderr).trim()
+            );
+        }
+        let rules = String::from_utf8_lossy(&rules.stdout).to_ascii_lowercase();
+        if rules.lines().any(|line| {
+            line.contains("fwmark 0x2")
+                && line.contains("lookup 200")
+                && line.trim_start().starts_with("100:")
+        }) {
+            anyhow::bail!("policy rule priority 100 for mark 0x2/table 200 already exists");
+        }
+
+        let routes = crate::utils::silent_command("ip")
+            .args(["route", "show", "table", &VPN_BYPASS_TABLE.to_string()])
+            .output_bounded()
+            .context("Failed to inspect VPN bypass routing table")?;
+        if routes.status.success() && !routes.stdout.iter().all(u8::is_ascii_whitespace) {
+            anyhow::bail!("routing table 200 is not empty");
+        }
+        if !routes.status.success() && !cleanup_command_missing(&routes.stderr) {
+            anyhow::bail!(
+                "Failed to inspect VPN bypass routing table: {}",
+                String::from_utf8_lossy(&routes.stderr).trim()
+            );
+        }
+        Ok(())
     }
 
     /// Start VPN bypass routing.
@@ -565,7 +652,7 @@ impl VpnBypassManager {
     pub fn start(&mut self) -> Result<()> {
         use anyhow::Context;
 
-        if self.is_active {
+        if self.is_active || self.rule_added || self.route_added {
             return Ok(());
         }
 
@@ -597,18 +684,14 @@ impl VpnBypassManager {
                 "priority",
                 "100",
             ])
-            .output()
+            .output_bounded()
             .context("Failed to add ip rule")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            //
-            // Ignore "already exists" errors.
-            //
-            if !stderr.contains("File exists") {
-                common::log_warn!("ip rule add warning: {}", stderr.trim());
-            }
+            anyhow::bail!("Failed to add VPN bypass rule: {}", stderr.trim());
         }
+        self.rule_added = true;
 
         //
         // 3. Add default route via real gateway in our bypass table.
@@ -625,18 +708,38 @@ impl VpnBypassManager {
                 "table",
                 &VPN_BYPASS_TABLE.to_string(),
             ])
-            .output()
-            .context("Failed to add bypass route")?;
+            .output_bounded()
+            .context("Failed to add bypass route");
+
+        let output = match output {
+            Ok(output) => output,
+            Err(e) => {
+                let cleanup = self.stop();
+                return match cleanup {
+                    Ok(()) => Err(e),
+                    Err(cleanup_error) => Err(anyhow::anyhow!(
+                        "{}; VPN bypass rollback also failed: {}",
+                        e,
+                        cleanup_error
+                    )),
+                };
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            //
-            // Ignore "already exists" errors.
-            //
-            if !stderr.contains("File exists") {
-                common::log_warn!("ip route add (bypass table) warning: {}", stderr.trim());
-            }
+            let cause = anyhow::anyhow!("Failed to add VPN bypass route: {}", stderr.trim());
+            let cleanup = self.stop();
+            return match cleanup {
+                Ok(()) => Err(cause),
+                Err(cleanup_error) => Err(anyhow::anyhow!(
+                    "{}; VPN bypass rollback also failed: {}",
+                    cause,
+                    cleanup_error
+                )),
+            };
         }
+        self.route_added = true;
 
         self.is_active = true;
         common::log_info!(
@@ -650,7 +753,7 @@ impl VpnBypassManager {
 
     /// Stop VPN bypass routing and clean up rules.
     pub fn stop(&mut self) -> Result<()> {
-        if !self.is_active {
+        if !self.is_active && !self.rule_added && !self.route_added {
             return Ok(());
         }
 
@@ -659,42 +762,62 @@ impl VpnBypassManager {
         //
         // Remove the bypass route from our table.
         //
-        if let (Some(gateway), Some(interface)) = (&self.default_gateway, &self.default_interface) {
-            let _ = crate::utils::silent_command("ip")
+        let mut failures = Vec::new();
+        if self.route_added {
+            let output = crate::utils::silent_command("ip")
                 .args([
                     "route",
                     "del",
                     "default",
-                    "via",
-                    gateway,
-                    "dev",
-                    interface,
                     "table",
                     &VPN_BYPASS_TABLE.to_string(),
                 ])
-                .output();
+                .output_bounded();
+            match output {
+                Ok(output) if output.status.success() => self.route_added = false,
+                Ok(output) if cleanup_command_missing(&output.stderr) => self.route_added = false,
+                Ok(output) => failures.push(format!("bypass route: {}", String::from_utf8_lossy(&output.stderr).trim())),
+                Err(e) => failures.push(format!("bypass route: {}", e)),
+            }
         }
 
         //
         // Remove the policy routing rule.
         //
-        let _ = crate::utils::silent_command("ip")
-            .args([
-                "rule",
-                "del",
-                "fwmark",
-                &VPN_BYPASS_MARK.to_string(),
-                "lookup",
-                &VPN_BYPASS_TABLE.to_string(),
-            ])
-            .output();
+        if self.rule_added {
+            let output = crate::utils::silent_command("ip")
+                .args([
+                    "rule",
+                    "del",
+                    "fwmark",
+                    &VPN_BYPASS_MARK.to_string(),
+                    "lookup",
+                    &VPN_BYPASS_TABLE.to_string(),
+                    "priority",
+                    "100",
+                ])
+                .output_bounded();
+            match output {
+                Ok(output) if output.status.success() => self.rule_added = false,
+                Ok(output) if cleanup_command_missing(&output.stderr) => self.rule_added = false,
+                Ok(output) => failures.push(format!(
+                    "bypass rule: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )),
+                Err(e) => failures.push(format!("bypass rule: {}", e)),
+            }
+        }
 
-        self.is_active = false;
-        self.default_gateway = None;
-        self.default_interface = None;
+        if failures.is_empty() {
+            self.is_active = false;
+            self.default_gateway = None;
+            self.default_interface = None;
 
-        common::log_info!("VPN bypass routing disabled");
-        Ok(())
+            common::log_info!("VPN bypass routing disabled");
+            Ok(())
+        } else {
+            anyhow::bail!(failures.join("; "))
+        }
     }
 
     /// Discover the default gateway and interface.
@@ -705,7 +828,7 @@ impl VpnBypassManager {
 
         let output = crate::utils::silent_command("ip")
             .args(["route", "show", "default"])
-            .output()
+            .output_bounded()
             .context("Failed to run ip route show default")?;
 
         if !output.status.success() {
@@ -748,6 +871,29 @@ impl VpnBypassManager {
     pub fn is_active(&self) -> bool {
         self.is_active
     }
+
+    /// True when this manager still owns host policy-routing resources that
+    /// must be torn down via stop() — not discarded Drop with ignored errors.
+    pub fn owns_host_resources(&self) -> bool {
+        self.is_active || self.rule_added || self.route_added
+    }
+
+    pub fn cleanup_stale() -> Result<()> {
+        let mut manager = Self::new();
+        manager.is_active = true;
+        manager.rule_added = true;
+        manager.route_added = true;
+        manager.stop()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_command_missing(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    stderr.contains("no such process")
+        || stderr.contains("not found")
+        || stderr.contains("no such file")
+        || stderr.contains("fib table does not exist")
 }
 
 #[cfg(target_os = "linux")]
@@ -760,10 +906,32 @@ impl Default for VpnBypassManager {
 #[cfg(target_os = "linux")]
 impl Drop for VpnBypassManager {
     fn drop(&mut self) {
-        if self.is_active {
+        if self.owns_host_resources() {
             common::log_warn!("VpnBypassManager dropped while still active, cleaning up");
             let _ = self.stop();
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod vpn_bypass_ownership_tests {
+    use super::VpnBypassManager;
+
+    #[test]
+    fn owns_host_resources_when_partial_flags_set() {
+        let mut manager = VpnBypassManager::new();
+        assert!(!manager.owns_host_resources());
+
+        manager.rule_added = true;
+        assert!(manager.owns_host_resources());
+
+        manager.rule_added = false;
+        manager.route_added = true;
+        assert!(manager.owns_host_resources());
+
+        manager.route_added = false;
+        manager.is_active = true;
+        assert!(manager.owns_host_resources());
     }
 }
 
@@ -792,6 +960,15 @@ impl VpnBypassManager {
     #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         false
+    }
+
+    #[allow(dead_code)]
+    pub fn owns_host_resources(&self) -> bool {
+        false
+    }
+
+    pub fn cleanup_stale() -> Result<()> {
+        Ok(())
     }
 }
 
@@ -841,16 +1018,9 @@ impl Ipv6Manager {
         // Read current value to save for restoration.
         //
 
-        let output = crate::utils::silent_command("sysctl")
-            .args(["-n", "net.ipv6.conf.all.disable_ipv6"])
-            .output()
-            .context("Failed to read IPv6 disable status")?;
-
-        if output.status.success() {
-            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            common::log_info!("Original net.ipv6.conf.all.disable_ipv6 = {}", value);
-            self.original_value = Some(value);
-        }
+        let value = Self::current_value()?;
+        common::log_info!("Original net.ipv6.conf.all.disable_ipv6 = {}", value);
+        self.original_value = Some(value);
 
         //
         // Disable IPv6.
@@ -858,12 +1028,12 @@ impl Ipv6Manager {
 
         let output = crate::utils::silent_command("sysctl")
             .args(["-w", "net.ipv6.conf.all.disable_ipv6=1"])
-            .output()
+            .output_bounded()
             .context("Failed to disable IPv6")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            common::log_warn!("sysctl disable IPv6 warning: {}", stderr.trim());
+            anyhow::bail!("Failed to disable IPv6: {}", stderr.trim());
         }
 
         self.is_disabled = true;
@@ -872,8 +1042,51 @@ impl Ipv6Manager {
         Ok(())
     }
 
+    pub fn current_value() -> Result<String> {
+        use anyhow::Context;
+
+        let output = crate::utils::silent_command("sysctl")
+            .args(["-n", "net.ipv6.conf.all.disable_ipv6"])
+            .output_bounded()
+            .context("Failed to read IPv6 disable status")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to read IPv6 disable status: {}", stderr.trim());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    pub fn original_value(&self) -> Option<&str> {
+        self.original_value.as_deref()
+    }
+
+    pub fn restore_stale(original_value: &str) -> Result<()> {
+        use anyhow::Context;
+
+        let output = crate::utils::silent_command("sysctl")
+            .args([
+                "-w",
+                &format!(
+                    "net.ipv6.conf.all.disable_ipv6={}",
+                    original_value
+                ),
+            ])
+            .output_bounded()
+            .context("Failed to restore stale IPv6 setting")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to restore stale IPv6 setting: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
     /// Restore IPv6 to its original state.
     pub fn restore(&mut self) -> Result<()> {
+        use anyhow::Context;
+
         if !self.is_disabled {
             return Ok(());
         }
@@ -881,9 +1094,15 @@ impl Ipv6Manager {
         let value = self.original_value.as_deref().unwrap_or("0");
         common::log_info!("Restoring net.ipv6.conf.all.disable_ipv6 to {}", value);
 
-        let _ = crate::utils::silent_command("sysctl")
+        let output = crate::utils::silent_command("sysctl")
             .args(["-w", &format!("net.ipv6.conf.all.disable_ipv6={}", value)])
-            .output();
+            .output_bounded()
+            .context("Failed to restore IPv6")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to restore IPv6: {}", stderr.trim());
+        }
 
         self.is_disabled = false;
         self.original_value = None;

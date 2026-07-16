@@ -28,7 +28,10 @@ pub(super) fn body_lines(bytes: &[u8], mode: BodyMode) -> Vec<ratatui::text::Lin
 }
 
 pub fn show_banner(app: &App) -> bool {
-    !app.intercept.any_intercept_active()
+    let from_status = app.intercept.any_intercept_active();
+    let from_nodes = app.nodes.nodes.iter().any(|n| n.intercept_active);
+    !from_status
+        && !from_nodes
         && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty())
 }
 
@@ -226,7 +229,7 @@ fn register_rules_hits(app: &App, body: Rect) {
 }
 
 fn render_banner(f: &mut Frame, area: Rect, app: &App) {
-    let msg = if app.intercept.intercept_statuses.is_empty() {
+    let msg = if app.nodes.nodes.is_empty() && app.intercept.intercept_statuses.is_empty() {
         "No intercept status yet — enable interception on a node (Nodes window, i)"
     } else {
         "Interception is off on all nodes — press i in Nodes to enable"
@@ -240,7 +243,28 @@ fn render_banner(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_status_strip(f: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
-    let statuses: Vec<&InterceptStatus> = app.intercept.intercept_statuses.values().collect();
+    //
+    // Prefer live InterceptStatus entries; fall back to SystemState nodes
+    // so the strip is useful even before a dedicated status message arrives.
+    //
+    let mut statuses: Vec<InterceptStatus> = app
+        .intercept
+        .intercept_statuses
+        .values()
+        .cloned()
+        .collect();
+    if statuses.is_empty() {
+        for n in &app.nodes.nodes {
+            statuses.push(InterceptStatus {
+                node_id: n.node_id.clone(),
+                enabled: n.intercept_active,
+                method: None,
+                proxy_port: None,
+                intercepted_domains: Vec::new(),
+                cleanup_required: false,
+            });
+        }
+    }
     if statuses.is_empty() {
         spans.push(Span::styled(
             "intercept: no nodes reporting",
@@ -265,7 +289,13 @@ fn render_status_strip(f: &mut Frame, area: Rect, app: &App) {
                     }
                 })
                 .unwrap_or_else(|| short_id(&status.node_id).to_string());
-            if status.enabled {
+            //
+            // Prioritize cleanup_required over enabled (partial teardown can
+            // leave both true).
+            //
+            if status.cleanup_required {
+                spans.extend(chrome::pill_two_tone(&node_label, "cleanup", WARN));
+            } else if status.enabled {
                 let method = status
                     .method
                     .map(|m| format!("{:?}", m).to_lowercase())

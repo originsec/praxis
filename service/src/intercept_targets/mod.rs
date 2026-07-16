@@ -42,6 +42,13 @@ pub fn parse(text: &str) -> Result<Vec<InterceptTargetConfig>, String> {
         if short_name.is_empty() {
             return Err("Empty [section] name; each target needs a short_name header.".to_string());
         }
+        if short_name.contains(common::TRAFFIC_AGENT_SEPARATOR) {
+            return Err(format!(
+                "Target [{}]: section names cannot contain '{}'.",
+                short_name,
+                common::TRAFFIC_AGENT_SEPARATOR
+            ));
+        }
         let domains: Vec<String> = raw
             .domains
             .into_iter()
@@ -105,5 +112,11 @@ mod tests {
         let targets = parse(text).unwrap();
         assert_eq!(targets[0].name, "claudecode");
         assert_eq!(targets[0].agent_short_name, "claudecode");
+    }
+
+    #[test]
+    fn reserved_agent_separator_errors() {
+        let text = "[\"foo|bar\"]\ndomains = [\"example.com\"]\n";
+        assert!(parse(text).is_err());
     }
 }

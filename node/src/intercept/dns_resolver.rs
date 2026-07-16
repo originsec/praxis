@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use hickory_resolver::TokioResolver;
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 
 /// DNS resolver that tracks domain-to-IP mappings for interception
@@ -17,13 +16,10 @@ pub struct DomainResolver {
 impl DomainResolver {
     /// Create a new domain resolver using system DNS configuration
     pub async fn new() -> Result<Self> {
-        let resolver = TokioResolver::builder_with_config(
-            ResolverConfig::default(),
-            TokioRuntimeProvider::default(),
-        )
-        .with_options(ResolverOpts::default())
-        .build()
-        .context("Failed to build DNS resolver")?;
+        let resolver = TokioResolver::builder(TokioRuntimeProvider::default())
+            .context("Failed to read system DNS configuration")?
+            .build()
+            .context("Failed to build DNS resolver")?;
 
         Ok(Self {
             resolver,
@@ -59,14 +55,41 @@ impl DomainResolver {
         }
 
         if ips.is_empty() {
-            common::log_warn!("No IP addresses found for domain: {}", domain);
-        } else {
-            common::log_info!("Resolved {} to {} IP(s): {:?}", domain, ips.len(), ips);
+            anyhow::bail!("No IP addresses found for domain '{}'", domain);
         }
+
+        common::log_info!("Resolved {} to {} IP(s): {:?}", domain, ips.len(), ips);
 
         self.domain_to_ips.insert(domain.to_string(), ips.clone());
 
         Ok(ips)
+    }
+
+    pub async fn resolve_required_domains(
+        &self,
+        domains: &HashSet<String>,
+    ) -> Result<HashMap<String, HashSet<IpAddr>>> {
+        let mut resolved = HashMap::with_capacity(domains.len());
+        let mut failures = Vec::new();
+
+        for domain in domains {
+            match self.resolve_domain(domain).await {
+                Ok(ips) => {
+                    resolved.insert(domain.clone(), ips);
+                }
+                Err(e) => failures.push(format!("{}: {}", domain, e)),
+            }
+        }
+
+        if !failures.is_empty() {
+            failures.sort();
+            anyhow::bail!(
+                "Failed to resolve required intercept domain(s): {}",
+                failures.join("; ")
+            );
+        }
+
+        Ok(resolved)
     }
 
     pub fn get_all_intercept_ips(&self) -> HashSet<IpAddr> {
@@ -83,6 +106,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires external DNS"]
     async fn test_resolve_domain() {
         let resolver = DomainResolver::new().await.unwrap();
         let ips = resolver.resolve_domain("google.com").await.unwrap();

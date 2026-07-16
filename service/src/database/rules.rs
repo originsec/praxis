@@ -1,11 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use common::{
     InterceptMethod, InterceptRule, InterceptedTrafficEntry, RuleScope, TargetDirection,
     TrafficDirection, TrafficMatch, TrafficMatchWithDetails,
 };
 use indexmap::IndexMap;
-use regex::Regex;
+use regex::Regex; // validated on insert/update
 
 use super::exec::{Arg, DbRow, db_args};
 use super::{Database, MAX_TRAFFIC_QUERY_LIMIT};
@@ -20,6 +20,7 @@ impl Database {
         scope: &RuleScope,
         summarization_prompt: Option<&str>,
     ) -> Result<InterceptRule> {
+        Regex::new(regex_pattern).context("Invalid intercept rule regex")?;
         let now = Utc::now();
         let (scope_type, scope_node_id, scope_agent) = rule_scope_to_db(scope);
         let target_direction_str = target_direction_to_string(target_direction);
@@ -68,6 +69,9 @@ impl Database {
         enabled: Option<bool>,
         summarization_prompt: Option<Option<&str>>,
     ) -> Result<Option<InterceptRule>> {
+        if let Some(pattern) = regex_pattern {
+            Regex::new(pattern).context("Invalid intercept rule regex")?;
+        }
         let now = Utc::now();
 
         //
@@ -207,7 +211,7 @@ impl Database {
         let query_sql = if rule_id.is_some() {
             format!(
                 "SELECT m.id, m.traffic_id, m.rule_id, r.name, m.matched_at, m.summary,
-                        t.id, t.timestamp, t.node_id, t.agent_short_name, t.intercept_method, t.direction, t.method, t.url, t.host, t.request_headers, t.request_body, t.response_status, t.response_headers, t.response_body
+                        t.id, t.timestamp, t.node_id, t.agent_short_name, t.intercept_method, t.direction, t.method, t.url, t.host, t.request_headers, t.response_status, t.response_headers
                  FROM traffic_matches m
                  JOIN intercepted_traffic t ON m.traffic_id = t.id
                  JOIN intercept_rules r ON m.rule_id = r.id
@@ -216,7 +220,7 @@ impl Database {
             )
         } else {
             "SELECT m.id, m.traffic_id, m.rule_id, r.name, m.matched_at, m.summary,
-                        t.id, t.timestamp, t.node_id, t.agent_short_name, t.intercept_method, t.direction, t.method, t.url, t.host, t.request_headers, t.request_body, t.response_status, t.response_headers, t.response_body
+                        t.id, t.timestamp, t.node_id, t.agent_short_name, t.intercept_method, t.direction, t.method, t.url, t.host, t.request_headers, t.response_status, t.response_headers
                  FROM traffic_matches m
                  JOIN intercepted_traffic t ON m.traffic_id = t.id
                  JOIN intercept_rules r ON m.rule_id = r.id
@@ -238,7 +242,7 @@ impl Database {
         let rows = self.db_fetch_all(&query_sql, query_args).await?;
         let matches = rows
             .iter()
-            .map(parse_match_with_traffic_row)
+            .map(parse_match_with_traffic_metadata_row)
             .collect::<Result<Vec<_>>>()?;
 
         Ok((matches, total_count as usize))
@@ -251,17 +255,57 @@ impl Database {
         traffic_id: i64,
         entry: &InterceptedTrafficEntry,
     ) -> Result<Vec<(i64, InterceptRule)>> {
+        //
+        // Fallback path without a shared snapshot (tests / rare callers).
+        // Production ingest uses check_and_insert_matches_with_snapshot.
+        //
         let rules = self.list_enabled_rules().await?;
+        let compiled = super::rules_snapshot::compile_enabled_rules(rules);
         let mut matches = Vec::new();
-
-        for rule in rules {
-            if rule_matches_traffic(&rule, entry) {
-                let match_id = self.insert_traffic_match(traffic_id, rule.id, None).await?;
-                matches.push((match_id, rule));
+        for compiled_rule in compiled {
+            if super::rules_snapshot::compiled_rule_matches_traffic(&compiled_rule, entry) {
+                let match_id = self
+                    .insert_traffic_match(traffic_id, compiled_rule.rule.id, None)
+                    .await?;
+                matches.push((match_id, compiled_rule.rule));
             }
         }
-
         Ok(matches)
+    }
+
+    /// Match using the shared precompiled rules snapshot (ingest hot path).
+    /// When the snapshot is dirty, falls back to DB-backed matching.
+    pub async fn check_and_insert_matches_with_snapshot(
+        &self,
+        traffic_id: i64,
+        entry: &InterceptedTrafficEntry,
+        snapshot: &super::rules_snapshot::RulesSnapshot,
+    ) -> Result<Vec<(i64, InterceptRule)>> {
+        if snapshot.is_dirty() {
+            return self.check_and_insert_matches(traffic_id, entry).await;
+        }
+        let rules = snapshot.current().await;
+        let mut matches = Vec::new();
+        for compiled in rules.iter() {
+            if super::rules_snapshot::compiled_rule_matches_traffic(compiled, entry) {
+                let match_id = self
+                    .insert_traffic_match(traffic_id, compiled.rule.id, None)
+                    .await?;
+                matches.push((match_id, compiled.rule.clone()));
+            }
+        }
+        Ok(matches)
+    }
+
+    /// Rebuild the shared enabled-rules snapshot from the database.
+    pub async fn refresh_rules_snapshot(
+        &self,
+        snapshot: &super::rules_snapshot::RulesSnapshot,
+    ) -> Result<()> {
+        let rules = self.list_enabled_rules().await?;
+        let compiled = super::rules_snapshot::compile_enabled_rules(rules);
+        snapshot.replace(compiled).await;
+        Ok(())
     }
 
     /// Update a traffic match with a summary
@@ -304,7 +348,7 @@ fn parse_rule_row(row: &DbRow) -> Result<InterceptRule> {
     })
 }
 
-fn parse_match_with_traffic_row(row: &DbRow) -> Result<TrafficMatchWithDetails> {
+fn parse_match_with_traffic_metadata_row(row: &DbRow) -> Result<TrafficMatchWithDetails> {
     let match_id: i64 = row.get(0);
     let traffic_id: i64 = row.get(1);
     let rule_id: i64 = row.get(2);
@@ -325,10 +369,8 @@ fn parse_match_with_traffic_row(row: &DbRow) -> Result<TrafficMatchWithDetails> 
     let url: String = row.get(13);
     let host: String = row.get(14);
     let request_headers_json: Option<String> = row.get(15);
-    let request_body: Option<Vec<u8>> = row.get(16);
-    let response_status: Option<i32> = row.get(17);
-    let response_headers_json: Option<String> = row.get(18);
-    let response_body: Option<Vec<u8>> = row.get(19);
+    let response_status: Option<i32> = row.get(16);
+    let response_headers_json: Option<String> = row.get(17);
 
     let intercept_method = intercept_method_str
         .parse::<InterceptMethod>()
@@ -361,98 +403,12 @@ fn parse_match_with_traffic_row(row: &DbRow) -> Result<TrafficMatchWithDetails> 
             url,
             host,
             request_headers,
-            request_body,
+            request_body: None,
             response_status: response_status.map(|s| s as u16),
             response_headers,
-            response_body,
+            response_body: None,
         },
     })
-}
-
-fn rule_matches_traffic(rule: &InterceptRule, entry: &InterceptedTrafficEntry) -> bool {
-    //
-    // Check direction.
-    //
-    match rule.target_direction {
-        TargetDirection::Send if entry.direction != TrafficDirection::Send => return false,
-        TargetDirection::Receive if entry.direction != TrafficDirection::Receive => return false,
-        _ => {}
-    }
-
-    //
-    // Check scope.
-    //
-    match &rule.scope {
-        RuleScope::Node { node_id } if entry.node_id != *node_id => return false,
-        RuleScope::Agent {
-            node_id,
-            agent_short_name,
-        } if entry.node_id != *node_id || entry.agent_short_name != *agent_short_name => {
-            return false;
-        }
-        _ => {}
-    }
-
-    //
-    // Check regex pattern against all relevant fields.
-    //
-    let regex = match Regex::new(&rule.regex_pattern) {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-
-    //
-    // Check URL.
-    //
-    if regex.is_match(&entry.url) {
-        return true;
-    }
-
-    //
-    // Check request headers.
-    //
-    if let Some(ref headers) = entry.request_headers {
-        for (key, value) in headers {
-            if regex.is_match(key) || regex.is_match(value) {
-                return true;
-            }
-        }
-    }
-
-    //
-    // Check response headers.
-    //
-    if let Some(ref headers) = entry.response_headers {
-        for (key, value) in headers {
-            if regex.is_match(key) || regex.is_match(value) {
-                return true;
-            }
-        }
-    }
-
-    //
-    // Check request body (as UTF-8 string if valid).
-    //
-    if let Some(ref body) = entry.request_body {
-        if let Ok(body_str) = std::str::from_utf8(body) {
-            if regex.is_match(body_str) {
-                return true;
-            }
-        }
-    }
-
-    //
-    // Check response body (as UTF-8 string if valid).
-    //
-    if let Some(ref body) = entry.response_body {
-        if let Ok(body_str) = std::str::from_utf8(body) {
-            if regex.is_match(body_str) {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 fn target_direction_to_string(direction: &TargetDirection) -> &'static str {

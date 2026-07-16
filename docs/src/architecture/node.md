@@ -108,7 +108,7 @@ Uses iptables TPROXY for transparent interception:
 2. iptables mangle rules mark packets to target IPs
 3. Policy routing directs marked packets to loopback
 4. TPROXY redirects packets to proxy
-5. Proxy uses `SO_ORIGINAL_DST` to get real destination
+5. Proxy uses the accepted socket `local_addr` (IP_TRANSPARENT) as the real destination
 
 This provides kernel-level interception without a TUN device.
 
@@ -315,19 +315,36 @@ Kept in memory:
 ## Node Reset
 
 A node can be reset at any time via the UI, CLI (`node reset`), or MCP
-(`node_reset`). Reset cancels all in-flight operations, closes sessions and
-terminals, disables interception, and re-registers the node with the service
-— equivalent to a clean restart without killing the process.
+(`node_reset`). Reset cancels in-flight intercept enable via an operation
+token, awaits the command handler so partial enable can roll back, closes
+sessions and terminals, runs intercept `force_cleanup` when
+`needs_cleanup()` (including `CleanupRequired`), and re-registers the node
+with the service — equivalent to a clean restart without killing the process.
 
 The reset signal is delivered on a dedicated RabbitMQ queue
 (`Node_{id}_reset`) consumed by its own task. This guarantees the signal is
 never blocked by a long-running command handler in the main event loop. When
 the reset consumer receives a message it cancels a `CancellationToken` that
-the main loop observes. Slow commands are also wrapped in `tokio::select!`
-with this token so they abort at the next `.await` point.
+the main loop observes. Async intercept phases (DNS, proxy start, packet IP
+refresh) are raced against the operation token. Synchronous OS child commands
+(firewall, sysctl, cert store, etc.) cannot be interrupted mid-process; cancel
+is checked at phase boundaries and incomplete cleanup leaves
+`CleanupRequired` with recovery state retained rather than silently
+`Disabled`.
 
 After cleanup the runtime returns `RuntimeExit::Reset` and the main
 reconnection loop immediately re-registers without the usual reconnect delay.
+
+### Intercept lifecycle
+
+| State | Meaning |
+| --- | --- |
+| `Disabled` | No ownership; enable allowed if no stale recovery |
+| `Enabling` | Setup in progress |
+| `Enabled` | Proxy/VPN/Hosts/TPROXY active |
+| `CleanupRequired` | Rollback incomplete; re-enable blocked until Disable/Reset cleanup succeeds |
+
+`InterceptStatus.cleanup_required` surfaces this to service/CLI status strips.
 
 ## Registration
 

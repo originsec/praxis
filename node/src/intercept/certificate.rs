@@ -8,6 +8,7 @@ use rcgen::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::utils::CommandOutputBounded;
 
 /// Linux distribution family for certificate installation
 #[cfg(target_os = "linux")]
@@ -122,6 +123,76 @@ impl CertificateAuthority {
             #[cfg(target_os = "linux")]
             linux_distro: None,
         })
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn prepare_root_cert_install(&mut self) -> Result<()> {
+        let temp_dir = std::env::temp_dir().join("praxis_certs");
+        std::fs::create_dir_all(&temp_dir)?;
+        let cert_path = temp_dir.join("praxis_root_ca.cer");
+        std::fs::write(&cert_path, &self.root_cert_pem)?;
+        let script = format!(
+            "(New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{}')).Thumbprint",
+            cert_path.display()
+        );
+        let output = crate::utils::silent_command("powershell")
+            .args(["-ExecutionPolicy", "Bypass", "-Command", &script])
+            .output_bounded()
+            .context("Failed to calculate root certificate thumbprint")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to calculate root certificate thumbprint: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        self.root_thumbprint = output
+            .stdout
+            .split(|byte| byte.is_ascii_whitespace())
+            .filter_map(|value| std::str::from_utf8(value).ok())
+            .find(|value| value.len() == 40 && value.chars().all(|c| c.is_ascii_hexdigit()))
+            .map(str::to_string);
+        if self.root_thumbprint.is_none() {
+            anyhow::bail!("PowerShell did not return a root certificate thumbprint");
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn prepare_root_cert_install(&mut self) -> Result<()> {
+        if unsafe { libc::geteuid() } != 0 {
+            return Ok(());
+        }
+        let distro = detect_linux_distro();
+        let (cert_dir, cert_name) = match distro {
+            LinuxDistro::DebianBased => (
+                std::path::Path::new("/usr/local/share/ca-certificates"),
+                "praxis_root_ca.crt",
+            ),
+            LinuxDistro::RhelBased => (
+                std::path::Path::new("/etc/pki/ca-trust/source/anchors"),
+                "praxis_root_ca.pem",
+            ),
+            LinuxDistro::Arch => (
+                std::path::Path::new("/etc/ca-certificates/trust-source/anchors"),
+                "praxis_root_ca.crt",
+            ),
+            LinuxDistro::Unknown => return Ok(()),
+        };
+        self.linux_distro = Some(distro);
+        let cert_path = cert_dir.join(cert_name);
+        if cert_path.exists() {
+            anyhow::bail!(
+                "Refusing to overwrite existing certificate file {} without recovery state",
+                cert_path.display()
+            );
+        }
+        self.linux_cert_path = Some(cert_path);
+        Ok(())
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
+    pub fn prepare_root_cert_install(&mut self) -> Result<()> {
+        Ok(())
     }
 
     pub fn root_cert_pem(&self) -> &str {
@@ -278,7 +349,7 @@ impl CertificateAuthority {
 
         let output = crate::utils::silent_command("powershell")
             .args(["-ExecutionPolicy", "Bypass", "-Command", &ps_script])
-            .output()
+            .output_bounded()
             .context("Failed to execute PowerShell for certificate installation")?;
 
         if output.status.success() {
@@ -382,14 +453,17 @@ impl CertificateAuthority {
         //
         let output = std::process::Command::new(&update_cmd[0])
             .args(&update_cmd[1..])
-            .output()
+            .output_bounded()
             .context("Failed to run certificate update command")?;
 
         if output.status.success() {
             common::log_info!("System certificate store updated successfully");
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            common::log_warn!("Certificate update command returned non-zero: {}", stderr);
+            anyhow::bail!(
+                "Certificate update command returned non-zero: {}",
+                stderr.trim()
+            );
         }
 
         Ok(())
@@ -422,6 +496,7 @@ impl CertificateAuthority {
             r#"
             $thumbprint = "{thumbprint}"
 
+            $failed = $false
             # Try to remove from both stores
             foreach ($location in @("CurrentUser", "LocalMachine")) {{
                 try {{
@@ -434,21 +509,23 @@ impl CertificateAuthority {
                     }}
                     $store.Close()
                 }} catch {{
-                    Write-Host "Could not access $location store: $_"
+                    Write-Error "Could not access $location store: $_"
+                    $failed = $true
                 }}
             }}
+            if ($failed) {{ exit 1 }}
             "#,
             thumbprint = thumbprint
         );
 
         let output = crate::utils::silent_command("powershell")
             .args(["-ExecutionPolicy", "Bypass", "-Command", &ps_script])
-            .output()
+            .output_bounded()
             .context("Failed to execute PowerShell for certificate uninstallation")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            common::log_warn!("Certificate uninstallation may have failed: {}", stderr);
+            anyhow::bail!("Certificate uninstallation failed: {}", stderr.trim());
         }
 
         //
@@ -496,7 +573,7 @@ impl CertificateAuthority {
 
         let output = std::process::Command::new(&update_cmd[0])
             .args(&update_cmd[1..])
-            .output();
+            .output_bounded();
 
         match output {
             Ok(o) if o.status.success() => {
@@ -504,10 +581,13 @@ impl CertificateAuthority {
             }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
-                common::log_warn!("Certificate update command returned non-zero: {}", stderr);
+                anyhow::bail!(
+                    "Certificate update command returned non-zero: {}",
+                    stderr.trim()
+                );
             }
             Err(e) => {
-                common::log_warn!("Failed to run certificate update command: {}", e);
+                return Err(e).context("Failed to run certificate update command");
             }
         }
 

@@ -5,7 +5,7 @@
 mod agent_chat;
 mod chains;
 mod config;
-mod intercept;
+pub(crate) mod intercept;
 mod intercept_targets;
 mod logs;
 mod lua_scripts;
@@ -115,24 +115,34 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         //
         // Traffic interception.
         //
-        ClientSignalMessage::TrafficLogRequest { client_id, filters } => {
-            handle_traffic_log(ctx, client_id, filters).await
-        }
+        ClientSignalMessage::TrafficLogRequest {
+            client_id,
+            request_id,
+            filters,
+        } => handle_traffic_log(ctx, client_id, request_id, filters).await,
         ClientSignalMessage::TrafficMatchesRequest {
             client_id,
+            request_id,
             rule_id,
             limit,
             offset,
-        } => handle_traffic_matches(ctx, client_id, rule_id, limit, offset).await,
-        ClientSignalMessage::TrafficClear { client_id } => {
-            handle_traffic_clear(ctx, client_id).await
+        } => {
+            handle_traffic_matches(ctx, client_id, request_id, rule_id, limit, offset).await
         }
-        ClientSignalMessage::TrafficSearchRequest { client_id, filters } => {
-            handle_traffic_search(ctx, client_id, filters).await
-        }
-        ClientSignalMessage::TrafficGetRequest { client_id, id } => {
-            handle_traffic_get(ctx, client_id, id).await
-        }
+        ClientSignalMessage::TrafficClear {
+            client_id,
+            request_id,
+        } => handle_traffic_clear(ctx, client_id, request_id).await,
+        ClientSignalMessage::TrafficSearchRequest {
+            client_id,
+            request_id,
+            filters,
+        } => handle_traffic_search(ctx, client_id, request_id, filters).await,
+        ClientSignalMessage::TrafficGetRequest {
+            client_id,
+            request_id,
+            id,
+        } => handle_traffic_get(ctx, client_id, request_id, id).await,
 
         //
         // Intercept rules.
@@ -191,11 +201,16 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         //
         ClientSignalMessage::InterceptEnable {
             client_id,
+            request_id,
             node_id,
             method,
-        } => handle_intercept_enable(ctx, client_id, node_id, method).await,
-        ClientSignalMessage::InterceptDisable { client_id, node_id } => {
-            handle_intercept_disable(ctx, client_id, node_id).await
+        } => handle_intercept_enable(ctx, client_id, request_id, node_id, method).await,
+        ClientSignalMessage::InterceptDisable {
+            client_id,
+            request_id,
+            node_id,
+        } => {
+            handle_intercept_disable(ctx, client_id, request_id, node_id).await
         }
 
         //

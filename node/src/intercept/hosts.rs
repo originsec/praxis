@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use crate::utils::CommandOutputBounded;
 
 #[cfg(target_os = "windows")]
 const HOSTS_FILE_PATH: &str = r"C:\Windows\System32\drivers\etc\hosts";
@@ -31,16 +32,26 @@ pub fn add_hosts_entry(domain: &str) -> Result<()> {
         common::log_info!("Hosts entry already exists for {}", domain);
         return Ok(());
     }
+    for line in content.lines() {
+        let line = line.split('#').next().unwrap_or_default();
+        let mut fields = line.split_whitespace();
+        let Some(address) = fields.next() else {
+            continue;
+        };
+        if fields.any(|existing| existing.eq_ignore_ascii_case(domain)) {
+            anyhow::bail!(
+                "Refusing to override existing hosts mapping for {} ({})",
+                domain,
+                address
+            );
+        }
+    }
 
-    //
-    // Append new entry.
-    //
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(&hosts_path)
-        .context("Failed to open hosts file for writing")?;
-
-    writeln!(file, "\n{}", entry).context("Failed to write to hosts file")?;
+    let mut updated = content.trim_end_matches(['\r', '\n']).to_string();
+    updated.push('\n');
+    updated.push_str(&entry);
+    updated.push('\n');
+    replace_hosts_file(&hosts_path, &updated)?;
 
     common::log_info!("Added hosts entry: {} -> {}", domain, LOCALHOST);
     Ok(())
@@ -54,7 +65,7 @@ pub fn add_hosts_entry(domain: &str) -> Result<()> {
 pub fn flush_dns_cache() {
     match crate::utils::silent_command("ipconfig")
         .args(["/flushdns"])
-        .output()
+        .output_bounded()
     {
         Ok(output) if output.status.success() => {
             common::log_info!("DNS cache flushed successfully");
@@ -78,57 +89,36 @@ pub fn flush_dns_cache() {
 }
 
 //
-// On Linux, redirect traffic from 127.0.0.1:443 to the proxy port.
-// This is needed because the hosts file redirects domains to 127.0.0.1,
-// but the proxy listens on a random port.
+// Hosts mode binds the proxy to 127.0.0.1:443 directly, so a REDIRECT is not
+// required for new enables. enable_hosts_redirect remains a no-op; disable
+// still tries to remove any stale Praxis-tagged REDIRECT from older builds.
 //
 
+//
+// Kept for recovery/cleanup of older installs that added a REDIRECT; new
+// enables do not call this.
+//
+#[allow(dead_code)]
 #[cfg(target_os = "linux")]
-pub fn enable_hosts_redirect(proxy_port: u16) -> Result<()> {
-    use std::process::Command;
-
-    let port_str = proxy_port.to_string();
-
-    let output = Command::new("iptables")
-        .args([
-            "-t",
-            "nat",
-            "-A",
-            "OUTPUT",
-            "-p",
-            "tcp",
-            "-d",
-            "127.0.0.1",
-            "--dport",
-            "443",
-            "-j",
-            "REDIRECT",
-            "--to-ports",
-            &port_str,
-        ])
-        .output()
-        .context("Failed to run iptables")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("iptables redirect failed: {}", stderr.trim());
-    }
-
-    common::log_info!(
-        "Added iptables REDIRECT rule: 127.0.0.1:443 -> port {}",
-        proxy_port
-    );
+pub fn enable_hosts_redirect(_proxy_port: u16) -> Result<()> {
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-pub fn disable_hosts_redirect() {
+pub fn disable_hosts_redirect(proxy_port: Option<u16>) -> Result<()> {
     use std::process::Command;
 
+    let proxy_port = proxy_port
+        .filter(|port| *port != 0)
+        .ok_or_else(|| anyhow::anyhow!("Hosts redirect proxy port is unavailable"))?;
+    let port = proxy_port.to_string();
+
     //
-    // Remove all REDIRECT rules for 127.0.0.1:443 (may have multiple from retries).
+    // Remove all Praxis REDIRECT rules for this proxy port. The complete rule
+    // is specified so unrelated localhost redirects are never removed.
     //
 
+    let mut removed = 0usize;
     for _ in 0..5 {
         let output = Command::new("iptables")
             .args([
@@ -142,18 +132,41 @@ pub fn disable_hosts_redirect() {
                 "127.0.0.1",
                 "--dport",
                 "443",
+                "-m",
+                "comment",
+                "--comment",
+                "PRAXIS-INTERCEPT",
                 "-j",
                 "REDIRECT",
+                "--to-ports",
+                &port,
             ])
-            .output();
+            .output_bounded()
+            .context("Failed to run iptables while removing Hosts redirect")?;
 
         match output {
-            Ok(o) if o.status.success() => continue,
-            _ => break,
+            o if o.status.success() => {
+                removed += 1;
+                continue;
+            }
+            o if hosts_rule_missing(&o.stderr) => break,
+            o => anyhow::bail!(
+                "Failed to remove Hosts redirect: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            ),
         }
     }
 
-    common::log_info!("Removed iptables REDIRECT rules for hosts mode");
+    common::log_info!("Removed {} iptables REDIRECT rule(s) for hosts mode", removed);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn hosts_rule_missing(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    stderr.contains("bad rule")
+        || stderr.contains("matching rule exist")
+        || stderr.contains("no chain/target/match")
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -166,8 +179,8 @@ pub fn enable_hosts_redirect(_proxy_port: u16) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn disable_hosts_redirect() {
-    // No-op on non-Linux.
+pub fn disable_hosts_redirect(_proxy_port: Option<u16>) -> Result<()> {
+    Ok(())
 }
 
 /// Remove ALL praxis intercept entries from the hosts file
@@ -191,7 +204,9 @@ pub fn remove_all_hosts_entries() -> Result<()> {
         }
     }
 
-    fs::write(&hosts_path, new_lines.join("\n")).context("Failed to write updated hosts file")?;
+    let mut updated = new_lines.join("\n");
+    updated.push('\n');
+    replace_hosts_file(&hosts_path, &updated)?;
 
     if removed_count > 0 {
         common::log_info!(
@@ -200,4 +215,33 @@ pub fn remove_all_hosts_entries() -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn replace_hosts_file(path: &PathBuf, content: &str) -> Result<()> {
+    let temp_path = path.with_extension(format!("praxis-{}.tmp", std::process::id()));
+    let original_permissions = fs::metadata(path)
+        .context("Failed to read hosts file metadata")?
+        .permissions();
+    let write_result = (|| -> Result<()> {
+        fs::write(&temp_path, content).context("Failed to write temporary hosts file")?;
+        fs::set_permissions(&temp_path, original_permissions)
+            .context("Failed to preserve hosts file permissions")?;
+        fs::File::open(&temp_path)
+            .and_then(|file| file.sync_all())
+            .context("Failed to flush temporary hosts file")?;
+        #[cfg(not(target_os = "windows"))]
+        fs::rename(&temp_path, path).context("Failed to atomically replace the hosts file")?;
+        #[cfg(target_os = "windows")]
+        {
+            let replacement = fs::read(&temp_path)
+                .context("Failed to read prepared hosts replacement")?;
+            fs::write(path, replacement).context("Failed to replace the hosts file")?;
+            fs::remove_file(&temp_path).context("Failed to remove temporary hosts file")?;
+        }
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
 }

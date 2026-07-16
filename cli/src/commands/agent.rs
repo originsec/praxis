@@ -176,15 +176,8 @@ async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
 
-    let node = state
-        .nodes
-        .iter()
-        .find(|node| {
-            node.node_id
-                .to_lowercase()
-                .starts_with(&node_prefix.to_lowercase())
-        })
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+    let node = super::find_node(&state, node_prefix)
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     if node.discovered_agents.is_empty() {
         println!("No agents discovered on this node");
@@ -225,15 +218,8 @@ async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node = state
-        .nodes
-        .iter()
-        .find(|n| {
-            n.node_id
-                .to_lowercase()
-                .starts_with(&node_prefix.to_lowercase())
-        })
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+    let node = super::find_node(&state, node_prefix)
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     print_success(&format!(
         "Reporting cached agent info: {} agent(s)",
@@ -256,7 +242,7 @@ async fn read_file(
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let mut params = json!({
         "agent_short_name": agent,
@@ -310,7 +296,7 @@ async fn write_file(
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let result = client
         .acp_request(
@@ -353,7 +339,7 @@ async fn grep_file(
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = super::find_node_id(&state, node_prefix)
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let result = client
         .acp_request(

@@ -156,11 +156,13 @@ pub enum ClientSignalMessage {
     ChainTriggerDelete { client_id, trigger_id },
     ChainTriggerList { client_id, chain_id: Option<String> },
 
-    // Traffic Interception
-    TrafficLogRequest { client_id, filters: TrafficLogFilters },
-    TrafficMatchesRequest { client_id, rule_id, limit, offset },
-    TrafficClear { client_id },
-    TrafficSearchRequest { client_id, filters: TrafficSearchFilters },
+    // Traffic Interception (request_id is client-generated; echoed in responses;
+    // Serde default empty string if omitted by older peers — prefer atomic upgrades)
+    TrafficLogRequest { client_id, request_id, filters: TrafficLogFilters },
+    TrafficMatchesRequest { client_id, request_id, rule_id, limit, offset },
+    TrafficClear { client_id, request_id },
+    TrafficGetRequest { client_id, request_id, id },
+    TrafficSearchRequest { client_id, request_id, filters: TrafficSearchFilters },
     InterceptRuleCreate { client_id, name, regex_pattern, ... },
     InterceptRuleUpdate { ... },
     InterceptRuleDelete { client_id, id },
@@ -223,17 +225,32 @@ pub enum ClientDirectMessage {
     ChainTriggerDeleted { trigger_id: String },
     ChainTriggerListResponse { triggers: Vec<ChainTriggerInfo> },
 
-    // Traffic Interception
-    TrafficLogResponse { entries: Vec<InterceptedTrafficEntry>, total_count },
-    TrafficSearchResponse { entries, total_count },
-    TrafficMatchesResponse { matches: Vec<TrafficMatchWithDetails>, total_count },
-    TrafficCleared { deleted_count },
+    // Traffic Interception (optional error: queue/DB failures; request_id correlates)
+    TrafficLogResponse { request_id, entries, total_count, error: Option<String> },
+    TrafficSearchResponse { request_id, entries, total_count, error: Option<String> },
+    TrafficMatchesResponse { request_id, matches, total_count, error: Option<String> },
+    // generation = clear-epoch after wipe; service_instance_id scopes it to one service process
+    TrafficCleared {
+        request_id,
+        deleted_count,
+        generation,
+        service_instance_id,
+        error: Option<String>,
+    },
+    TrafficGetResponse { request_id, id, entry: Option<InterceptedTrafficEntry>, error: Option<String> },
     InterceptRuleListResponse { rules: Vec<InterceptRule> },
     InterceptRuleCreated { rule },
     InterceptRuleUpdated { rule },
     InterceptRuleDeleted { id, success },
     InterceptRuleError { message },
     InterceptStatusUpdate(InterceptStatus),
+    // request_id correlates the awaiting client toggle; status may include cleanup_required
+    InterceptCommandResult {
+        request_id,
+        node_id,
+        error: Option<String>,
+        status: Option<InterceptStatus>,
+    },
 
     // Application Log
     ApplicationLogResponse { node_id, entries, total_count },
@@ -254,16 +271,39 @@ pub enum ClientBroadcastMessage {
     // Periodic state update with all nodes
     StateUpdate(SystemState),
 
-    // Service has come online
-    ServiceOnline,
+    // Service process started/restarted. Clients must re-register against
+    // service_instance_id; RegistrationAck (with registration_nonce) is the
+    // only control-plane rebind of clear-generation identity. Live
+    // traffic/match batches never rebind.
+    ServiceOnline { service_instance_id },
 
     // Chain execution progress
     ChainExecutionUpdate(ChainExecutionUpdate),
 
+    // Semantic operation progress
+    SemanticOpUpdate(SemanticOpUpdate),
+
+    // Intercept status (enabled / method / cleanup_required)
+    InterceptStatusUpdate(InterceptStatus),
+
     // Enable/disable centralized event logging
     EventLoggingSet { enabled: bool },
+
+    // Live intercept streams (bodies stripped). generation is the service
+    // clear-epoch; service_instance_id must match the client's bound instance
+    // or the batch is dropped (no ABA rebind from data plane).
+    InterceptedTrafficBatch { entries, generation, service_instance_id },
+    TrafficMatchBatch { matches, generation, service_instance_id },
 }
 ```
+
+`RegistrationAck` includes `service_instance_id` (UUID per service process).
+Clients adopt it only on registration / re-registration after `ServiceOnline`.
+
+`InterceptStatus` fields: `node_id`, `enabled`, `method`, `proxy_port`,
+`intercepted_domains`, and `cleanup_required` (default false). When
+`cleanup_required` is true, enable is blocked until Disable/Reset cleanup
+succeeds.
 
 ## Node Protocol
 

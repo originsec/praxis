@@ -1,5 +1,5 @@
 use common::{
-    ClientDirectMessage, CommandRequest, CommandResponse, NodeCapability, NodeDirectMessage,
+    ClientDirectMessage, CommandRequest, InterceptStatus, NodeCapability, NodeDirectMessage,
 };
 
 use crate::messaging::{send_to_client, send_to_node};
@@ -34,6 +34,41 @@ pub(super) async fn handle_intercept_rule_create(
         .await
     {
         Ok(rule) => {
+            let patched = ctx.rules_snapshot.upsert_compiled(rule.clone()).await.is_ok();
+            let refresh_ok = match ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    common::log_warn!("Failed to refresh rules snapshot after create: {}", e);
+                    false
+                }
+            };
+            use crate::database::rules_snapshot::{refresh_outcome, SnapshotRefreshOutcome};
+            match refresh_outcome(patched, refresh_ok) {
+                SnapshotRefreshOutcome::Fresh => {}
+                SnapshotRefreshOutcome::PatchedDirty => {
+                    ctx.rules_snapshot.mark_dirty();
+                    common::log_warn!(
+                        "Rules snapshot patch applied after create but full refresh failed; matching uses DB fallback until refresh"
+                    );
+                }
+                SnapshotRefreshOutcome::DirtyFallback => {
+                    ctx.rules_snapshot.mark_dirty();
+                    let message = ClientDirectMessage::InterceptRuleError {
+                        message: format!(
+                            "Created rule {} but matching snapshot is stale; will use DB fallback until refresh succeeds",
+                            rule.id
+                        ),
+                    };
+                    let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+                    //
+                    // Still notify create so the client has the rule row.
+                    //
+                }
+            }
             common::log_info!("Created intercept rule: {} (id={})", name, rule.id);
             let message = ClientDirectMessage::InterceptRuleCreated { rule };
             if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
@@ -87,6 +122,25 @@ pub(super) async fn handle_intercept_rule_update(
         .await
     {
         Ok(Some(rule)) => {
+            let patched = ctx.rules_snapshot.upsert_compiled(rule.clone()).await.is_ok();
+            let refresh_ok = ctx
+                .database
+                .refresh_rules_snapshot(&ctx.rules_snapshot)
+                .await
+                .is_ok();
+            if !refresh_ok {
+                common::log_warn!("Failed to refresh rules snapshot after update");
+                ctx.rules_snapshot.mark_dirty();
+                if !patched {
+                    let message = ClientDirectMessage::InterceptRuleError {
+                        message: format!(
+                            "Updated rule {} but matching snapshot is stale; DB fallback until refresh",
+                            id
+                        ),
+                    };
+                    let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+                }
+            }
             common::log_info!("Updated intercept rule: {}", id);
             let message = ClientDirectMessage::InterceptRuleUpdated { rule };
             if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
@@ -123,6 +177,15 @@ pub(super) async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id
     match ctx.database.delete_rule(id).await {
         Ok(success) => {
             if success {
+                ctx.rules_snapshot.remove_id(id).await;
+                if let Err(e) = ctx
+                    .database
+                    .refresh_rules_snapshot(&ctx.rules_snapshot)
+                    .await
+                {
+                    common::log_warn!("Failed to refresh rules snapshot after delete: {}", e);
+                    ctx.rules_snapshot.mark_dirty();
+                }
                 common::log_info!("Deleted intercept rule: {}", id);
             }
             let message = ClientDirectMessage::InterceptRuleDeleted { id, success };
@@ -178,6 +241,7 @@ pub(super) async fn handle_intercept_rule_list(ctx: &ServiceContext, client_id: 
 pub(super) async fn handle_intercept_enable(
     ctx: &ServiceContext,
     client_id: String,
+    request_id: String,
     node_id: String,
     method: Option<common::InterceptMethod>,
 ) {
@@ -191,7 +255,11 @@ pub(super) async fn handle_intercept_enable(
     //
     // Forward to node as a command.
     //
-    let command_id = uuid::Uuid::new_v4().to_string();
+    let command_id = if request_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        request_id
+    };
     let request = CommandRequest {
         command_id: command_id.clone(),
         client_id: client_id.clone(),
@@ -202,6 +270,20 @@ pub(super) async fn handle_intercept_enable(
     match ctx.node_registry.get(&node_id).await {
         Some(node) => {
             if !node.has_capability(&NodeCapability::Interception) {
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    format!(
+                        "Node '{}' does not support interception (run privileged)",
+                        common::short_id(&node_id)
+                    ),
+                )
+                .await;
+                //
+                // Also emit the legacy capability error shape for other clients.
+                //
                 send_capability_error(
                     ctx,
                     &client_id,
@@ -212,27 +294,41 @@ pub(super) async fn handle_intercept_enable(
                 .await;
                 return;
             }
-            ctx.pending_commands
-                .add(command_id.clone(), client_id.clone())
+            let registered = ctx.pending_commands
+                .add_intercept(command_id.clone(), client_id.clone(), node_id.clone())
                 .await;
+            if !registered {
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    "An intercept command with this request ID is already pending".into(),
+                )
+                .await;
+                return;
+            }
             let node_message = NodeDirectMessage::Command(request);
             if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
                 common::log_error!("Failed to send InterceptEnable to node {}: {}", node_id, e);
                 ctx.pending_commands.remove(&command_id).await;
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    format!("Failed to reach node: {}", e),
+                )
+                .await;
             }
         }
         None => {
-            let response = CommandResponse {
-                command_id,
-                node_id: node_id.clone(),
-                result: common::NodeCommandResult::Error {
-                    message: format!("Node '{}' not found", node_id),
-                },
-            };
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
+            send_intercept_command_error(
+                ctx,
                 &client_id,
-                ClientDirectMessage::CommandResponse(response),
+                &command_id,
+                &node_id,
+                format!("Node '{}' not found", node_id),
             )
             .await;
         }
@@ -242,6 +338,7 @@ pub(super) async fn handle_intercept_enable(
 pub(super) async fn handle_intercept_disable(
     ctx: &ServiceContext,
     client_id: String,
+    request_id: String,
     node_id: String,
 ) {
     common::log_info!(
@@ -253,7 +350,11 @@ pub(super) async fn handle_intercept_disable(
     //
     // Forward to node as a command.
     //
-    let command_id = uuid::Uuid::new_v4().to_string();
+    let command_id = if request_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        request_id
+    };
     let request = CommandRequest {
         command_id: command_id.clone(),
         client_id: client_id.clone(),
@@ -264,6 +365,17 @@ pub(super) async fn handle_intercept_disable(
     match ctx.node_registry.get(&node_id).await {
         Some(node) => {
             if !node.has_capability(&NodeCapability::Interception) {
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    format!(
+                        "Node '{}' does not support interception (run privileged)",
+                        common::short_id(&node_id)
+                    ),
+                )
+                .await;
                 send_capability_error(
                     ctx,
                     &client_id,
@@ -274,31 +386,77 @@ pub(super) async fn handle_intercept_disable(
                 .await;
                 return;
             }
-            ctx.pending_commands
-                .add(command_id.clone(), client_id.clone())
+            let registered = ctx.pending_commands
+                .add_intercept(command_id.clone(), client_id.clone(), node_id.clone())
                 .await;
+            if !registered {
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    "An intercept command with this request ID is already pending".into(),
+                )
+                .await;
+                return;
+            }
             let node_message = NodeDirectMessage::Command(request);
             if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
                 common::log_error!("Failed to send InterceptDisable to node {}: {}", node_id, e);
                 ctx.pending_commands.remove(&command_id).await;
+                send_intercept_command_error(
+                    ctx,
+                    &client_id,
+                    &command_id,
+                    &node_id,
+                    format!("Failed to reach node: {}", e),
+                )
+                .await;
             }
         }
         None => {
-            let response = CommandResponse {
-                command_id,
-                node_id: node_id.clone(),
-                result: common::NodeCommandResult::Error {
-                    message: format!("Node '{}' not found", node_id),
-                },
-            };
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
+            send_intercept_command_error(
+                ctx,
                 &client_id,
-                ClientDirectMessage::CommandResponse(response),
+                &command_id,
+                &node_id,
+                format!("Node '{}' not found", node_id),
             )
             .await;
         }
     }
+}
+
+pub(crate) async fn send_intercept_command_error(
+    ctx: &ServiceContext,
+    client_id: &str,
+    request_id: &str,
+    node_id: &str,
+    message: String,
+) {
+    let msg = ClientDirectMessage::InterceptCommandResult {
+        request_id: request_id.to_string(),
+        node_id: node_id.to_string(),
+        error: Some(message),
+        status: None,
+    };
+    let _ = send_to_client(&ctx.client_publish_channel, client_id, msg).await;
+}
+
+pub(crate) async fn send_intercept_command_ok(
+    ctx: &ServiceContext,
+    client_id: &str,
+    request_id: &str,
+    status: InterceptStatus,
+) {
+    let node_id = status.node_id.clone();
+    let msg = ClientDirectMessage::InterceptCommandResult {
+        request_id: request_id.to_string(),
+        node_id,
+        error: None,
+        status: Some(status),
+    };
+    let _ = send_to_client(&ctx.client_publish_channel, client_id, msg).await;
 }
 
 // ---------------------------------------------------------------------------

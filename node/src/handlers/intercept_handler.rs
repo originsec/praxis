@@ -2,10 +2,12 @@ use crate::app::NodeState;
 use common::{InterceptCommand, InterceptCommandResult, InterceptMethod, NodeCommandResult};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 pub async fn handle_intercept_command(
     cmd: InterceptCommand,
     node_state: &Arc<RwLock<NodeState>>,
+    operation_cancel: CancellationToken,
 ) -> NodeCommandResult {
     match cmd {
         InterceptCommand::Enable { method } => {
@@ -19,21 +21,16 @@ pub async fn handle_intercept_command(
             let mut intercept_manager = intercept_manager.lock().await;
 
             //
-            // Check if already active.
-            //
-            if intercept_manager.is_enabled() {
-                let current_method = intercept_manager.method().unwrap_or(InterceptMethod::Proxy);
-                return NodeCommandResult::Intercept(InterceptCommandResult::Enabled {
-                    method: current_method,
-                });
-            }
-
-            //
-            // Use provided method or default to Proxy.
+            // Lifecycle is authoritative: CleanupRequired + is_enabled must
+            // not short-circuit as success (enable() enforces the same).
             //
             let method = method.unwrap_or(InterceptMethod::Proxy);
+            intercept_manager.set_operation_cancel(operation_cancel);
 
-            match intercept_manager.enable(&targets, method).await {
+            let result = intercept_manager.enable(&targets, method).await;
+            intercept_manager.clear_operation_cancel();
+
+            match result {
                 Ok(used_method) => {
                     let domains = intercept_manager.intercepted_domains();
                     common::log_info!(
@@ -61,10 +58,28 @@ pub async fn handle_intercept_command(
             };
             let mut intercept_manager = intercept_manager.lock().await;
 
+            //
+            // CleanupRequired (with or without is_enabled) and other residual
+            // ownership: prefer force_cleanup so Disable always retries cleanup.
+            //
+            if intercept_manager.needs_cleanup()
+                && (!intercept_manager.is_enabled()
+                    || matches!(
+                        intercept_manager.lifecycle(),
+                        crate::intercept::lifecycle::InterceptLifecycle::CleanupRequired
+                    ))
+            {
+                return match intercept_manager.force_cleanup().await {
+                    Ok(()) => {
+                        common::log_info!("Intercept cleanup completed");
+                        NodeCommandResult::Intercept(InterceptCommandResult::Disabled)
+                    }
+                    Err(e) => NodeCommandResult::Error {
+                        message: format!("Failed to cleanup intercept: {}", e),
+                    },
+                };
+            }
             if !intercept_manager.is_enabled() {
-                //
-                // Not active, consider it disabled.
-                //
                 return NodeCommandResult::Intercept(InterceptCommandResult::Disabled);
             }
 

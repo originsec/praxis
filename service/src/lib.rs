@@ -192,6 +192,12 @@ async fn run_main_loop() -> Result<()> {
     let node_registry = Arc::new(NodeRegistry::new());
     let client_registry = Arc::new(ClientRegistry::new());
     let pending_commands = Arc::new(PendingCommands::new());
+    let service_instance_id = uuid::Uuid::new_v4().to_string();
+    common::log_info!(
+        "Service instance id for traffic clear epoch: {}",
+        service_instance_id
+    );
+
     let node_handler = Arc::new(NodeMessageHandler::new(
         publish_channel.clone(),
         broadcast_channel.clone(),
@@ -203,6 +209,7 @@ async fn run_main_loop() -> Result<()> {
         client_publish_channel.clone(),
         client_registry.clone(),
         node_registry.clone(),
+        service_instance_id.clone(),
     ));
 
     //
@@ -617,16 +624,21 @@ async fn run_main_loop() -> Result<()> {
     common::log_info!("Started event log consumers for web and nodes");
 
     //
-    // Broadcast ServiceOnline to all clients so they can re-register.
+    // Broadcast ServiceOnline so clients re-register against this process.
     //
-    let service_online_message = ClientBroadcastMessage::ServiceOnline;
+    let service_online_message = ClientBroadcastMessage::ServiceOnline {
+        service_instance_id: service_instance_id.clone(),
+    };
     let _ = publish_json_exchange(
         &broadcast_channel,
         CLIENT_BROADCAST_EXCHANGE,
         &service_online_message,
     )
     .await;
-    common::log_info!("Broadcast ServiceOnline to clients");
+    common::log_info!(
+        "Broadcast ServiceOnline to clients (instance={})",
+        service_instance_id
+    );
 
     //
     // Broadcast current event logging setting to clients and nodes.
@@ -876,8 +888,70 @@ async fn run_main_loop() -> Result<()> {
     // entries and rule matches into small batches before publishing
     // them to the client broadcast exchange.
     //
-    let intercept_broadcaster =
-        dispatch::traffic_broadcast::InterceptBroadcaster::spawn(broadcast_channel.clone());
+    let traffic_barrier =
+        dispatch::traffic_barrier::TrafficTableBarrier::new(service_instance_id.clone());
+    let intercept_broadcaster = dispatch::traffic_broadcast::InterceptBroadcaster::spawn(
+        broadcast_channel.clone(),
+        traffic_barrier.clone(),
+    );
+    let rules_snapshot = database::rules_snapshot::RulesSnapshot::new();
+    if let Err(e) = database.refresh_rules_snapshot(&rules_snapshot).await {
+        common::log_warn!(
+            "Failed to load initial intercept rules snapshot (DB fallback until refresh): {}",
+            e
+        );
+        rules_snapshot.mark_dirty();
+    }
+    //
+    // Bounded backoff reconciliation while the snapshot is dirty so ingest
+    // does not stay on the per-entry DB/compile path indefinitely.
+    // Mutation linearization: DB write then snapshot patch/refresh; during
+    // the short window ingest may still see the previous clean snapshot
+    // (documented product trade-off; dirty/DB fallback covers failed refresh).
+    //
+    {
+        let db = database.clone();
+        let snap = rules_snapshot.clone();
+        tokio::spawn(async move {
+            let mut delay = std::time::Duration::from_secs(2);
+            let max_delay = std::time::Duration::from_secs(60);
+            loop {
+                tokio::time::sleep(delay).await;
+                if !snap.is_dirty() {
+                    delay = std::time::Duration::from_secs(2);
+                    continue;
+                }
+                match db.refresh_rules_snapshot(&snap).await {
+                    Ok(()) => {
+                        common::log_info!("Rules snapshot reconciled after dirty period");
+                        delay = std::time::Duration::from_secs(2);
+                    }
+                    Err(e) => {
+                        common::log_warn!(
+                            "Rules snapshot dirty retry failed (will backoff): {}",
+                            e
+                        );
+                        delay = (delay * 2).min(max_delay);
+                    }
+                }
+            }
+        });
+    }
+    let intercept_processor = Arc::new(dispatch::intercept_processing::InterceptProcessor::spawn(
+        database.clone(),
+        service_config.clone(),
+        Some(trigger_engine.clone()),
+        intercept_broadcaster.clone(),
+        traffic_barrier.clone(),
+        rules_snapshot.clone(),
+    ));
+    let traffic_query_processor = Arc::new(
+        dispatch::traffic_queries::TrafficQueryProcessor::spawn(
+            database.clone(),
+            client_publish_channel.clone(),
+            traffic_barrier,
+        ),
+    );
 
     //
     // Create the service context for message dispatch.
@@ -900,12 +974,69 @@ async fn run_main_loop() -> Result<()> {
         ccrv1_manager,
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
-        intercept_broadcaster,
+        intercept_processor: intercept_processor.clone(),
+        traffic_query_processor: traffic_query_processor.clone(),
+        rules_snapshot,
         remote_node_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,
         semantic_ops_channel,
+    };
+
+    //
+    // Reap commands whose node never replied and notify intercept callers.
+    // The cancellation token keeps this process-lifetime loop responsive to
+    // service shutdown.
+    //
+    const REAP_SWEEP_SECS: u64 = 60;
+    const REAP_MAX_AGE_SECS: u64 = 900;
+    let pending_reaper_cancel = tokio_util::sync::CancellationToken::new();
+    let pending_reaper_handle = {
+        let cancel = pending_reaper_cancel.clone();
+        let pending_commands = ctx.pending_commands.clone();
+        let client_channel = ctx.client_publish_channel.clone();
+        tokio::spawn(async move {
+            let mut tick =
+                tokio::time::interval(std::time::Duration::from_secs(REAP_SWEEP_SECS));
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tick.tick() => {
+                        let reaped = pending_commands
+                            .reap_older_than(std::time::Duration::from_secs(REAP_MAX_AGE_SECS))
+                            .await;
+                        for (request_id, pending) in &reaped {
+                            if pending.kind == state::registries::PendingCommandKind::Intercept {
+                                let node_id = pending.node_id.as_deref().unwrap_or_default();
+                                let message = common::ClientDirectMessage::InterceptCommandResult {
+                                    request_id: request_id.clone(),
+                                    node_id: node_id.to_string(),
+                                    error: Some(format!(
+                                        "Node did not respond to intercept command within {} seconds",
+                                        REAP_MAX_AGE_SECS
+                                    )),
+                                    status: None,
+                                };
+                                let _ = messaging::send_to_client(
+                                    &client_channel,
+                                    &pending.client_id,
+                                    message,
+                                )
+                                .await;
+                            }
+                        }
+                        if !reaped.is_empty() {
+                            common::log_warn!(
+                                "Reaped {} pending command(s) with no node response after {}s",
+                                reaped.len(),
+                                REAP_MAX_AGE_SECS
+                            );
+                        }
+                    }
+                }
+            }
+        })
     };
 
     //
@@ -941,7 +1072,7 @@ async fn run_main_loop() -> Result<()> {
                     }
                     Err(e) => {
                         common::log_error!("Error receiving node message: {}", e);
-                        return Ok(());
+                        break;
                     }
                 }
             }
@@ -965,7 +1096,7 @@ async fn run_main_loop() -> Result<()> {
                     }
                     Err(e) => {
                         common::log_error!("Error receiving client message: {}", e);
-                        return Ok(());
+                        break;
                     }
                 }
             }
@@ -982,6 +1113,11 @@ async fn run_main_loop() -> Result<()> {
     // Shut down orchestrator sessions before exiting.
     //
 
+    pending_reaper_cancel.cancel();
+    let _ = pending_reaper_handle.await;
+    traffic_query_processor.shutdown().await;
+    intercept_processor.shutdown().await;
+    intercept_broadcaster.shutdown().await;
     ctx.acp_server.shutdown().await;
 
     Ok(())

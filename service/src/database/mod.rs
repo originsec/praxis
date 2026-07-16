@@ -13,6 +13,7 @@ mod operations;
 mod recon;
 mod remote_nodes;
 mod rules;
+pub mod rules_snapshot;
 mod service_config;
 mod toolkit_actions;
 mod traffic;

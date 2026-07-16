@@ -228,14 +228,35 @@ impl App {
                 enable,
                 method,
             } => {
-                let result = if enable {
-                    self.client.enable_intercept(node_id, method).await
-                } else {
-                    self.client.disable_intercept(node_id).await
-                };
-                if let Err(e) = result {
-                    self.intercept.set_error(format!("Intercept toggle: {}", e));
+                if !self.intercept.pending_toggles.insert(node_id.clone()) {
+                    self.intercept
+                        .set_error("An intercept command is already pending for this node");
+                    return;
                 }
+                //
+                // Enable/disable is a round-trip to the node (cert install,
+                // proxy setup) that can take seconds. Run it off the event
+                // loop and report the outcome via an event so the TUI stays
+                // responsive; the status strip already updates independently
+                // via the broadcast InterceptStatusUpdate.
+                //
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+                let result_node_id = node_id.clone();
+                tokio::spawn(async move {
+                    let result = if enable {
+                        client.enable_intercept(node_id, method).await
+                    } else {
+                        client.disable_intercept(node_id).await
+                    };
+                    if let Some(tx) = tx {
+                        let _ = tx.send(crate::event::AppEvent::InterceptToggleResult {
+                            node_id: result_node_id,
+                            enable,
+                            result: result.map_err(|e| e.to_string()),
+                        });
+                    }
+                });
             }
             ConfirmKind::DiscardChainForm => {
                 self.chain_form = None;

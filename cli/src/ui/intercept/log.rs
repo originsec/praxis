@@ -410,7 +410,14 @@ fn group_detail_lines(
         } else {
             Span::styled("\u{2193}", Style::default().fg(STATUS_2XX))
         };
-        let method = e.method.clone().unwrap_or_default();
+        let method = e
+            .method
+            .as_deref()
+            .unwrap_or_default()
+            .split_once('#')
+            .map(|(method, _)| method)
+            .unwrap_or_else(|| e.method.as_deref().unwrap_or_default())
+            .to_string();
         let size = e
             .response_body
             .as_ref()
@@ -516,4 +523,3 @@ fn truncate(s: &str, max: usize) -> String {
     out.push('\u{2026}');
     out
 }
-

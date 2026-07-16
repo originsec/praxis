@@ -101,7 +101,13 @@ async fn async_main() {
     // Clean up any stale intercept state from a previous run that crashed.
     //
 
-    intercept::cleanup_stale_state();
+    if let Err(e) = intercept::cleanup_stale_state() {
+        common::log_error!(
+            "Failed to clean up stale intercept state: {} — refusing to start while stale intercept system changes could not be restored",
+            e
+        );
+        std::process::exit(1);
+    }
 
     //
     // Load or create a persistent node ID that survives restarts.

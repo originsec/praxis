@@ -4,8 +4,11 @@
 //! their appropriate handlers.
 
 pub mod client;
+pub mod intercept_processing;
 pub mod node;
+pub mod traffic_barrier;
 pub mod traffic_broadcast;
+pub mod traffic_queries;
 
 use lapin::Channel;
 use std::sync::Arc;
@@ -24,7 +27,9 @@ use crate::semantic_ops::{ChainExecutor, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 use crate::tools::ToolkitManager;
 use crate::trigger_engine::TriggerEngine;
-use traffic_broadcast::InterceptBroadcaster;
+use crate::database::rules_snapshot::RulesSnapshot;
+use intercept_processing::InterceptProcessor;
+use traffic_queries::TrafficQueryProcessor;
 
 //
 // ServiceContext holds all the shared state needed by message handlers.
@@ -47,7 +52,9 @@ pub struct ServiceContext {
     pub ccrv1_manager: Arc<CcrV1Manager>,
     pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
-    pub intercept_broadcaster: Arc<InterceptBroadcaster>,
+    pub intercept_processor: Arc<InterceptProcessor>,
+    pub traffic_query_processor: Arc<TrafficQueryProcessor>,
+    pub rules_snapshot: Arc<RulesSnapshot>,
     pub remote_node_manager: Arc<RemoteNodeManager>,
 
     //

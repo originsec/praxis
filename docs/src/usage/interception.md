@@ -32,6 +32,12 @@ on the service. Each `[section]` is one intercept target; the section
 header is the `agent_short_name` used to route captured traffic to the
 matching connector.
 
+If multiple enabled targets contain the same domain, Praxis retains every
+candidate agent instead of assigning the endpoint to whichever target was
+loaded last. Traffic displays the candidates separated by `|`; agent filters
+and agent-scoped rules match each candidate individually. URL capture occurs
+when any matching target permits the URL.
+
 ```toml
 [claudecode]
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
@@ -47,6 +53,9 @@ Fields per target:
 |---------------|----------|------------------------------------------------------|
 | `domains`     | yes      | One or more hostnames to capture for this target.    |
 | `url_pattern` | no       | Optional regex matched against the request URL path. |
+
+Section names cannot contain `|`, which is reserved for representing ambiguous
+multi-agent attribution.
 
 Lines starting with `#` are ignored. To disable a target without
 deleting it, comment out the entire section. Praxis ships built-in
@@ -82,27 +91,30 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 - Windows: Modifies registry proxy settings
 
 **Advantages:**
-- Easiest to set up
-- Works without elevated privileges
-- Minimal system changes
+- Easiest to set up (loopback listener only)
+- Minimal system routing changes
 
 **Disadvantages:**
 - Only captures HTTP/HTTPS
 - Some applications ignore proxy settings
 - May conflict with existing proxy configuration
+- In Praxis, enabling interception still requires a **privileged** node
+  (the `Interception` capability is only advertised when running as root/admin)
 
-**Best for:** Quick setup, applications that respect proxy settings
+**Best for:** Quick setup on a privileged node, apps that respect proxy settings
 
 ### VPN Mode
 
 **How it works:** Creates a TUN network adapter and routes specific IPs through it at the packet level.
 
-**Platform support:** Windows only. For Linux, use TPROXY mode instead (more efficient, no userspace packet processing).
+**Platform support:** Windows and Linux. TPROXY is the recommended Linux
+default because it avoids userspace packet processing.
 
 **Setup:**
-1. TUN device created (wintun on Windows)
-2. Intercept domains resolved to IP addresses
-3. Routes added for those IPs through the TUN
+1. Intercept domains resolved to IP addresses and conflict preflight runs
+   (no system mutation yet)
+2. TUN device created (wintun on Windows / Linux TUN) only after preflight
+3. Routes added for resolved IPs through the TUN
 4. Packet engine performs NAT to redirect to proxy
 5. Proxy connects to real server, bypassing TUN via interface binding
 
@@ -118,7 +130,6 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 - More comprehensive coverage
 
 **Disadvantages:**
-- Windows only (use TPROXY on Linux)
 - Requires elevated privileges (admin)
 - More complex setup
 
@@ -150,13 +161,13 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 **How it works:** Uses iptables TPROXY to transparently redirect traffic to the proxy at the kernel level.
 
 **Setup:**
-1. IPv6 disabled system-wide (restored on cleanup)
-2. Intercept domains resolved to IP addresses
-3. iptables mangle rules added to mark packets to target IPs (mark 0x1)
-4. Policy routing configured to route marked packets to loopback
-5. TPROXY rule redirects packets to proxy port
-6. Proxy uses `SO_ORIGINAL_DST` to get real destination
-7. Proxy's outbound connections marked with bypass mark (0x2) to skip iptables rules
+1. Intercept domains resolved to IPv4 addresses before system changes
+2. Policy routing configured to route marked packets to loopback
+3. iptables mangle rules added for the resolved target IPs (mark 0x1)
+4. TPROXY redirects matching packets to the proxy port
+5. IPv6 disabled system-wide only after rule setup succeeds (restored on cleanup)
+6. Proxy uses the accepted socket `local_addr` (IP_TRANSPARENT) as the real destination
+7. Proxy's outbound connections use bypass mark 0x2 to skip interception rules
 
 **Internal details:**
 - Uses iptables mangle table with PREROUTING chain
@@ -180,22 +191,41 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 ## Privilege Requirements
 
-Most interception methods (VPN, Hosts, TPROXY) require the node to be running with elevated privileges (root on Linux/macOS, administrator on Windows). The Proxy method can work without elevated privileges.
+All interception methods require a privileged node in Praxis: the node only
+advertises the `Interception` capability when running as root/admin. VPN,
+Hosts, and TPROXY also need those privileges for system routing/cert changes;
+Proxy is still gated the same way even though its listener is loopback-only.
 
-Nodes report their privilege status automatically. In the praxis TUI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. Privileged nodes display a **ROOT** badge in the Nodes window.
+Nodes report their privilege status automatically. In the praxis TUI, press
+`i` on a non-privileged node shows an error — you must restart the node with
+elevated privileges before enabling interception. Privileged nodes display a
+**priv** pill in the Nodes window.
 
 ## Enabling Interception
 
-1. Open the **Intercept** window (`Ctrl+T`) in the praxis TUI
-2. Select your node (must be running privileged for VPN/Hosts/TPROXY methods)
-3. Choose a method (Proxy, VPN, Hosts, or TPROXY)
-4. Enable interception
+1. Open the **Nodes** window in the praxis TUI
+2. Select your node (must be running privileged — root/admin)
+3. Press **`i`** and confirm
+
+The TUI auto-picks a method by OS: **TPROXY** on Linux, **VPN** on Windows.
+Other methods (Proxy, Hosts) are available via the node command path; the
+default TUI flow uses the OS-appropriate privileged method.
+
+The same operations are available without the TUI:
+
+```bash
+praxis_cli intercept status
+praxis_cli intercept enable <node-prefix> --method tproxy
+praxis_cli intercept disable <node-prefix>
+```
 
 The node will:
 - Create and install a root CA certificate
 - Generate leaf certificates for intercept domains
 - Start the proxy server
 - Configure system based on chosen method
+
+View captured traffic in the **Intercept** window (`Ctrl+T`).
 
 ## Viewing Traffic
 
@@ -211,22 +241,35 @@ The Traffic tab shows captured requests:
 | URL | Full request URL |
 | Status | Response status code |
 
-WebSocket traffic is also supported - messages are coalesced into a single row per connection.
+WebSocket traffic is also supported — frames for one connection are grouped
+by a stable **flow id** (not merely URL), so concurrent sockets to the same
+host do not merge in the TUI.
 
-HTTP/2 and gRPC traffic is fully supported with frame-level interception.
+HTTP/2 is captured at the **frame** level (HEADERS/DATA and control frames
+relayed). gRPC over HTTP/2 is therefore **frame-level capture**, not full
+message reassembly across DATA frames — length-prefixed gRPC messages that
+span frames may appear fragmented in capture, rules, and search. **This is
+the supported scope for this release** (not a temporary gap pending
+reassembly). Frames group by **connection flow + stream** in the TUI.
+
+Live list/match streams and traffic log/search/matches responses are
+**metadata-only** (bodies stripped). Opening a row issues a `TrafficGet`
+for full request/response bodies (lazy load). Captured request/response
+headers are stored as a map of name→single value (duplicate header names
+collapse).
 
 ### Request Details
 
 Click a row to see details:
 
 **Request:**
-- Full headers
+- Headers (name→single value; duplicate names collapse)
 - Request body (JSON formatted)
 - Content type
 
 **Response:**
 - Status code
-- Headers
+- Headers (name→single value; duplicate names collapse)
 - Response body (JSON formatted)
 
 For LLM APIs, you'll see:
@@ -239,20 +282,31 @@ For LLM APIs, you'll see:
 
 ### HTTP/1.1
 
-Standard HTTP traffic is fully captured with request/response headers and bodies.
+Standard HTTP traffic is captured as separate send and receive entries. Send
+rules inspect only request fields; receive rules inspect only response fields.
 
 ### WebSocket
 
-WebSocket connections are detected via HTTP 101 upgrade responses. Individual frames are captured and grouped by connection URL in the TUI's Intercept window.
+WebSocket upgrades require HTTP 101 plus both `Upgrade: websocket` and a
+`Connection: upgrade` token (plain and TLS paths). Individual frames are
+captured with method suffixes like `WS_TEXT#<flow>` used as internal grouping
+keys (the TUI may hide the `#flow` suffix). Grouping is per flow id, not
+solely by URL.
 
 ### HTTP/2 and gRPC
 
 The proxy provides frame-level HTTP/2 interception for services using HTTP/2 (including gRPC streaming):
 
-**Detection**: HTTP/2 is detected by the connection preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`)
+**Detection**: TLS ALPN is authoritative for HTTP/2, and the complete connection
+preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`) is then read and validated without
+consuming the first SETTINGS frame. Praxis prefers HTTP/1.1 during its client
+handshake for broad origin compatibility; when a client requires HTTP/2, the
+origin must also negotiate `h2` or the tunnel is rejected instead of relaying
+bytes under mismatched protocols.
 
 **Captured Frames**:
-- `H2_HEADERS` - Request/response headers (HPACK encoded)
+- `H2_HEADERS` - Request/response headers, HPACK-decoded into readable key/value
+  pairs (including the `:method`, `:path`, and `:status` pseudo-headers)
 - `H2_DATA` - Request/response body data
 
 **Frame Relay**: All frame types are forwarded bidirectionally:
@@ -261,15 +315,121 @@ The proxy provides frame-level HTTP/2 interception for services using HTTP/2 (in
 - RST_STREAM (stream reset)
 - GOAWAY (connection close)
 
-**gRPC Streaming**: Full support for bidirectional streaming RPCs. Both client-to-server and server-to-client data frames are captured as they flow.
+**gRPC Streaming**: Bidirectional DATA frames are relayed and captured, but
+each DATA frame is treated independently for decompression/capture. **Supported
+scope for this release is frame-level capture**, not full gRPC message
+reassembly across frames.
 
-**UI Display**: HTTP/2 traffic is grouped by URL (similar to WebSocket), showing:
+**UI Display**: HTTP/2 traffic is grouped by connection flow and stream
+(method fields use suffixes like `H2_HEADERS#<flow>:<stream>` as internal
+keys), showing:
 - Total frame count
 - Send/receive counts
 - Total bytes transferred
 - Individual frames expandable with payload preview
 
-**Path Extraction**: The proxy extracts the `:path` pseudo-header from HPACK-encoded HEADERS frames to provide URL context for DATA frames in the same stream.
+**Header Decoding**: HEADERS frames are decoded with a stateful per-direction
+HPACK decoder that tracks the dynamic table across frames and reassembles blocks
+split across CONTINUATION frames. Decoded headers are shown as key/value pairs,
+and the `:path` pseudo-header provides URL context for DATA frames in the same
+stream. If a header block ever fails to decode, header decoding for that
+direction is disabled for the rest of the connection rather than showing
+corrupt output. Header blocks and HPACK dynamic tables are capped at 1 MiB,
+padded DATA frames exclude padding from captured bodies, and invalid
+interleaved CONTINUATION sequences disable only capture decoding while frames
+continue to be forwarded.
+
+**Capture completeness**: Captured traffic passes through bounded queues on
+both the node and service. The service persists entries with a bounded worker
+pool so database and rule processing cannot block node command/status
+dispatch. If a burst outpaces either queue, entries are dropped rather than
+blocking the intercepted connection, and Praxis logs that capture is lossy.
+Forwarding of the live connection is independent of service storage, but
+**local** proxy memory bounds (e.g. 64 MiB plain HTTP request/response
+buffering) can still affect traffic under extreme concurrent load.
+
+Trigger firing and LLM summarization run on a separate capacity budget and
+are dropped immediately under load (no queueing) without blocking capture
+persistence.
+
+**Clear vs in-flight triggers:** Traffic Clear deletes stored rows and
+advances the service clear-generation so new live batches and TUI state
+reconcile. Trigger / LLM / external side effects that have already entered
+the trigger engine for a match may still complete; Clear does not revoke
+in-flight match side effects. A generation check skips only triggers that
+have not yet entered the engine when Clear has already advanced.
+
+## Cleanup and Recovery
+
+Enable records recovery intent before changing proxy settings, hosts/routes,
+TPROXY policy rules, or IPv6 sysctls. Disable removes only Praxis-owned rules
+and retains the recovery file if any cleanup step fails, allowing a retry on
+the next start.
+
+Failed or cancelled enable whose rollback cannot fully clean up enters
+**CleanupRequired**: re-enable is blocked until Disable or node Reset runs
+`force_cleanup` successfully. Manager-owned CA/resource handles are retained
+while cleanup is incomplete; recovery metadata is not overwritten by a fresh
+enable. The TUI status strip shows `cleanup` for nodes reporting
+`InterceptStatus.cleanup_required`.
+
+A node also refuses to proceed while stale cleanup is incomplete or its
+recovery file cannot be parsed. Async enable phases (DNS, proxy start, packet
+IP refresh) race an operation cancel token. Host child commands (iptables,
+netsh, sysctl, cert tools, etc.) run through a bounded runner
+(`output_bounded` / 30s default) that kills the process on timeout; timeout is
+treated as unknown host state and keeps recovery ownership / CleanupRequired
+rather than claiming Disabled.
+
+## Limits
+
+| Limit | Value |
+|-------|-------|
+| Captured body (stored / live) | 10 MiB per side |
+| Captured headers (aggregate) | 1 MiB |
+| WebSocket frame | 16 MiB |
+| Plain non-CONNECT HTTP buffer | 64 MiB request + 64 MiB response (buffered, not streaming) |
+| TUI traffic ring buffer | 2,000 entries |
+| TUI matches buffer | 2,000 entries |
+| TUI paused pending | 2,000 entries |
+| TUI body cache | 64 MiB (insertion-order eviction) |
+| Service traffic-query queue | 64 jobs, 4 workers |
+| Service intercept-processing queue | 64 entries, 8 workers |
+| Live broadcast batch queue | 4,096 (bodies stripped) |
+| CLI live intercept entry/match channels | 32 batches (drop-when-full, rate-limited logs) |
+
+## Compatibility and Trust
+
+**Traffic request_id**: Client traffic log/search/matches/clear/get signals
+include a client-generated `request_id` echoed in the matching response so
+concurrent same-kind queries are not swapped. The field accepts an empty
+default when older peers omit it (Serde `default`). Prefer **atomic**
+CLI/service upgrades; mixed versions without a unique request_id can still
+mis-pair concurrent traffic queries.
+
+**Node identity on intercept traffic**: The service accepts
+`InterceptedTraffic` / intercept status when the payload `node_id` names a
+**registered** node. It does **not** bind the payload to an authenticated
+transport sender. If multiple nodes share the same RabbitMQ credentials, a
+node can attribute traffic or status under another registered node id.
+Treat co-credentialed nodes as fully trusted for attribution, or isolate
+broker credentials per node.
+
+**Clear vs ingest**: Traffic clear takes an exclusive barrier shared with
+ingest, prune, and queries. A generation counter advances on successful clear;
+pre-clear entries that only reach the DB after clear are dropped. Multi-batch
+regex/body scans use keyset pagination on `id` (not `OFFSET`).
+
+Duplicate header **names** are preserved when **forwarding** plain HTTP, but
+stored capture uses a map and collapses duplicates to a single value per name.
+
+Server-side traffic list/search scans may skip rows under concurrent deletes
+or pruning (pagination is best-effort without a snapshot transaction). Clear
+is synchronized against concurrent list/search/get jobs on the service, but
+ingest/pruning can still insert or delete around a clear — a successful
+clear does **not** guarantee a global snapshot of “everything before this
+request is gone.” Invalid search regex falls back to a literal substring
+pattern; **rules reject invalid regex** on create/update.
 
 ## Traffic Rules
 
@@ -278,13 +438,16 @@ Rules let you match and process specific traffic.
 ### Creating Rules
 
 1. Go to **Intercept** → **Rules**
-2. Click **New Rule**
+2. Create a rule (`Ctrl+N` in the TUI)
 3. Configure:
    - **Name** - identifier for the rule
-   - **Pattern** - regex to match
+   - **Pattern** - regex (must compile; invalid patterns are rejected)
    - **Direction** - send, receive, or both
    - **Scope** - all traffic or specific node/agent
    - **Summarization prompt** - optional LLM analysis
+
+Matching covers host, URL, method, response status, headers, and UTF-8
+bodies (respecting send/receive direction).
 
 ### Rule Matching
 
@@ -370,8 +533,7 @@ This tool is designed for research, not covert operations.
 
 ### VPN mode fails
 
-- Windows only (Linux support in development)
-- Requires Administrator privileges
+- Requires Administrator privileges on Windows or root/CAP_NET_ADMIN on Linux
 - Check for conflicting VPN software
 
 ### TPROXY mode fails
@@ -389,7 +551,9 @@ TPROXY mode temporarily disables IPv6 system-wide (`net.ipv6.conf.all.disable_ip
 - TPROXY rules only handle IPv4 traffic
 - IPv6 traffic would bypass interception
 
-IPv6 is automatically restored when interception is disabled. If the node crashes without cleanup, restore manually:
+IPv6 is automatically restored when interception is disabled or when the node
+process next starts and finds recovery state. If automatic cleanup repeatedly
+fails, restore it manually to the value appropriate for the host:
 ```bash
 sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
 ```

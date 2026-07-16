@@ -4,6 +4,7 @@ mod client;
 mod commands;
 mod config;
 mod event;
+mod intercept_live;
 mod keymap;
 mod markdown;
 mod output;
@@ -74,6 +75,12 @@ enum Commands {
         command: commands::agent::AgentCommand,
     },
 
+    /// Traffic interception commands
+    Intercept {
+        #[command(subcommand)]
+        command: commands::intercept::InterceptCommand,
+    },
+
     /// Session management commands
     Session {
         #[command(subcommand)]
@@ -97,6 +104,7 @@ impl Commands {
         match self {
             Commands::Node { command } => commands::node::execute(client, command).await,
             Commands::Agent { command } => commands::agent::execute(client, command).await,
+            Commands::Intercept { command } => commands::intercept::execute(client, command).await,
             Commands::Session { command } => commands::session::execute(client, command).await,
             Commands::SetRabbitmqUrl { .. } | Commands::Config => {
                 unreachable!("config subcommands handled before connecting to a client")

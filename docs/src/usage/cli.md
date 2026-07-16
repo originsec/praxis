@@ -117,18 +117,21 @@ JSONL, JSON array, or raw text depending on the agent's format.
 
 ### Intercept (`Ctrl+T`)
 
-Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch):
+Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch).
+Enable/disable interception from the **Nodes** window with **`i`** (not
+from this window).
 
-- **Log** — incoming traffic streams from every node into a ring buffer.
-  HTTP entries show individually; WebSocket and HTTP/2 frames group by
-  `(node, url)` so streaming endpoints don't flood the list.
+- **Traffic** — incoming traffic streams from every node into a ring buffer
+  (2,000-entry cap; bodies load lazily on selection; 64 MiB body cache).
+  HTTP entries show individually; WebSocket frames group by flow id and
+  HTTP/2 by flow+stream so concurrent sockets don't flood the list.
 - **Rules** — create, edit, delete, and toggle intercept rules (regex
   patterns with direction and scope). Rules can carry an optional LLM
   summarisation prompt.
 - **Matches** — matched-traffic review with AI summaries (when a rule
   has a summarisation prompt).
 
-#### Log tab
+#### Traffic tab
 
 | Key | Action |
 |-----|--------|
@@ -144,6 +147,7 @@ Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch):
 | `Ctrl+X` | Clear ALL traffic (with confirmation) |
 | `b` | Cycle body render mode: pretty → raw → hex |
 | `y` | Copy selected URL |
+| `m` | Jump to Matches for the selected traffic row |
 
 Request and response bodies arrive via a second fetch on selection to
 keep the broadcast payload small — large bodies load within a few
@@ -162,10 +166,19 @@ hundred milliseconds after you navigate to an entry.
 | `r` | Refresh the rules list |
 | `/` | Filter rules by name/pattern |
 
-The rule form (open via `n` or `e`) fields: Name, Regex, Direction
+The rule form (open via `Ctrl+N` / `Ctrl+E`) fields: Name, Regex
+(must compile — invalid patterns are rejected), Direction
 (`send` / `receive` / `both`), Scope (`all` / `node` / `agent`), and an
 optional LLM summary prompt. `Tab` moves between fields, `Space` /
 `←` / `→` cycles select-style fields, `Ctrl+S` saves, `Esc` cancels.
+
+Noninteractive commands:
+
+```bash
+praxis_cli intercept status
+praxis_cli intercept enable <node-prefix> [--method tproxy|vpn|proxy|hosts]
+praxis_cli intercept disable <node-prefix>
+```
 
 #### Matches tab
 
@@ -325,6 +338,7 @@ Use `-C` to run a single command and exit:
 
 ```bash
 praxis_cli -C "node list"
+praxis_cli -C "intercept enable abc123 --method tproxy"
 praxis_cli -C "session create --node abc123 --agent codex --yolo"
 ```
 
@@ -334,6 +348,7 @@ Subcommands can also be passed directly:
 
 ```bash
 praxis_cli node list
+praxis_cli intercept status
 praxis_cli session create --node abc123 --agent codex --yolo
 ```
 
@@ -363,6 +378,18 @@ session create --node <prefix> --agent <name> [--yolo] [--project <path>] [--tim
 session prompt --node <prefix> <text>
 session close --node <prefix>
 ```
+
+**Traffic Interception:**
+```bash
+intercept status [node-prefix]                    # Show interception state
+intercept enable <node-prefix> [--method proxy|vpn|hosts|tproxy]
+intercept disable <node-prefix>
+```
+
+Enable and disable wait for the selected node to finish setup or cleanup and
+return the node's error if the operation fails. Independent node commands are
+correlated separately, so concurrent callers cannot consume one another's
+responses.
 
 Every command that needs an agent takes `--agent` explicitly; ACP
 sessions are per-agent, so the same node can host concurrent sessions
@@ -422,4 +449,3 @@ To reset local state:
 ```bash
 praxis_cli --clear
 ```
-

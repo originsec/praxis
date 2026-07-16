@@ -91,9 +91,30 @@ pub(super) async fn handle_command(ctx: &ServiceContext, request: CommandRequest
         }
     }
 
-    ctx.pending_commands
-        .add(request.command_id.clone(), request.client_id.clone())
+    let registered = ctx
+        .pending_commands
+        .add(
+            request.command_id.clone(),
+            request.client_id.clone(),
+            request.node_id.clone(),
+        )
         .await;
+    if !registered {
+        let response = CommandResponse {
+            command_id: request.command_id.clone(),
+            node_id: request.node_id.clone(),
+            result: common::NodeCommandResult::Error {
+                message: "A command with this request ID is already pending".into(),
+            },
+        };
+        let _ = send_to_client(
+            &ctx.client_publish_channel,
+            &request.client_id,
+            ClientDirectMessage::CommandResponse(response),
+        )
+        .await;
+        return;
+    }
 
     let node_message = NodeDirectMessage::Command(request.clone());
     if let Err(e) = send_to_node(&ctx.publish_channel, &request.node_id, node_message).await {

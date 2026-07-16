@@ -30,6 +30,13 @@ pub use rules_form::{FormMode, RuleForm, RuleFormField};
 //
 
 const BUFFER_CAP: usize = 2000;
+const MATCH_BUFFER_CAP: usize = 2000;
+const BODY_CACHE_CAP_BYTES: usize = 64 * 1024 * 1024;
+
+fn body_pair_size(pair: &(Option<Vec<u8>>, Option<Vec<u8>>)) -> usize {
+    pair.0.as_ref().map(Vec::len).unwrap_or(0)
+        + pair.1.as_ref().map(Vec::len).unwrap_or(0)
+}
 
 //
 // How long an error banner stays visible in the status line.
@@ -79,8 +86,8 @@ pub enum SummaryStatus {
 
 //
 // A row in the flattened display. HTTP entries show individually;
-// WS_*/H2_* frames are collapsed into groups keyed by (node_id, url) so
-// streaming endpoints don't flood the list.
+// WS_*/H2_* frames are collapsed into per-connection/per-stream groups so
+// unrelated traffic to the same URL is never merged.
 //
 
 #[derive(Debug, Clone)]
@@ -98,6 +105,59 @@ impl DisplayRow {
     }
 }
 
+//
+// Pure clear reconciliation: keep live-stamped ids whose generation is still
+// current after clear epoch advances. Late AppEvents queued before clear must
+// use the same policy at push time (reject generation < clear_epoch).
+//
+
+pub fn should_keep_after_clear(live_gen: Option<u64>, clear_epoch: u64) -> bool {
+    match live_gen {
+        Some(g) => g >= clear_epoch,
+        None => false, // untagged (query-loaded) rows are pre-clear
+    }
+}
+
+/// Whether a live batch/body-fetch with this generation may enter the buffer.
+pub fn should_accept_live_generation(generation: u64, clear_epoch: u64) -> bool {
+    should_keep_after_clear(Some(generation), clear_epoch)
+}
+
+/// Pure: whether a service instance id change requires resetting the TUI epoch.
+/// Control-plane only — live data must use [`live_instance_acceptable`].
+pub fn service_instance_changed(current: Option<&str>, incoming: &str) -> bool {
+    if incoming.is_empty() {
+        return false;
+    }
+    current != Some(incoming)
+}
+
+/// Pure: live data may apply only when instance matches (or stamp is empty).
+/// Never treats a different UUID as a rebind.
+pub fn live_instance_acceptable(current: Option<&str>, incoming: Option<&str>) -> bool {
+    match incoming {
+        None | Some("") => true,
+        Some(id) => common::clear_epoch::instance_matches_current(current, id),
+    }
+}
+
+///
+/// Pure: whether a validated clear response may advance TUI clear_epoch.
+/// Uses the instance stamped on the success path — never a later-rebound
+/// client identity. Empty response instance is legacy (accept).
+///
+pub fn should_apply_clear_boundary(
+    tui_instance: Option<&str>,
+    response_instance: &str,
+) -> bool {
+    common::clear_epoch::clear_pending_accepts_response(
+        tui_instance.unwrap_or(""),
+        response_instance,
+    ) && (response_instance.is_empty()
+        || tui_instance.is_none()
+        || tui_instance == Some(response_instance))
+}
+
 pub struct InterceptState {
     pub tab: InterceptTab,
     pub last_error: Option<(String, Instant)>,
@@ -106,6 +166,15 @@ pub struct InterceptState {
     // Log tab.
     //
     pub buffer: VecDeque<InterceptedTrafficEntry>,
+    /// Service clear-epoch after last successful clear (reject older live gens).
+    /// Reset to 0 when `service_instance_id` changes (service restart).
+    pub clear_epoch: u64,
+    /// Service process identity for clear-generation scoping.
+    pub service_instance_id: Option<String>,
+    /// Live-batch generation by traffic id (for clear reconciliation).
+    pub live_entry_gens: HashMap<i64, u64>,
+    /// Live-batch generation by match id.
+    pub live_match_gens: HashMap<i64, u64>,
     pub display_rows: Vec<DisplayRow>,
     pub display_dirty: bool,
     pub selected: usize,
@@ -132,6 +201,8 @@ pub struct InterceptState {
     // detail pane doesn't need to refetch on each selection change.
     //
     pub body_cache: HashMap<i64, (Option<Vec<u8>>, Option<Vec<u8>>)>,
+    body_cache_order: VecDeque<i64>,
+    body_cache_bytes: usize,
     pub inflight_body_fetches: HashSet<i64>,
 
     //
@@ -173,6 +244,7 @@ pub struct InterceptState {
     // Current intercept status per node (from live broadcast).
     //
     pub intercept_statuses: HashMap<String, InterceptStatus>,
+    pub pending_toggles: HashSet<String>,
 
     //
     // Traffic/match cross-links and rule stats.
@@ -199,6 +271,10 @@ impl Default for InterceptState {
             jump_traffic_id: None,
             last_error: None,
             buffer: VecDeque::with_capacity(BUFFER_CAP),
+            clear_epoch: 0,
+            service_instance_id: None,
+            live_entry_gens: HashMap::new(),
+            live_match_gens: HashMap::new(),
             display_rows: Vec::new(),
             display_dirty: true,
             selected: 0,
@@ -216,6 +292,8 @@ impl Default for InterceptState {
             initial_loaded: false,
             total_in_service: 0,
             body_cache: HashMap::new(),
+            body_cache_order: VecDeque::new(),
+            body_cache_bytes: 0,
             inflight_body_fetches: HashSet::new(),
             paused_pending: Vec::new(),
             rules: Vec::new(),
@@ -234,6 +312,7 @@ impl Default for InterceptState {
             matches_loaded: false,
             match_total: 0,
             intercept_statuses: HashMap::new(),
+            pending_toggles: HashSet::new(),
             traffic_match_rules: HashMap::new(),
             rule_match_counts: HashMap::new(),
         }
@@ -264,6 +343,76 @@ impl InterceptState {
 
     pub fn any_intercept_active(&self) -> bool {
         self.intercept_statuses.values().any(|s| s.enabled)
+    }
+
+    //
+    // Merge a live InterceptStatus without wiping richer fields when a
+    // partial update arrives (e.g. service command path has method but
+    // no domains/port; node status has the full picture).
+    //
+    pub fn apply_status(&mut self, status: InterceptStatus) {
+        let entry = self
+            .intercept_statuses
+            .entry(status.node_id.clone())
+            .or_insert_with(|| InterceptStatus {
+                node_id: status.node_id.clone(),
+                enabled: false,
+                method: None,
+                proxy_port: None,
+                intercepted_domains: Vec::new(),
+                cleanup_required: false,
+            });
+        entry.enabled = status.enabled;
+        entry.cleanup_required = status.cleanup_required;
+        if status.method.is_some() {
+            entry.method = status.method;
+        }
+        if status.proxy_port.is_some() {
+            entry.proxy_port = status.proxy_port;
+        }
+        if !status.intercepted_domains.is_empty() {
+            entry.intercepted_domains = status.intercepted_domains;
+        }
+        if !status.enabled && !status.cleanup_required {
+            entry.method = None;
+            entry.proxy_port = None;
+            entry.intercepted_domains.clear();
+        }
+    }
+
+    //
+    // Merge status from SystemState nodes when the dedicated status
+    // stream hasn't filled intercept_statuses yet (e.g. after reconnect).
+    // Live InterceptStatusUpdate wins when present.
+    //
+    pub fn sync_status_from_nodes(&mut self, nodes: &[common::NodeState]) {
+        for node in nodes {
+            let entry = self
+                .intercept_statuses
+                .entry(node.node_id.clone())
+                .or_insert_with(|| InterceptStatus {
+                    node_id: node.node_id.clone(),
+                    enabled: node.intercept_active,
+                    method: None,
+                    proxy_port: None,
+                    intercepted_domains: Vec::new(),
+                    cleanup_required: false,
+                });
+            //
+            // Only fill gaps: if we have never seen a live status for this
+            // node, mirror intercept_active from state. Once a live status
+            // has populated method/port, leave it alone unless state says
+            // it turned off.
+            //
+            if entry.method.is_none() && entry.proxy_port.is_none() {
+                entry.enabled = node.intercept_active;
+            } else if !node.intercept_active {
+                entry.enabled = false;
+                entry.method = None;
+                entry.proxy_port = None;
+                entry.intercepted_domains.clear();
+            }
+        }
     }
 
     pub fn rebuild_match_indexes(&mut self) {
@@ -417,15 +566,10 @@ impl InterceptState {
 
     pub fn replace_buffer(&mut self, entries: Vec<InterceptedTrafficEntry>, total: usize) {
         self.buffer.clear();
-        for mut entry in entries {
-            if let Some(id) = entry.id {
-                let req = entry.request_body.take();
-                let resp = entry.response_body.take();
-                if req.is_some() || resp.is_some() {
-                    self.body_cache.insert(id, (req, resp));
-                }
-            }
-            self.buffer.push_front(entry);
+        self.clear_body_cache();
+        for mut entry in entries.into_iter().take(BUFFER_CAP) {
+            self.take_and_cache_bodies(&mut entry, false);
+            self.buffer.push_back(entry);
         }
         self.total_in_service = total;
         self.initial_loaded = true;
@@ -442,7 +586,85 @@ impl InterceptState {
     // batch is flushed in one go.
     //
 
+    #[allow(dead_code)] // tests + internal resume use with_generation directly
     pub fn push_entries(&mut self, entries: Vec<InterceptedTrafficEntry>) {
+        self.push_entries_with_generation(0, entries);
+    }
+
+    ///
+    /// Apply a clear that already validated on the client for
+    /// `response_instance`. No-op (does not advance epoch) if the TUI is no
+    /// longer on that instance.
+    ///
+    pub fn apply_validated_clear_boundary(
+        &mut self,
+        response_instance: &str,
+        generation: u64,
+    ) {
+        if !should_apply_clear_boundary(self.service_instance_id.as_deref(), response_instance) {
+            return;
+        }
+        self.retain_after_clear(generation);
+    }
+
+    /// Authoritative rebind (RegistrationAck / ServiceInstanceRebind only).
+    /// Resets clear epoch, drops live rows, and marks pages unloaded so
+    /// persistent history is re-queried for the new service process.
+    pub fn note_service_instance(&mut self, instance_id: &str) {
+        if !service_instance_changed(self.service_instance_id.as_deref(), instance_id) {
+            return;
+        }
+        self.service_instance_id = Some(instance_id.to_string());
+        self.clear_epoch = 0;
+        self.buffer.clear();
+        self.matches.clear();
+        self.paused_pending.clear();
+        self.live_entry_gens.clear();
+        self.live_match_gens.clear();
+        self.display_rows.clear();
+        self.display_dirty = true;
+        self.selected = 0;
+        self.match_selected = 0;
+        self.total_in_service = 0;
+        self.match_total = 0;
+        self.clear_body_cache();
+        self.traffic_match_rules.clear();
+        self.rule_match_counts.clear();
+        //
+        // Force reload of persistent DB history after service restart.
+        //
+        self.initial_loaded = false;
+        self.matches_loaded = false;
+    }
+
+    pub fn push_entries_with_generation(
+        &mut self,
+        generation: u64,
+        entries: Vec<InterceptedTrafficEntry>,
+    ) {
+        self.push_entries_scoped(None, generation, entries);
+    }
+
+    pub fn push_entries_scoped(
+        &mut self,
+        service_instance_id: Option<&str>,
+        generation: u64,
+        entries: Vec<InterceptedTrafficEntry>,
+    ) {
+        //
+        // Data plane never rebinds. Mismatched instance (delayed A after B)
+        // is dropped without clearing current rows.
+        //
+        if !live_instance_acceptable(self.service_instance_id.as_deref(), service_instance_id) {
+            return;
+        }
+        //
+        // Drop late AppEvents that were queued before clear advanced the epoch
+        // (same policy as retain_after_clear).
+        //
+        if !should_accept_live_generation(generation, self.clear_epoch) {
+            return;
+        }
         if self.paused {
             //
             // Still apply body-fill updates (same id) immediately so
@@ -453,30 +675,54 @@ impl InterceptState {
             for entry in entries {
                 match entry.id {
                     Some(id) if self.buffer.iter().any(|e| e.id == Some(id)) => {
-                        if let Some(pos) = self.buffer.iter().position(|e| e.id == Some(id)) {
-                            self.buffer[pos] = entry;
-                        }
+                        self.live_entry_gens.insert(id, generation);
+                        self.merge_entry_update(entry);
                     }
                     _ => deferred.push(entry),
                 }
             }
+            //
+            // Stamp deferred gens on flush via paused path: store gen on ids
+            // when we know them.
+            //
+            for e in &deferred {
+                if let Some(id) = e.id {
+                    self.live_entry_gens.insert(id, generation);
+                }
+            }
             self.paused_pending.extend(deferred);
+            if self.paused_pending.len() > BUFFER_CAP {
+                let overflow = self.paused_pending.len() - BUFFER_CAP;
+                self.paused_pending.drain(..overflow);
+                self.set_error(format!(
+                    "Dropped {} paused intercept update(s); paused buffer is full",
+                    overflow
+                ));
+            }
             return;
         }
 
-        for entry in entries {
-            if let Some(id) = entry.id
-                && let Some(pos) = self.buffer.iter().position(|e| e.id == Some(id))
-            {
-                self.buffer[pos] = entry;
-                continue;
+        for mut entry in entries {
+            if let Some(id) = entry.id {
+                self.live_entry_gens.insert(id, generation);
+                if self.buffer.iter().any(|e| e.id == Some(id)) {
+                    self.merge_entry_update(entry);
+                    continue;
+                }
             }
+            self.take_and_cache_bodies(&mut entry, false);
             self.buffer.push_front(entry);
             self.total_in_service = self.total_in_service.saturating_add(1);
         }
 
         while self.buffer.len() > BUFFER_CAP {
-            self.buffer.pop_back();
+            if let Some(evicted) = self.buffer.pop_back() {
+                if let Some(id) = evicted.id {
+                    self.remove_cached_body(id);
+                    self.inflight_body_fetches.remove(&id);
+                    self.live_entry_gens.remove(&id);
+                }
+            }
         }
 
         if self.follow_tail && !self.detail_focus {
@@ -485,6 +731,190 @@ impl InterceptState {
         }
 
         self.display_dirty = true;
+    }
+
+    /// After clear epoch advances: drop untagged/pre-clear rows; keep gen>=epoch.
+    pub fn retain_after_clear(&mut self, clear_epoch: u64) {
+        //
+        // Monotonic: never move epoch backward (late clear responses).
+        //
+        if clear_epoch > self.clear_epoch {
+            self.clear_epoch = clear_epoch;
+        }
+        let clear_epoch = self.clear_epoch;
+        let gens = &self.live_entry_gens;
+        let drop_ids: Vec<i64> = self
+            .buffer
+            .iter()
+            .filter_map(|e| {
+                let id = e.id?;
+                if should_keep_after_clear(gens.get(&id).copied(), clear_epoch) {
+                    None
+                } else {
+                    Some(id)
+                }
+            })
+            .collect();
+        for id in &drop_ids {
+            self.remove_cached_body(*id);
+            self.inflight_body_fetches.remove(id);
+            self.live_entry_gens.remove(id);
+        }
+        self.buffer.retain(|e| {
+            should_keep_after_clear(
+                e.id.and_then(|id| self.live_entry_gens.get(&id).copied()),
+                clear_epoch,
+            )
+        });
+        self.paused_pending.retain(|e| {
+            should_keep_after_clear(
+                e.id.and_then(|id| self.live_entry_gens.get(&id).copied()),
+                clear_epoch,
+            )
+        });
+        let match_gens = &self.live_match_gens;
+        self.matches.retain(|m| {
+            should_keep_after_clear(match_gens.get(&m.match_info.id).copied(), clear_epoch)
+        });
+        self.live_entry_gens.retain(|_, g| *g >= clear_epoch);
+        self.live_match_gens.retain(|_, g| *g >= clear_epoch);
+        self.display_rows.clear();
+        self.display_dirty = true;
+        self.selected = 0;
+        self.detail_focus = false;
+        self.match_selected = 0;
+        self.match_detail_focus = false;
+        self.total_in_service = self.buffer.len();
+        self.match_total = self.matches.len();
+        self.rebuild_match_indexes();
+    }
+
+    //
+    // Merge a same-id update without clobbering bodies already cached
+    // or present on the existing row. Stripped live broadcasts must not
+    // wipe a previously-fetched body, and must not clear an in-flight
+    // body fetch (that race used to plant an empty sentinel and block
+    // retries forever when the real TrafficGet later failed).
+    //
+    fn merge_entry_update(&mut self, mut entry: InterceptedTrafficEntry) {
+        let Some(id) = entry.id else {
+            return;
+        };
+
+        let has_new_bodies = entry.request_body.is_some() || entry.response_body.is_some();
+        if has_new_bodies {
+            //
+            // Body-bearing updates (TrafficGet success or inline list
+            // payloads) fill the cache and complete any in-flight fetch.
+            // Partial payloads only fill sides that are present.
+            //
+            self.inflight_body_fetches.remove(&id);
+            self.take_and_cache_bodies(&mut entry, false);
+        }
+        //
+        // Metadata-only / stripped updates: refresh the buffer row and leave
+        // inflight + cache alone. Empty-body fetch completion is handled by
+        // complete_empty_body_fetch(), not inferred here.
+        //
+
+        if let Some(pos) = self.buffer.iter().position(|e| e.id == Some(id)) {
+            self.buffer[pos] = entry;
+        }
+    }
+
+    //
+    // TrafficGet returned an entry with no bodies. Plant an empty sentinel
+    // so body_needs_fetch does not loop; only called from the fetch path.
+    //
+    pub fn complete_empty_body_fetch(&mut self, id: i64) {
+        self.inflight_body_fetches.remove(&id);
+        if self.body_cache.contains_key(&id) {
+            return;
+        }
+        self.body_cache.insert(id, (None, None));
+        self.body_cache_order.push_back(id);
+    }
+
+    //
+    // TrafficGet failed or returned None. Clear inflight so the user can
+    // re-select and retry; do not plant a sentinel.
+    //
+    pub fn note_body_fetch_failed(&mut self, id: i64) {
+        self.inflight_body_fetches.remove(&id);
+    }
+
+    fn take_and_cache_bodies(
+        &mut self,
+        entry: &mut InterceptedTrafficEntry,
+        cache_empty: bool,
+    ) {
+        let Some(id) = entry.id else {
+            return;
+        };
+        let req = entry.request_body.take();
+        let resp = entry.response_body.take();
+        if !cache_empty && req.is_none() && resp.is_none() {
+            return;
+        }
+        let mut cached = self.remove_cached_body(id).unwrap_or((None, None));
+        if req.is_some() {
+            cached.0 = req;
+        } else if cache_empty {
+            cached.0 = None;
+        }
+        if resp.is_some() {
+            cached.1 = resp;
+        } else if cache_empty {
+            cached.1 = None;
+        }
+        self.body_cache_bytes = self.body_cache_bytes.saturating_add(body_pair_size(&cached));
+        self.body_cache.insert(id, cached);
+        self.body_cache_order.push_back(id);
+        while self.body_cache_bytes > BODY_CACHE_CAP_BYTES {
+            let Some(oldest) = self.body_cache_order.pop_front() else {
+                break;
+            };
+            //
+            // Skip stale order entries for ids already re-inserted later.
+            //
+            if !self.body_cache.contains_key(&oldest) {
+                continue;
+            }
+            if let Some((req, resp)) = self.body_cache.remove(&oldest) {
+                self.body_cache_bytes = self
+                    .body_cache_bytes
+                    .saturating_sub(body_pair_size(&(req, resp)));
+            }
+        }
+        self.inflight_body_fetches.remove(&id);
+    }
+
+    fn remove_cached_body(
+        &mut self,
+        id: i64,
+    ) -> Option<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+        self.body_cache_order.retain(|cached_id| *cached_id != id);
+        let cached = self.body_cache.remove(&id);
+        if let Some(ref pair) = cached {
+            self.body_cache_bytes = self.body_cache_bytes.saturating_sub(body_pair_size(pair));
+        }
+        cached
+    }
+
+    fn clear_body_cache(&mut self) {
+        self.body_cache.clear();
+        self.body_cache_order.clear();
+        self.body_cache_bytes = 0;
+        self.inflight_body_fetches.clear();
+    }
+
+    pub fn clear_body_inflight(&mut self, id: i64) {
+        self.inflight_body_fetches.remove(&id);
+    }
+
+    #[cfg(test)]
+    pub fn is_body_inflight(&self, id: i64) -> bool {
+        self.inflight_body_fetches.contains(&id)
     }
 
     //
@@ -496,7 +926,17 @@ impl InterceptState {
         self.paused = !self.paused;
         if !self.paused && !self.paused_pending.is_empty() {
             let pending = std::mem::take(&mut self.paused_pending);
-            self.push_entries(pending);
+            //
+            // Re-apply each deferred entry with its stored live generation so
+            // clear_epoch filtering still works after retain_after_clear.
+            //
+            for entry in pending {
+                let generation = entry
+                    .id
+                    .and_then(|id| self.live_entry_gens.get(&id).copied())
+                    .unwrap_or(self.clear_epoch);
+                self.push_entries_with_generation(generation, vec![entry]);
+            }
         }
     }
 
@@ -507,9 +947,35 @@ impl InterceptState {
     // to the front.
     //
 
+    #[allow(dead_code)]
     pub fn push_matches(&mut self, incoming: Vec<TrafficMatchWithDetails>) {
-        for m in incoming {
+        self.push_matches_with_generation(0, incoming);
+    }
+
+    pub fn push_matches_with_generation(
+        &mut self,
+        generation: u64,
+        incoming: Vec<TrafficMatchWithDetails>,
+    ) {
+        self.push_matches_scoped(None, generation, incoming);
+    }
+
+    pub fn push_matches_scoped(
+        &mut self,
+        service_instance_id: Option<&str>,
+        generation: u64,
+        incoming: Vec<TrafficMatchWithDetails>,
+    ) {
+        if !live_instance_acceptable(self.service_instance_id.as_deref(), service_instance_id) {
+            return;
+        }
+        if !should_accept_live_generation(generation, self.clear_epoch) {
+            return;
+        }
+        for mut m in incoming {
+            self.take_and_cache_bodies(&mut m.traffic, false);
             let match_id = m.match_info.id;
+            self.live_match_gens.insert(match_id, generation);
             if let Some(pos) = self
                 .matches
                 .iter()
@@ -518,11 +984,46 @@ impl InterceptState {
                 self.matches[pos] = m;
             } else {
                 self.matches.insert(0, m);
+                self.matches.truncate(MATCH_BUFFER_CAP);
                 self.match_total = self.match_total.saturating_add(1);
             }
         }
         self.rebuild_match_indexes();
         self.reconcile_match_selection();
+    }
+
+    pub fn replace_matches(
+        &mut self,
+        incoming: Vec<TrafficMatchWithDetails>,
+        total: usize,
+    ) {
+        self.matches.clear();
+        for mut item in incoming.into_iter().take(MATCH_BUFFER_CAP) {
+            self.take_and_cache_bodies(&mut item.traffic, false);
+            self.matches.push(item);
+        }
+        self.match_total = total;
+        self.matches_loaded = true;
+        self.rebuild_match_indexes();
+        self.reconcile_match_selection();
+    }
+
+    pub fn append_matches(&mut self, incoming: Vec<TrafficMatchWithDetails>) {
+        for mut item in incoming {
+            if self.matches.len() >= MATCH_BUFFER_CAP {
+                break;
+            }
+            if self
+                .matches
+                .iter()
+                .any(|existing| existing.match_info.id == item.match_info.id)
+            {
+                continue;
+            }
+            self.take_and_cache_bodies(&mut item.traffic, false);
+            self.matches.push(item);
+        }
+        self.rebuild_match_indexes();
     }
 
     pub fn apply_search(&mut self, s: String) {
@@ -566,7 +1067,9 @@ impl InterceptState {
 
     //
     // Rebuild the flattened display_rows from the current buffer and
-    // filters. Newest first. Groups WS_*/H2_* entries by (node_id, url).
+    // filters. Newest first. The node embeds an opaque flow tag after `#` in
+    // WS/H2 synthetic method names; legacy entries without a tag retain the
+    // old node+URL grouping.
     //
 
     pub fn rebuild_display(&mut self) {
@@ -575,7 +1078,7 @@ impl InterceptState {
         }
 
         let mut rows: Vec<DisplayRow> = Vec::with_capacity(self.buffer.len());
-        let mut group_index: HashMap<(String, String), usize> = HashMap::new();
+        let mut group_index: HashMap<(String, String, String), usize> = HashMap::new();
 
         for (i, entry) in self.buffer.iter().enumerate() {
             if !self.entry_passes_filters(entry) {
@@ -589,7 +1092,13 @@ impl InterceptState {
                 .unwrap_or(false);
 
             if is_grouped {
-                let key = (entry.node_id.clone(), entry.url.clone());
+                let flow = entry
+                    .method
+                    .as_deref()
+                    .and_then(|method| method.split_once('#').map(|(_, flow)| flow))
+                    .unwrap_or("legacy")
+                    .to_string();
+                let key = (entry.node_id.clone(), entry.url.clone(), flow);
                 if let Some(&idx) = group_index.get(&key) {
                     if let DisplayRow::Group { indices, .. } = &mut rows[idx] {
                         indices.push(i);
@@ -612,7 +1121,17 @@ impl InterceptState {
         if self.selected >= self.display_rows.len() {
             self.selected = self.display_rows.len().saturating_sub(1);
         }
-        self.group_frame_selected = 0;
+        //
+        // Clamp frame cursor instead of resetting — live rebuilds should
+        // not yank the user off the WS/H2 frame they were inspecting.
+        //
+        if let Some(DisplayRow::Group { indices, .. }) = self.display_rows.get(self.selected) {
+            if self.group_frame_selected >= indices.len() {
+                self.group_frame_selected = indices.len().saturating_sub(1);
+            }
+        } else {
+            self.group_frame_selected = 0;
+        }
     }
 
     fn entry_passes_filters(&self, entry: &InterceptedTrafficEntry) -> bool {
@@ -622,7 +1141,7 @@ impl InterceptState {
             return false;
         }
         if let Some(ref a) = self.agent_filter
-            && &entry.agent_short_name != a
+            && !common::traffic_agent_matches(&entry.agent_short_name, a)
         {
             return false;
         }
@@ -745,8 +1264,10 @@ impl InterceptState {
             {
                 continue;
             }
-            if seen.insert(e.agent_short_name.clone()) {
-                out.push(e.agent_short_name.clone());
+            for candidate in common::traffic_agent_candidates(&e.agent_short_name) {
+                if seen.insert(candidate.to_string()) {
+                    out.push(candidate.to_string());
+                }
             }
         }
         out.sort();
@@ -898,6 +1419,18 @@ impl InterceptState {
             return false;
         }
         //
+        // HTTP/2 HEADERS frames carry no body — their payload is the decoded
+        // header map. Fetching would loop forever on an entry that never has
+        // a body, so never mark them as needing a fetch.
+        //
+        if entry
+            .method
+            .as_deref()
+            .is_some_and(|method| method.starts_with("H2_HEADERS"))
+        {
+            return false;
+        }
+        //
         // Only fetch if the entry's inline bodies aren't already
         // present (e.g. from the initial list response).
         //
@@ -966,10 +1499,7 @@ impl App {
             .await
         {
             Ok((matches, total)) => {
-                self.intercept.matches = matches;
-                self.intercept.match_total = total;
-                self.intercept.matches_loaded = true;
-                self.intercept.rebuild_match_indexes();
+                self.intercept.replace_matches(matches, total);
             }
             Err(e) => self.intercept.set_error(format!("Matches: {}", e)),
         }
@@ -980,6 +1510,13 @@ impl App {
         if offset >= self.intercept.match_total {
             return;
         }
+        if offset >= MATCH_BUFFER_CAP {
+            self.intercept.set_status_message(format!(
+                "Match history is limited to the newest {} entries",
+                MATCH_BUFFER_CAP
+            ));
+            return;
+        }
         match self
             .client
             .request_traffic_matches(self.intercept.match_rule_filter, 200, offset)
@@ -987,17 +1524,7 @@ impl App {
         {
             Ok((matches, total)) => {
                 self.intercept.match_total = total;
-                for m in matches {
-                    if !self
-                        .intercept
-                        .matches
-                        .iter()
-                        .any(|x| x.match_info.id == m.match_info.id)
-                    {
-                        self.intercept.matches.push(m);
-                    }
-                }
-                self.intercept.rebuild_match_indexes();
+                self.intercept.append_matches(matches);
             }
             Err(e) => self.intercept.set_error(format!("Matches: {}", e)),
         }
@@ -1073,15 +1600,56 @@ impl App {
     async fn fetch_body_for_traffic_id(&mut self, id: i64) {
         self.intercept.mark_body_inflight(id);
         let client = self.client.clone();
+        let epoch_at_request = client.clear_epoch().await;
+        let instance_at_request = client.service_instance_id().await;
         let tx = match self.event_tx.clone() {
             Some(tx) => tx,
-            None => return,
+            None => {
+                self.intercept.clear_body_inflight(id);
+                return;
+            }
         };
         tokio::spawn(async move {
-            if let Ok(Some(entry)) = client.fetch_traffic_entry(id).await {
-                let _ = tx.send(crate::event::AppEvent::InterceptEntriesAppended(vec![
-                    entry,
-                ]));
+            //
+            // Ignore body results if clear advanced the epoch or the service
+            // instance rebounded while we waited (restart). Stamp generation
+            // only — empty instance so a stale fetch cannot rebind InterceptState
+            // back to a prior service process.
+            //
+            match client.fetch_traffic_entry(id).await {
+                Ok(Some(entry)) => {
+                    let epoch_now = client.clear_epoch().await;
+                    let instance_now = client.service_instance_id().await;
+                    if epoch_now > epoch_at_request || instance_now != instance_at_request {
+                        let _ = tx.send(crate::event::AppEvent::InterceptBodyFetchFailed {
+                            id,
+                            message: "Body fetch discarded after traffic clear".into(),
+                        });
+                        return;
+                    }
+                    let empty = entry.request_body.is_none() && entry.response_body.is_none();
+                    if empty {
+                        let _ = tx.send(crate::event::AppEvent::InterceptBodyFetchEmpty(id));
+                    } else {
+                        let _ = tx.send(crate::event::AppEvent::InterceptEntriesAppended {
+                            generation: epoch_at_request,
+                            service_instance_id: String::new(),
+                            entries: vec![entry],
+                        });
+                    }
+                }
+                Ok(None) => {
+                    let _ = tx.send(crate::event::AppEvent::InterceptBodyFetchFailed {
+                        id,
+                        message: format!("Traffic entry {} not found", id),
+                    });
+                }
+                Err(error) => {
+                    let _ = tx.send(crate::event::AppEvent::InterceptBodyFetchFailed {
+                        id,
+                        message: format!("Body fetch failed: {}", error),
+                    });
+                }
             }
         });
     }
@@ -1491,6 +2059,7 @@ impl App {
                         self.intercept.match_detail_scroll.saturating_sub(1);
                 } else {
                     self.intercept.move_match_selection(-1);
+                    self.fetch_body_for_match_selected().await;
                 }
             }
             (KeyCode::Down, _) => {
@@ -1753,18 +2322,14 @@ impl App {
 
     pub async fn clear_intercept_traffic(&mut self) {
         match self.client.clear_all_traffic().await {
-            Ok(_) => {
-                self.intercept.buffer.clear();
-                self.intercept.display_rows.clear();
-                self.intercept.display_dirty = true;
-                self.intercept.matches.clear();
-                self.intercept.body_cache.clear();
-                self.intercept.selected = 0;
-                self.intercept.detail_focus = false;
-                self.intercept.total_in_service = 0;
-                self.intercept.match_total = 0;
-                self.intercept.traffic_match_rules.clear();
-                self.intercept.rule_match_counts.clear();
+            Ok((service_instance_id, _deleted, generation)) => {
+                //
+                // Apply only the validated response scope. Do not re-read
+                // client.service_instance_id() (may have rebound to B while
+                // this Ok carried A's generation).
+                //
+                self.intercept
+                    .apply_validated_clear_boundary(&service_instance_id, generation);
             }
             Err(e) => self.intercept.set_error(format!("Clear: {}", e)),
         }
@@ -1967,5 +2532,316 @@ fn copy_to_clipboard(text: &str) -> bool {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod body_cache_tests {
+    use super::*;
+    use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
+
+    fn entry(id: i64, req: Option<Vec<u8>>, resp: Option<Vec<u8>>) -> InterceptedTrafficEntry {
+        InterceptedTrafficEntry {
+            id: Some(id),
+            timestamp: chrono::Utc::now(),
+            node_id: "n1".into(),
+            agent_short_name: "agent".into(),
+            intercept_method: InterceptMethod::Proxy,
+            direction: TrafficDirection::Send,
+            method: Some("POST".into()),
+            url: "https://example.com/v1".into(),
+            host: "example.com".into(),
+            request_headers: None,
+            request_body: req,
+            response_status: Some(200),
+            response_headers: None,
+            response_body: resp,
+        }
+    }
+
+    #[test]
+    fn stripped_live_update_does_not_erase_cached_body() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![entry(1, Some(b"req".to_vec()), Some(b"resp".to_vec()))]);
+        assert_eq!(
+            state.request_body_for(state.buffer.front().unwrap()),
+            Some(b"req".as_slice())
+        );
+
+        // Metadata-only live update for same id.
+        state.push_entries(vec![entry(1, None, None)]);
+        let row = state.buffer.front().unwrap();
+        assert_eq!(state.request_body_for(row), Some(b"req".as_slice()));
+        assert_eq!(state.response_body_for(row), Some(b"resp".as_slice()));
+        assert!(!state.body_needs_fetch(row));
+    }
+
+    #[test]
+    fn inflight_failure_allows_retry() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![entry(7, None, None)]);
+        state.mark_body_inflight(7);
+        assert!(!state.body_needs_fetch(state.buffer.front().unwrap()));
+        state.note_body_fetch_failed(7);
+        assert!(state.body_needs_fetch(state.buffer.front().unwrap()));
+        assert!(!state.is_body_inflight(7));
+    }
+
+    #[test]
+    fn stripped_live_while_inflight_does_not_plant_empty_sentinel() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![entry(9, None, None)]);
+        state.mark_body_inflight(9);
+        assert!(state.is_body_inflight(9));
+        assert!(!state.body_needs_fetch(state.buffer.front().unwrap()));
+
+        //
+        // Live metadata-only update for the same id while TrafficGet is still
+        // in flight — must not clear inflight or plant an empty cache entry.
+        //
+        state.push_entries(vec![entry(9, None, None)]);
+        assert!(
+            state.is_body_inflight(9),
+            "stripped live update must leave body fetch in flight"
+        );
+        assert!(
+            !state.body_cache.contains_key(&9),
+            "must not plant empty sentinel from stripped live while inflight"
+        );
+        // Still not re-fetchable while inflight.
+        assert!(!state.body_needs_fetch(state.buffer.front().unwrap()));
+
+        // Real fetch failure: clear inflight, allow retry, still no sentinel.
+        state.note_body_fetch_failed(9);
+        assert!(!state.is_body_inflight(9));
+        assert!(!state.body_cache.contains_key(&9));
+        assert!(state.body_needs_fetch(state.buffer.front().unwrap()));
+    }
+
+    #[test]
+    fn empty_body_fetch_completion_plants_sentinel_only_via_explicit_api() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![entry(3, None, None)]);
+        state.mark_body_inflight(3);
+        state.complete_empty_body_fetch(3);
+        assert!(!state.is_body_inflight(3));
+        assert!(state.body_cache.contains_key(&3));
+        assert!(!state.body_needs_fetch(state.buffer.front().unwrap()));
+    }
+
+    #[test]
+    fn partial_body_update_preserves_other_side() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![entry(1, Some(vec![1; 100]), Some(vec![2; 50]))]);
+        assert_eq!(state.body_cache_bytes, 150);
+        // Request-only update for same id must keep cached response.
+        state.push_entries(vec![entry(1, Some(vec![3; 20]), None)]);
+        let row = state.buffer.front().unwrap();
+        assert_eq!(state.request_body_for(row), Some(&[3u8; 20][..]));
+        assert_eq!(state.response_body_for(row), Some(&[2u8; 50][..]));
+        assert_eq!(state.body_cache_bytes, 70);
+        state.clear_body_cache();
+        assert_eq!(state.body_cache_bytes, 0);
+        assert!(state.body_cache.is_empty());
+    }
+
+    #[test]
+    fn should_keep_after_clear_policy() {
+        assert!(!should_keep_after_clear(None, 5));
+        assert!(!should_keep_after_clear(Some(4), 5));
+        assert!(should_keep_after_clear(Some(5), 5));
+        assert!(should_keep_after_clear(Some(6), 5));
+    }
+
+    #[test]
+    fn retain_after_clear_keeps_post_clear_live_rows() {
+        let mut state = InterceptState::default();
+        // Untagged (as if from query list) — pre-clear. Use gen 0 before any clear.
+        state.push_entries_with_generation(0, vec![entry(1, None, None)]);
+        // Live batch at gen 2 (post-clear).
+        state.push_entries_with_generation(2, vec![entry(2, None, None)]);
+        // Live batch at gen 1 (pre-clear relative to epoch 2).
+        state.push_entries_with_generation(1, vec![entry(3, None, None)]);
+        assert_eq!(state.buffer.len(), 3);
+
+        state.retain_after_clear(2);
+        assert_eq!(state.clear_epoch, 2);
+
+        let ids: Vec<i64> = state.buffer.iter().filter_map(|e| e.id).collect();
+        assert_eq!(ids, vec![2], "only gen>=2 live row remains");
+        assert!(state.live_entry_gens.get(&2).copied() == Some(2));
+        assert!(!state.live_entry_gens.contains_key(&1));
+        assert!(!state.live_entry_gens.contains_key(&3));
+    }
+
+    #[test]
+    fn late_pre_clear_append_after_retain_is_rejected() {
+        //
+        // AppEvent was already in intercept_rx before TrafficCleared advanced
+        // the epoch; applying it after retain must not re-insert pre-clear rows.
+        //
+        let mut state = InterceptState::default();
+        state.push_entries_with_generation(1, vec![entry(10, None, None)]);
+        state.retain_after_clear(2);
+        assert!(state.buffer.is_empty());
+        assert_eq!(state.clear_epoch, 2);
+
+        state.push_entries_with_generation(1, vec![entry(11, None, None)]);
+        assert!(
+            state.buffer.is_empty(),
+            "late gen=1 batch must not re-enter after epoch=2"
+        );
+        assert!(!state.live_entry_gens.contains_key(&11));
+
+        // Post-clear live still accepted.
+        state.push_entries_with_generation(2, vec![entry(12, None, None)]);
+        let ids: Vec<i64> = state.buffer.iter().filter_map(|e| e.id).collect();
+        assert_eq!(ids, vec![12]);
+
+        // Matches: same late-append policy.
+        use common::{TrafficMatch, TrafficMatchWithDetails};
+        use chrono::Utc;
+        let mk = |id: i64| TrafficMatchWithDetails {
+            match_info: TrafficMatch {
+                id,
+                traffic_id: id,
+                rule_id: 1,
+                rule_name: "r".into(),
+                matched_at: Utc::now(),
+                summary: None,
+            },
+            traffic: entry(id, None, None),
+        };
+        state.push_matches_with_generation(1, vec![mk(20)]);
+        assert!(state.matches.is_empty());
+        state.push_matches_with_generation(2, vec![mk(21)]);
+        assert_eq!(state.matches.len(), 1);
+        assert_eq!(state.matches[0].match_info.id, 21);
+    }
+
+    #[test]
+    fn should_accept_live_generation_matches_epoch_policy() {
+        assert!(should_accept_live_generation(0, 0));
+        assert!(!should_accept_live_generation(0, 1));
+        assert!(!should_accept_live_generation(1, 2));
+        assert!(should_accept_live_generation(2, 2));
+        assert!(should_accept_live_generation(3, 2));
+    }
+
+    #[test]
+    fn service_restart_resets_tui_epoch_so_gen0_is_accepted() {
+        //
+        // Authoritative rebind (note_service_instance) resets epoch; live
+        // data for the new instance is then accepted at gen 0.
+        //
+        let mut state = InterceptState::default();
+        state.note_service_instance("svc-a");
+        state.push_entries_scoped(Some("svc-a"), 1, vec![entry(1, None, None)]);
+        state.retain_after_clear(5);
+        assert_eq!(state.clear_epoch, 5);
+        assert!(state.buffer.is_empty());
+
+        // Late gen-0 on same instance rejected.
+        state.push_entries_scoped(Some("svc-a"), 0, vec![entry(2, None, None)]);
+        assert!(state.buffer.is_empty());
+
+        // Live data for a different instance must NOT rebind (ABA).
+        state.push_entries_scoped(Some("svc-b"), 0, vec![entry(3, None, None)]);
+        assert_eq!(state.service_instance_id.as_deref(), Some("svc-a"));
+        assert_eq!(state.clear_epoch, 5);
+        assert!(state.buffer.is_empty());
+
+        // Control-plane rebind, then gen-0 on B accepted.
+        state.note_service_instance("svc-b");
+        assert_eq!(state.clear_epoch, 0);
+        assert!(!state.initial_loaded);
+        assert!(!state.matches_loaded);
+        state.push_entries_scoped(Some("svc-b"), 0, vec![entry(3, None, None)]);
+        let ids: Vec<i64> = state.buffer.iter().filter_map(|e| e.id).collect();
+        assert_eq!(ids, vec![3]);
+    }
+
+    #[test]
+    fn delayed_old_instance_after_rebind_is_rejected() {
+        let mut state = InterceptState::default();
+        state.note_service_instance("svc-a");
+        state.push_entries_scoped(Some("svc-a"), 1, vec![entry(1, None, None)]);
+        assert_eq!(state.buffer.len(), 1);
+
+        state.note_service_instance("svc-b");
+        assert!(state.buffer.is_empty());
+        state.push_entries_scoped(Some("svc-b"), 0, vec![entry(2, None, None)]);
+        assert_eq!(
+            state.buffer.iter().filter_map(|e| e.id).collect::<Vec<_>>(),
+            vec![2]
+        );
+
+        // Delayed A AppEvent after B rebind: drop without clearing B.
+        state.push_entries_scoped(Some("svc-a"), 99, vec![entry(3, None, None)]);
+        state.push_matches_scoped(Some("svc-a"), 99, vec![]);
+        assert_eq!(state.service_instance_id.as_deref(), Some("svc-b"));
+        assert_eq!(
+            state.buffer.iter().filter_map(|e| e.id).collect::<Vec<_>>(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn live_instance_acceptable_pure() {
+        assert!(live_instance_acceptable(Some("a"), None));
+        assert!(live_instance_acceptable(Some("a"), Some("")));
+        assert!(live_instance_acceptable(Some("a"), Some("a")));
+        assert!(!live_instance_acceptable(Some("a"), Some("b")));
+        assert!(!live_instance_acceptable(None, Some("a")));
+    }
+
+    #[test]
+    fn clear_ok_then_rebind_does_not_transplant_foreign_generation() {
+        //
+        // Finding 4: clear succeeds for A with generation 10; TUI rebinds to B
+        // before apply; applying A's generation must not advance B's epoch.
+        //
+        let mut state = InterceptState::default();
+        state.note_service_instance("svc-a");
+        state.push_entries_scoped(Some("svc-a"), 1, vec![entry(1, None, None)]);
+        assert_eq!(state.clear_epoch, 0);
+
+        // Simulate validated clear response for A (as clear_all_traffic returns).
+        let response_instance = "svc-a".to_string();
+        let generation = 10u64;
+
+        // Rebind to B before the App applies the Ok result.
+        state.note_service_instance("svc-b");
+        assert_eq!(state.clear_epoch, 0);
+        state.push_entries_scoped(Some("svc-b"), 3, vec![entry(2, None, None)]);
+        assert_eq!(state.buffer.len(), 1);
+
+        // Real shipped apply path used by clear_intercept_traffic.
+        state.apply_validated_clear_boundary(&response_instance, generation);
+        assert_eq!(state.service_instance_id.as_deref(), Some("svc-b"));
+        assert_eq!(
+            state.clear_epoch, 0,
+            "must not transplant A's generation onto B"
+        );
+        assert!(
+            should_accept_live_generation(3, state.clear_epoch),
+            "B live gens must still be accepted"
+        );
+        let ids: Vec<i64> = state.buffer.iter().filter_map(|e| e.id).collect();
+        assert_eq!(ids, vec![2]);
+
+        // Same-instance clear still works.
+        state.apply_validated_clear_boundary("svc-b", 5);
+        assert_eq!(state.clear_epoch, 5);
+        assert!(state.buffer.is_empty());
+    }
+
+    #[test]
+    fn should_apply_clear_boundary_pure() {
+        assert!(should_apply_clear_boundary(Some("a"), "a"));
+        assert!(!should_apply_clear_boundary(Some("b"), "a"));
+        assert!(!should_apply_clear_boundary(Some("a"), "b"));
+        assert!(should_apply_clear_boundary(Some("a"), ""));
+        assert!(should_apply_clear_boundary(None, "a"));
     }
 }

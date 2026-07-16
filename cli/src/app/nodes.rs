@@ -299,6 +299,9 @@ impl App {
                 .capabilities
                 .contains(&common::NodeCapability::Interception)
         {
+            self.intercept.set_error(
+                "Interception requires a privileged node (restart node as root/admin)",
+            );
             return;
         }
         let node_id = node.node_id.clone();

@@ -11,6 +11,7 @@ pub struct ClientMessageHandler {
     channel: Channel,
     registry: Arc<ClientRegistry>,
     node_registry: Arc<NodeRegistry>,
+    service_instance_id: String,
 }
 
 impl ClientMessageHandler {
@@ -18,11 +19,13 @@ impl ClientMessageHandler {
         channel: Channel,
         registry: Arc<ClientRegistry>,
         node_registry: Arc<NodeRegistry>,
+        service_instance_id: String,
     ) -> Self {
         Self {
             channel,
             registry,
             node_registry,
+            service_instance_id,
         }
     }
 
@@ -33,10 +36,14 @@ impl ClientMessageHandler {
         self.registry.register(client_id.clone()).await;
 
         //
-        // Send registration ack.
+        // Send registration ack. Echo nonce for correlation. If the client
+        // announced an expected instance that does not match this process,
+        // still identify ourselves so the client can ignore a stale consumer.
         //
         let ack = ClientRegistrationAck {
             client_id: client_id.clone(),
+            service_instance_id: self.service_instance_id.clone(),
+            registration_nonce: registration.registration_nonce.clone(),
         };
         let message = ClientDirectMessage::RegistrationAck(ack);
 

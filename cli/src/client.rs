@@ -13,9 +13,12 @@ use common::{
 use lapin::Channel;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{mpsc, Mutex, oneshot};
+
+use crate::intercept_live::{try_push_bounded, LivePushResult, INTERCEPT_LIVE_CAPACITY};
 
 pub struct Client {
     channel: Channel,
@@ -23,6 +26,29 @@ pub struct Client {
     timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     consumer_handle: Option<tokio::task::JoinHandle<()>>,
+    register_cmd_tx: Option<mpsc::UnboundedSender<RegisterCmd>>,
+    register_worker: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Serialized registration / ServiceOnline re-register commands.
+enum RegisterCmd {
+    Register {
+        expected_instance: Option<String>,
+        resp: oneshot::Sender<Result<(), String>>,
+    },
+    Shutdown,
+}
+
+struct PendingRegistration {
+    nonce: String,
+    expected_instance: Option<String>,
+    resp: oneshot::Sender<Result<(), String>>,
+}
+
+struct PendingClear {
+    expected_instance: String,
+    /// (service_instance_id, deleted_count, generation)
+    resp: oneshot::Sender<Result<(String, usize, u64), String>>,
 }
 
 //
@@ -84,20 +110,44 @@ struct ClientState {
     intercept_targets_error: Option<String>,
 
     //
-    // Intercept traffic: per-request one-shot senders and live streaming
-    // subscribers. Only one request of each kind is expected in flight at
-    // a time; a newer request overwrites the older sender.
+    // Intercept traffic: one-shot senders keyed by client-generated
+    // request_id so concurrent same-kind queries cannot be swapped.
     //
-    pending_traffic_log: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
-    pending_traffic_search: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
-    pending_traffic_matches: Option<oneshot::Sender<(Vec<TrafficMatchWithDetails>, usize)>>,
-    pending_traffic_clear: Option<oneshot::Sender<usize>>,
+    pending_traffic_log:
+        HashMap<String, oneshot::Sender<Result<(Vec<InterceptedTrafficEntry>, usize), String>>>,
+    pending_traffic_search:
+        HashMap<String, oneshot::Sender<Result<(Vec<InterceptedTrafficEntry>, usize), String>>>,
+    pending_traffic_matches:
+        HashMap<String, oneshot::Sender<Result<(Vec<TrafficMatchWithDetails>, usize), String>>>,
+    pending_traffic_clear: HashMap<String, PendingClear>,
     pending_rules_list: Option<oneshot::Sender<Vec<InterceptRule>>>,
     pending_rule_op: Option<oneshot::Sender<RuleOpOutcome>>,
-    pending_traffic_get: HashMap<i64, oneshot::Sender<Option<InterceptedTrafficEntry>>>,
-    intercept_entries_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<InterceptedTrafficEntry>>>,
-    intercept_matches_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<TrafficMatchWithDetails>>>,
-    intercept_status_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptStatus>>,
+    pending_traffic_get:
+        HashMap<String, oneshot::Sender<Result<Option<InterceptedTrafficEntry>, String>>>,
+    pending_intercept_toggles: HashMap<String, oneshot::Sender<Result<(), String>>>,
+    //
+    // Bounded live intercept delivery (drop-when-full). Status uses a
+    // watch channel (last-value-wins) so it does not compete with traffic.
+    //
+    intercept_entries_tx:
+        Option<mpsc::Sender<(String, u64, Vec<InterceptedTrafficEntry>)>>,
+    intercept_matches_tx:
+        Option<mpsc::Sender<(String, u64, Vec<TrafficMatchWithDetails>)>>,
+    intercept_status_tx: Option<tokio::sync::watch::Sender<Option<InterceptStatus>>>,
+    /// Notifies TUI when service_instance_id rebinds (registration / restart).
+    service_instance_tx: Option<tokio::sync::watch::Sender<Option<String>>>,
+    /// Last-value-wins clear boundary so late successes still reconcile the TUI.
+    clear_boundary_tx: Option<tokio::sync::watch::Sender<Option<(String, u64)>>>,
+    /// Serialized register / ServiceOnline re-register worker.
+    register_cmd_tx: Option<mpsc::UnboundedSender<RegisterCmd>>,
+    /// In-flight registration correlated by nonce (not StateUpdate).
+    pending_registration: Option<PendingRegistration>,
+    intercept_entries_drops: AtomicU64,
+    intercept_matches_drops: AtomicU64,
+    /// Clear-epoch from last successful TrafficCleared (ignore older live batches).
+    clear_epoch: AtomicU64,
+    /// Service process identity for generation scoping across restarts.
+    service_instance_id: Option<String>,
 
     //
     // LogQuery: single in-flight request; the Err side carries the service
@@ -135,17 +185,99 @@ impl Client {
             )
             .await?;
 
-        let client = Self {
+        let mut client = Self {
             channel: transport.channel().clone(),
             client_id,
             timeout: Duration::from_secs(timeout_secs),
             state,
             consumer_handle: Some(consumer_handle),
+            register_cmd_tx: None,
+            register_worker: None,
         };
 
+        //
+        // Single serial registration worker for initial connect and
+        // ServiceOnline re-register (correlated nonce + expected instance).
+        //
+        client.spawn_register_worker().await;
         client.register().await?;
 
         Ok(client)
+    }
+
+    async fn spawn_register_worker(&mut self) {
+        let (tx, mut rx) = mpsc::unbounded_channel::<RegisterCmd>();
+        self.state.lock().await.register_cmd_tx = Some(tx.clone());
+        self.register_cmd_tx = Some(tx);
+        let state = self.state.clone();
+        let channel = self.channel.clone();
+        let client_id = self.client_id.clone();
+        let timeout = self.timeout;
+        self.register_worker = Some(tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    RegisterCmd::Shutdown => break,
+                    RegisterCmd::Register {
+                        expected_instance,
+                        resp,
+                    } => {
+                        let nonce = uuid::Uuid::new_v4().to_string();
+                        let (ack_tx, ack_rx) = oneshot::channel();
+                        {
+                            let mut s = state.lock().await;
+                            //
+                            // Only one registration in flight; drop a prior
+                            // incomplete slot so it cannot be completed late.
+                            //
+                            if let Some(prev) = s.pending_registration.take() {
+                                let _ = prev.resp.send(Err(
+                                    "registration superseded by a newer attempt".into(),
+                                ));
+                            }
+                            s.pending_registration = Some(PendingRegistration {
+                                nonce: nonce.clone(),
+                                expected_instance: expected_instance.clone(),
+                                resp: ack_tx,
+                            });
+                        }
+                        let registration = ClientRegistration {
+                            client_id: client_id.clone(),
+                            registration_nonce: nonce,
+                            expected_service_instance_id: expected_instance
+                                .clone()
+                                .unwrap_or_default(),
+                        };
+                        let message = ClientSignalMessage::Registration(registration);
+                        if let Err(e) = publish_json(&channel, CLIENT_SIGNAL_QUEUE, &message).await
+                        {
+                            let mut s = state.lock().await;
+                            s.pending_registration = None;
+                            let _ = resp.send(Err(format!("register publish failed: {}", e)));
+                            continue;
+                        }
+                        let outcome = match tokio::time::timeout(timeout, ack_rx).await {
+                            Ok(Ok(r)) => r,
+                            Ok(Err(_)) => Err("registration response channel closed".into()),
+                            Err(_) => {
+                                let mut s = state.lock().await;
+                                s.pending_registration = None;
+                                Err(format!(
+                                    "registration timed out after {}s",
+                                    timeout.as_secs()
+                                ))
+                            }
+                        };
+                        let _ = resp.send(outcome);
+                    }
+                }
+            }
+            //
+            // Drop the state-held sender so we do not leak a cycle.
+            //
+            let mut s = state.lock().await;
+            s.register_cmd_tx = None;
+            s.pending_registration = None;
+        }));
     }
 
     async fn handle_direct_message(state: &Arc<Mutex<ClientState>>, data: &[u8]) {
@@ -154,26 +286,85 @@ impl Client {
         };
 
         //
-        // Intercept legacy terminal-create responses via a common decoder
-        // so we don't have to touch `CommandResponse` / `NodeCommandResult`
-        // directly here. This is the only legacy Command reply we still
-        // handle in the CLI; everything else flows over ACP.
+        // Legacy CommandResponse routing: terminal-create is correlated by
+        // command_id. Other CommandResponses fall through (intercept uses
+        // InterceptCommandResult instead).
         //
 
-        if let Some((command_id, result)) = common::decode_terminal_create_response(&message) {
+        if let common::ClientDirectMessage::CommandResponse(ref resp) = message {
             let mut state = state.lock().await;
-            if let Some(tx) = state.pending_terminal_creates.remove(&command_id) {
+            if let Some(tx) = state.pending_terminal_creates.remove(&resp.command_id) {
+                let result = match &resp.result {
+                    common::NodeCommandResult::Terminal(
+                        common::TerminalCommandResult::Created { terminal_id },
+                    ) => Ok(terminal_id.clone()),
+                    common::NodeCommandResult::Error { message } => Err(message.clone()),
+                    other => Err(format!("Unexpected terminal create result: {:?}", other)),
+                };
                 let _ = tx.send(result);
+                return;
             }
-            return;
+            drop(state);
         }
 
         let mut state = state.lock().await;
 
         match message {
-            ClientDirectMessage::RegistrationAck(_) => {}
+            ClientDirectMessage::RegistrationAck(ack) => {
+                //
+                // Control-plane: only correlated RegistrationAck rebinds.
+                // Delayed acks (wrong nonce / unexpected instance) are ignored
+                // so they cannot rebind backward after a newer ServiceOnline.
+                //
+                let Some(pending) = state.pending_registration.take() else {
+                    return;
+                };
+                let accept = common::clear_epoch::may_accept_registration_ack(
+                    state.service_instance_id.as_deref(),
+                    &ack.service_instance_id,
+                    pending.expected_instance.as_deref(),
+                    &pending.nonce,
+                    &ack.registration_nonce,
+                );
+                if !accept {
+                    //
+                    // Wrong attempt (e.g. delayed A after B): keep waiting if
+                    // nonce did not match; fail the attempt if nonce matched
+                    // but instance was wrong.
+                    //
+                    if pending.nonce != ack.registration_nonce {
+                        state.pending_registration = Some(pending);
+                    } else {
+                        let _ = pending.resp.send(Err(format!(
+                            "registration ack rejected (instance={} expected={:?})",
+                            ack.service_instance_id, pending.expected_instance
+                        )));
+                    }
+                    return;
+                }
+                use std::sync::atomic::Ordering;
+                let mut epoch = state.clear_epoch.load(Ordering::Acquire);
+                let mut inst = state.service_instance_id.clone();
+                let changed = common::clear_epoch::rebind_service_instance(
+                    &mut inst,
+                    &mut epoch,
+                    &ack.service_instance_id,
+                );
+                state.service_instance_id = inst.clone();
+                state.clear_epoch.store(epoch, Ordering::Release);
+                if changed {
+                    if let Some(ref tx) = state.service_instance_tx {
+                        let _ = tx.send(inst);
+                    }
+                }
+                let _ = pending.resp.send(Ok(()));
+            }
             ClientDirectMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
+                //
+                // Legacy: complete initial wait if still used. Prefer
+                // RegistrationAck correlation for new clients.
+                //
                 if let Some(tx) = state.pending_initial_state.take() {
                     let _ = tx.send(());
                 }
@@ -336,40 +527,123 @@ impl Client {
             ClientDirectMessage::SessionUpdate(_) => {}
 
             //
-            // Intercept traffic responses.
+            // Intercept traffic responses — correlated by request_id.
             //
             ClientDirectMessage::TrafficLogResponse {
+                request_id,
                 entries,
                 total_count,
+                error,
             } => {
-                if let Some(tx) = state.pending_traffic_log.take() {
-                    let _ = tx.send((entries, total_count));
+                if let Some(tx) = state.pending_traffic_log.remove(&request_id) {
+                    let _ = tx.send(match error {
+                        Some(error) => Err(error),
+                        None => Ok((entries, total_count)),
+                    });
                 }
             }
             ClientDirectMessage::TrafficSearchResponse {
+                request_id,
                 entries,
                 total_count,
+                error,
             } => {
-                if let Some(tx) = state.pending_traffic_search.take() {
-                    let _ = tx.send((entries, total_count));
+                if let Some(tx) = state.pending_traffic_search.remove(&request_id) {
+                    let _ = tx.send(match error {
+                        Some(error) => Err(error),
+                        None => Ok((entries, total_count)),
+                    });
                 }
             }
             ClientDirectMessage::TrafficMatchesResponse {
+                request_id,
                 matches,
                 total_count,
+                error,
             } => {
-                if let Some(tx) = state.pending_traffic_matches.take() {
-                    let _ = tx.send((matches, total_count));
+                if let Some(tx) = state.pending_traffic_matches.remove(&request_id) {
+                    let _ = tx.send(match error {
+                        Some(error) => Err(error),
+                        None => Ok((matches, total_count)),
+                    });
                 }
             }
-            ClientDirectMessage::TrafficCleared { deleted_count } => {
-                if let Some(tx) = state.pending_traffic_clear.take() {
-                    let _ = tx.send(deleted_count);
+            ClientDirectMessage::TrafficCleared {
+                request_id,
+                deleted_count,
+                generation,
+                service_instance_id,
+                error,
+            } => {
+                //
+                // Pending clear is scoped to the instance at request time.
+                // Foreign instance → error (never transplant generation).
+                // Same instance → apply epoch + boundary watch.
+                //
+                if let Some(pending) = state.pending_traffic_clear.remove(&request_id) {
+                    if let Some(err) = error {
+                        let _ = pending.resp.send(Err(err));
+                    } else if !common::clear_epoch::clear_pending_accepts_response(
+                        &pending.expected_instance,
+                        &service_instance_id,
+                    ) {
+                        let _ = pending.resp.send(Err(format!(
+                            "clear response from service instance {} after rebind to {}; retry clear",
+                            service_instance_id, pending.expected_instance
+                        )));
+                    } else {
+                        use std::sync::atomic::Ordering;
+                        let mut epoch = state.clear_epoch.load(Ordering::Acquire);
+                        if common::clear_epoch::apply_clear_response(
+                            state.service_instance_id.as_deref(),
+                            &mut epoch,
+                            &service_instance_id,
+                            generation,
+                        ) {
+                            state.clear_epoch.store(epoch, Ordering::Release);
+                            if let Some(ref tx) = state.clear_boundary_tx {
+                                let _ = tx.send(Some((service_instance_id.clone(), generation)));
+                            }
+                            let _ = pending.resp.send(Ok((
+                                service_instance_id,
+                                deleted_count,
+                                generation,
+                            )));
+                        } else {
+                            let _ = pending.resp.send(Err(format!(
+                                "clear response rejected for instance {}",
+                                service_instance_id
+                            )));
+                        }
+                    }
+                } else if error.is_none() {
+                    //
+                    // Late success after oneshot timeout: still reconcile TUI
+                    // for the current instance only.
+                    //
+                    use std::sync::atomic::Ordering;
+                    let mut epoch = state.clear_epoch.load(Ordering::Acquire);
+                    if common::clear_epoch::apply_clear_response(
+                        state.service_instance_id.as_deref(),
+                        &mut epoch,
+                        &service_instance_id,
+                        generation,
+                    ) {
+                        state.clear_epoch.store(epoch, Ordering::Release);
+                        if let Some(ref tx) = state.clear_boundary_tx {
+                            let _ = tx.send(Some((service_instance_id.clone(), generation)));
+                        }
+                    }
                 }
             }
-            ClientDirectMessage::TrafficGetResponse { id, entry } => {
-                if let Some(tx) = state.pending_traffic_get.remove(&id) {
-                    let _ = tx.send(entry);
+            ClientDirectMessage::TrafficGetResponse {
+                request_id,
+                id: _,
+                entry,
+                error,
+            } => {
+                if let Some(tx) = state.pending_traffic_get.remove(&request_id) {
+                    let _ = tx.send(error.map_or(Ok(entry), Err));
                 }
             }
             ClientDirectMessage::InterceptRuleListResponse { rules } => {
@@ -398,8 +672,29 @@ impl Client {
                 }
             }
             ClientDirectMessage::InterceptStatusUpdate(status) => {
+                //
+                // watch::send is synchronous last-value-wins (not a dropped future).
+                //
                 if let Some(ref tx) = state.intercept_status_tx {
-                    let _ = tx.send(status);
+                    let _ = tx.send(Some(status));
+                }
+            }
+            ClientDirectMessage::InterceptCommandResult {
+                request_id,
+                node_id: _,
+                error,
+                status,
+            } => {
+                if let Some(status) = status {
+                    if let Some(ref tx) = state.intercept_status_tx {
+                        let _ = tx.send(Some(status));
+                    }
+                }
+                if let Some(tx) = state.pending_intercept_toggles.remove(&request_id) {
+                    let _ = tx.send(match error {
+                        Some(msg) => Err(msg),
+                        None => Ok(()),
+                    });
                 }
             }
 
@@ -464,21 +759,123 @@ impl Client {
             }
 
             //
-            // Live intercept streams from the service broadcaster.
+            // Live intercept streams: bounded try_send, drop-when-full with
+            // rate-limited diagnostics (see intercept_live).
             //
-            ClientBroadcastMessage::InterceptedTrafficBatch { entries } => {
-                if let Some(ref tx) = state.intercept_entries_tx {
-                    let _ = tx.send(entries);
+            ClientBroadcastMessage::InterceptedTrafficBatch {
+                entries,
+                generation,
+                service_instance_id,
+            } => {
+                use std::sync::atomic::Ordering;
+                let epoch = state.clear_epoch.load(Ordering::Acquire);
+                //
+                // Data plane never rebinds instance identity.
+                //
+                let accept = common::clear_epoch::accept_live_batch(
+                    state.service_instance_id.as_deref(),
+                    epoch,
+                    &service_instance_id,
+                    generation,
+                );
+                if accept {
+                    if let Some(ref tx) = state.intercept_entries_tx {
+                        match try_push_bounded(
+                            tx,
+                            (service_instance_id, generation, entries),
+                            &state.intercept_entries_drops,
+                        ) {
+                            LivePushResult::Sent => {}
+                            LivePushResult::Dropped {
+                                drop_count,
+                                should_log,
+                            } => {
+                                if should_log {
+                                    common::log_warn!(
+                                        "Dropped live intercept traffic batch (channel full, capacity {}, total drops {})",
+                                        INTERCEPT_LIVE_CAPACITY,
+                                        drop_count
+                                    );
+                                }
+                            }
+                            LivePushResult::Closed => {
+                                state.intercept_entries_tx = None;
+                            }
+                        }
+                    }
                 }
             }
-            ClientBroadcastMessage::TrafficMatchBatch { matches } => {
-                if let Some(ref tx) = state.intercept_matches_tx {
-                    let _ = tx.send(matches);
+            ClientBroadcastMessage::TrafficMatchBatch {
+                matches,
+                generation,
+                service_instance_id,
+            } => {
+                use std::sync::atomic::Ordering;
+                let epoch = state.clear_epoch.load(Ordering::Acquire);
+                let accept = common::clear_epoch::accept_live_batch(
+                    state.service_instance_id.as_deref(),
+                    epoch,
+                    &service_instance_id,
+                    generation,
+                );
+                if accept {
+                    if let Some(ref tx) = state.intercept_matches_tx {
+                        match try_push_bounded(
+                            tx,
+                            (service_instance_id, generation, matches),
+                            &state.intercept_matches_drops,
+                        ) {
+                            LivePushResult::Sent => {}
+                            LivePushResult::Dropped {
+                                drop_count,
+                                should_log,
+                            } => {
+                                if should_log {
+                                    common::log_warn!(
+                                        "Dropped live intercept match batch (channel full, capacity {}, total drops {})",
+                                        INTERCEPT_LIVE_CAPACITY,
+                                        drop_count
+                                    );
+                                }
+                            }
+                            LivePushResult::Closed => {
+                                state.intercept_matches_tx = None;
+                            }
+                        }
+                    }
                 }
             }
             ClientBroadcastMessage::InterceptStatusUpdate(status) => {
                 if let Some(ref tx) = state.intercept_status_tx {
-                    let _ = tx.send(status);
+                    let _ = tx.send(Some(status));
+                }
+            }
+            ClientBroadcastMessage::ServiceOnline {
+                service_instance_id,
+            } => {
+                //
+                // Control plane: serialized re-register with announced instance.
+                //
+                let expected = if service_instance_id.is_empty() {
+                    None
+                } else {
+                    Some(service_instance_id)
+                };
+                if let Some(ref tx) = state.register_cmd_tx {
+                    let (resp_tx, _resp_rx) = oneshot::channel();
+                    if tx
+                        .send(RegisterCmd::Register {
+                            expected_instance: expected,
+                            resp: resp_tx,
+                        })
+                        .is_err()
+                    {
+                        common::log_warn!("ServiceOnline: registration worker gone");
+                    }
+                } else {
+                    common::log_warn!(
+                        "ServiceOnline received before registration worker was ready"
+                    );
                 }
             }
 
@@ -487,15 +884,40 @@ impl Client {
     }
 
     async fn register(&self) -> Result<()> {
-        let registration = ClientRegistration {
-            client_id: self.client_id.clone(),
-        };
-        let message = ClientSignalMessage::Registration(registration);
-        self.request("initial state", |s| &mut s.pending_initial_state, message)
-            .await
+        let tx = self
+            .register_cmd_tx
+            .as_ref()
+            .ok_or_else(|| anyhow!("registration worker not started"))?
+            .clone();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(RegisterCmd::Register {
+            expected_instance: None,
+            resp: resp_tx,
+        })
+        .map_err(|_| anyhow!("registration worker closed"))?;
+        match tokio::time::timeout(self.timeout, resp_rx).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(e))) => Err(anyhow!("registration failed: {}", e)),
+            Ok(Err(_)) => Err(anyhow!("registration response channel closed")),
+            Err(_) => Err(anyhow!(
+                "Timeout after {}s waiting for registration",
+                self.timeout.as_secs()
+            )),
+        }
     }
 
     pub async fn disconnect(self) {
+        if let Some(tx) = &self.register_cmd_tx {
+            let _ = tx.send(RegisterCmd::Shutdown);
+        }
+        if let Some(handle) = self.register_worker {
+            let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        }
+        {
+            let mut s = self.state.lock().await;
+            s.register_cmd_tx = None;
+            s.pending_registration = None;
+        }
         if let Some(handle) = self.consumer_handle {
             handle.abort();
         }
@@ -1317,8 +1739,8 @@ impl Client {
 
     pub fn subscribe_intercept_entries(
         &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Vec<InterceptedTrafficEntry>> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> mpsc::Receiver<(String, u64, Vec<InterceptedTrafficEntry>)> {
+        let (tx, rx) = mpsc::channel(INTERCEPT_LIVE_CAPACITY);
         let state = self.state.clone();
         tokio::spawn(async move {
             state.lock().await.intercept_entries_tx = Some(tx);
@@ -1328,8 +1750,8 @@ impl Client {
 
     pub fn subscribe_intercept_matches(
         &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Vec<TrafficMatchWithDetails>> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> mpsc::Receiver<(String, u64, Vec<TrafficMatchWithDetails>)> {
+        let (tx, rx) = mpsc::channel(INTERCEPT_LIVE_CAPACITY);
         let state = self.state.clone();
         tokio::spawn(async move {
             state.lock().await.intercept_matches_tx = Some(tx);
@@ -1337,10 +1759,11 @@ impl Client {
         rx
     }
 
+    /// Last-value-wins status channel (not capacity-shared with traffic).
     pub fn subscribe_intercept_status(
         &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<InterceptStatus> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> tokio::sync::watch::Receiver<Option<InterceptStatus>> {
+        let (tx, rx) = tokio::sync::watch::channel(None);
         let state = self.state.clone();
         tokio::spawn(async move {
             state.lock().await.intercept_status_tx = Some(tx);
@@ -1348,32 +1771,115 @@ impl Client {
         rx
     }
 
+    pub fn subscribe_service_instance(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<String>> {
+        //
+        // Seed with the already-known registration instance so the TUI does
+        // not start at None after connect (v4 review).
+        //
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let mut s = state.lock().await;
+            let seed = s.service_instance_id.clone();
+            if seed.is_some() {
+                let _ = tx.send(seed);
+            }
+            s.service_instance_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub fn subscribe_clear_boundary(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<(String, u64)>> {
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.clear_boundary_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub async fn clear_epoch(&self) -> u64 {
+        use std::sync::atomic::Ordering;
+        self.state.lock().await.clear_epoch.load(Ordering::Acquire)
+    }
+
+    pub async fn service_instance_id(&self) -> Option<String> {
+        self.state.lock().await.service_instance_id.clone()
+    }
+
     //
     // Intercept traffic: request/response helpers.
     //
+
+    async fn traffic_request<T>(
+        &self,
+        op_name: &str,
+        map_slot: impl Fn(
+            &mut ClientState,
+        ) -> &mut HashMap<String, oneshot::Sender<Result<T, String>>>,
+        build: impl FnOnce(String) -> ClientSignalMessage,
+    ) -> Result<T> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            map_slot(&mut state).insert(request_id.clone(), tx);
+        }
+        if let Err(e) = self.publish_signal(build(request_id.clone())).await {
+            map_slot(&mut *self.state.lock().await).remove(&request_id);
+            return Err(e);
+        }
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Err(error))) => Err(anyhow!(error)),
+            Ok(Err(_)) => Err(anyhow!("{} response channel closed", op_name)),
+            Err(_) => {
+                map_slot(&mut *self.state.lock().await).remove(&request_id);
+                Err(anyhow!(
+                    "Timeout after {}s waiting for {} response",
+                    self.timeout.as_secs(),
+                    op_name
+                ))
+            }
+        }
+    }
 
     pub async fn request_traffic_log(
         &self,
         filters: TrafficLogFilters,
     ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        let message = ClientSignalMessage::TrafficLogRequest {
-            client_id: self.client_id.clone(),
-            filters,
-        };
-        self.request("traffic log", |s| &mut s.pending_traffic_log, message)
-            .await
+        let client_id = self.client_id.clone();
+        self.traffic_request(
+            "traffic log",
+            |s| &mut s.pending_traffic_log,
+            |request_id| ClientSignalMessage::TrafficLogRequest {
+                client_id,
+                request_id,
+                filters,
+            },
+        )
+        .await
     }
 
     pub async fn request_traffic_search(
         &self,
         filters: TrafficSearchFilters,
     ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        let message = ClientSignalMessage::TrafficSearchRequest {
-            client_id: self.client_id.clone(),
-            filters,
-        };
-        self.request("traffic search", |s| &mut s.pending_traffic_search, message)
-            .await
+        let client_id = self.client_id.clone();
+        self.traffic_request(
+            "traffic search",
+            |s| &mut s.pending_traffic_search,
+            |request_id| ClientSignalMessage::TrafficSearchRequest {
+                client_id,
+                request_id,
+                filters,
+            },
+        )
+        .await
     }
 
     pub async fn request_traffic_matches(
@@ -1382,48 +1888,83 @@ impl Client {
         limit: usize,
         offset: usize,
     ) -> Result<(Vec<TrafficMatchWithDetails>, usize)> {
-        let message = ClientSignalMessage::TrafficMatchesRequest {
-            client_id: self.client_id.clone(),
-            rule_id,
-            limit,
-            offset,
-        };
-        self.request(
+        let client_id = self.client_id.clone();
+        self.traffic_request(
             "traffic matches",
             |s| &mut s.pending_traffic_matches,
-            message,
+            |request_id| ClientSignalMessage::TrafficMatchesRequest {
+                client_id,
+                request_id,
+                rule_id,
+                limit,
+                offset,
+            },
         )
         .await
     }
 
-    pub async fn clear_all_traffic(&self) -> Result<usize> {
-        let message = ClientSignalMessage::TrafficClear {
-            client_id: self.client_id.clone(),
-        };
-        self.request("traffic clear", |s| &mut s.pending_traffic_clear, message)
-            .await
-    }
-
-    pub async fn fetch_traffic_entry(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {
+    ///
+    /// Returns `(service_instance_id, deleted_count, generation)` for the
+    /// validated clear response so the TUI applies only that scope (never
+    /// re-reads a later-rebound client identity).
+    ///
+    pub async fn clear_all_traffic(&self) -> Result<(String, usize, u64)> {
+        let client_id = self.client_id.clone();
+        let request_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         {
             let mut state = self.state.lock().await;
-            state.pending_traffic_get.insert(id, tx);
+            let expected = state.service_instance_id.clone().unwrap_or_default();
+            state.pending_traffic_clear.insert(
+                request_id.clone(),
+                PendingClear {
+                    expected_instance: expected,
+                    resp: tx,
+                },
+            );
         }
-        self.publish_signal(ClientSignalMessage::TrafficGetRequest {
-            client_id: self.client_id.clone(),
-            id,
-        })
-        .await?;
-
+        let message = ClientSignalMessage::TrafficClear {
+            client_id,
+            request_id: request_id.clone(),
+        };
+        if let Err(e) = self.publish_signal(message).await {
+            self.state
+                .lock()
+                .await
+                .pending_traffic_clear
+                .remove(&request_id);
+            return Err(e);
+        }
         match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(entry)) => Ok(entry),
-            Ok(Err(_)) => Err(anyhow!("Traffic get response channel closed")),
+            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Err(error))) => Err(anyhow!(error)),
+            Ok(Err(_)) => Err(anyhow!("traffic clear response channel closed")),
             Err(_) => {
-                self.state.lock().await.pending_traffic_get.remove(&id);
-                Err(anyhow!("Timeout waiting for traffic get response"))
+                self.state
+                    .lock()
+                    .await
+                    .pending_traffic_clear
+                    .remove(&request_id);
+                Err(anyhow!(
+                    "Timeout after {}s waiting for traffic clear response",
+                    self.timeout.as_secs()
+                ))
             }
         }
+    }
+
+    pub async fn fetch_traffic_entry(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {
+        let client_id = self.client_id.clone();
+        self.traffic_request(
+            "traffic get",
+            |s| &mut s.pending_traffic_get,
+            |request_id| ClientSignalMessage::TrafficGetRequest {
+                client_id,
+                request_id,
+                id,
+            },
+        )
+        .await
     }
 
     //
@@ -1519,20 +2060,67 @@ impl Client {
         node_id: String,
         method: Option<InterceptMethod>,
     ) -> Result<()> {
-        self.publish_signal(ClientSignalMessage::InterceptEnable {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let message = ClientSignalMessage::InterceptEnable {
             client_id: self.client_id.clone(),
+            request_id: request_id.clone(),
             node_id,
             method,
-        })
-        .await
+        };
+        self.request_intercept_toggle("intercept enable", request_id, message)
+            .await
     }
 
     pub async fn disable_intercept(&self, node_id: String) -> Result<()> {
-        self.publish_signal(ClientSignalMessage::InterceptDisable {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let message = ClientSignalMessage::InterceptDisable {
             client_id: self.client_id.clone(),
+            request_id: request_id.clone(),
             node_id,
-        })
-        .await
+        };
+        self.request_intercept_toggle("intercept disable", request_id, message)
+            .await
+    }
+
+    async fn request_intercept_toggle(
+        &self,
+        op_name: &str,
+        request_id: String,
+        message: ClientSignalMessage,
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.state
+            .lock()
+            .await
+            .pending_intercept_toggles
+            .insert(request_id.clone(), tx);
+
+        if let Err(e) = self.publish_signal(message).await {
+            self.state
+                .lock()
+                .await
+                .pending_intercept_toggles
+                .remove(&request_id);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => Err(anyhow!("{} response channel closed", op_name)),
+            Err(_) => {
+                self.state
+                    .lock()
+                    .await
+                    .pending_intercept_toggles
+                    .remove(&request_id);
+                Err(anyhow!(
+                    "Timeout after {}s waiting for {} response",
+                    self.timeout.as_secs(),
+                    op_name
+                ))
+            }
+        }
     }
 
     //

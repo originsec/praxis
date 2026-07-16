@@ -2,11 +2,9 @@
 
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use chrono::Utc;
 use common::{
     CLIENT_BROADCAST_EXCHANGE, ClientBroadcastMessage, ClientDirectMessage, NodeSignalMessage,
-    TrafficMatch, TrafficMatchWithDetails, node_semantic_queue_name, publish_json,
-    publish_json_exchange,
+    node_semantic_queue_name, publish_json, publish_json_exchange,
 };
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
@@ -147,7 +145,23 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::CommandResponse(response) => {
-            if let Some(pending) = ctx.pending_commands.remove(&response.command_id).await {
+            let pending = match ctx
+                .pending_commands
+                .remove_for_response(&response.command_id, &response.node_id)
+                .await
+            {
+                Ok(pending) => pending,
+                Err(expected_node) => {
+                    common::log_warn!(
+                        "Rejected command response {} from node {}; expected node {}",
+                        response.command_id,
+                        response.node_id,
+                        expected_node
+                    );
+                    return Ok(());
+                }
+            };
+            if let Some(pending) = pending {
                 //
                 // Track whether we need to broadcast state to all clients
                 // after processing this response, so UIs reflect the change
@@ -155,23 +169,80 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 // state broadcast.
                 //
                 let mut should_broadcast_state = false;
+                let mut intercept_status: Option<common::InterceptStatus> = None;
 
                 //
                 // Update intercept state if relevant.
                 //
                 if let common::NodeCommandResult::Intercept(ref result) = response.result {
                     match result {
-                        common::InterceptCommandResult::Enabled { method: _ } => {
+                        common::InterceptCommandResult::Enabled { method } => {
                             ctx.node_registry
                                 .set_intercept_active(&response.node_id, true)
                                 .await;
                             should_broadcast_state = true;
+                            intercept_status = Some(common::InterceptStatus {
+                                node_id: response.node_id.clone(),
+                                enabled: true,
+                                method: Some(*method),
+                                proxy_port: None,
+                                intercepted_domains: Vec::new(),
+                                cleanup_required: false,
+                            });
                         }
                         common::InterceptCommandResult::Disabled => {
                             ctx.node_registry
                                 .set_intercept_active(&response.node_id, false)
                                 .await;
                             should_broadcast_state = true;
+                            intercept_status = Some(common::InterceptStatus {
+                                node_id: response.node_id.clone(),
+                                enabled: false,
+                                method: None,
+                                proxy_port: None,
+                                intercepted_domains: Vec::new(),
+                                cleanup_required: false,
+                            });
+                        }
+                    }
+                }
+
+                //
+                // Intercept toggles get a dedicated result message so the TUI
+                // can await enable/disable without parsing CommandResponse.
+                //
+                if pending.kind == crate::state::registries::PendingCommandKind::Intercept {
+                    match &response.result {
+                        common::NodeCommandResult::Intercept(_) => {
+                            if let Some(ref status) = intercept_status {
+                                crate::dispatch::client::intercept::send_intercept_command_ok(
+                                    ctx,
+                                    &pending.client_id,
+                                    &response.command_id,
+                                    status.clone(),
+                                )
+                                .await;
+                            }
+                        }
+                        common::NodeCommandResult::Error { message } => {
+                            crate::dispatch::client::intercept::send_intercept_command_error(
+                                ctx,
+                                &pending.client_id,
+                                &response.command_id,
+                                &response.node_id,
+                                message.clone(),
+                            )
+                            .await;
+                        }
+                        _ => {
+                            crate::dispatch::client::intercept::send_intercept_command_error(
+                                ctx,
+                                &pending.client_id,
+                                &response.command_id,
+                                &response.node_id,
+                                "Unexpected intercept command result".into(),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -195,6 +266,16 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     response.command_id,
                     pending.client_id
                 );
+
+                if let Some(status) = intercept_status {
+                    let message = ClientBroadcastMessage::InterceptStatusUpdate(status);
+                    let _ = publish_json_exchange(
+                        &ctx.broadcast_channel,
+                        CLIENT_BROADCAST_EXCHANGE,
+                        &message,
+                    )
+                    .await;
+                }
 
                 if should_broadcast_state {
                     if let Err(e) =
@@ -273,163 +354,60 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             });
         }
 
-        NodeSignalMessage::InterceptedTraffic(mut entry) => {
-            common::log_info!(
-                "Received intercepted traffic: node={} agent={} {} {} {} (status={})",
-                common::short_id(&entry.node_id),
-                entry.agent_short_name,
-                entry.direction,
-                entry.method.as_deref().unwrap_or("-"),
-                entry.host,
-                entry
-                    .response_status
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "-".to_string())
-            );
-
+        NodeSignalMessage::InterceptedTraffic(entry) => {
             //
-            // Store intercepted traffic in database and check for rule matches.
+            // Trust model: the payload's node_id is accepted when that id is
+            // registered. Broker credentials are shared across nodes; the
+            // service does not bind this message to an authenticated transport
+            // sender identity. Deployments that share broker credentials must
+            // treat every registered node as fully trusted for traffic/status
+            // attribution (or isolate credentials per node).
             //
-            match ctx.database.insert_traffic(&entry).await {
-                Ok(traffic_id) => {
-                    common::log_info!("Stored traffic entry id={} for {}", traffic_id, entry.url);
-                    entry.id = Some(traffic_id);
-
-                    //
-                    // Push the newly-stored entry onto the live broadcaster.
-                    // The broadcaster strips bodies before publishing.
-                    //
-                    ctx.intercept_broadcaster.push_entry(entry.clone());
-
-                    //
-                    // Check against rules and insert matches.
-                    //
-                    match ctx
-                        .database
-                        .check_and_insert_matches(traffic_id, &entry)
-                        .await
-                    {
-                        Ok(matches) => {
-                            //
-                            // Fire intercept-match triggers for matched rules.
-                            //
-                            if !matches.is_empty() {
-                                if let Some(ref trigger_engine) = ctx.trigger_engine {
-                                    let matched_rule_ids: Vec<i64> =
-                                        matches.iter().map(|(_, r)| r.id).collect();
-                                    let te = trigger_engine.clone();
-                                    let trigger_node_id = entry.node_id.clone();
-                                    let match_context = format!(
-                                        "Intercept match on URL: {}\nMatched rules: {}",
-                                        entry.url,
-                                        matches
-                                            .iter()
-                                            .map(|(_, r)| r.name.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    );
-                                    tokio::spawn(async move {
-                                        te.fire_intercept_match_triggers(
-                                            &matched_rule_ids,
-                                            &trigger_node_id,
-                                            &match_context,
-                                        )
-                                        .await;
-                                    });
-                                }
-                            }
-
-                            //
-                            // Broadcast and process summarization for each match.
-                            //
-                            for (match_id, rule) in matches {
-                                let match_info = TrafficMatch {
-                                    id: match_id,
-                                    traffic_id,
-                                    rule_id: rule.id,
-                                    rule_name: rule.name.clone(),
-                                    matched_at: Utc::now(),
-                                    summary: None,
-                                };
-                                ctx.intercept_broadcaster
-                                    .push_match(TrafficMatchWithDetails {
-                                        match_info: match_info.clone(),
-                                        traffic: entry.clone(),
-                                    });
-
-                                if let Some(ref prompt) = rule.summarization_prompt {
-                                    let db = ctx.database.clone();
-                                    let cfg = ctx.service_config.clone();
-                                    let entry_clone = entry.clone();
-                                    let prompt_clone = prompt.clone();
-                                    let broadcaster = ctx.intercept_broadcaster.clone();
-                                    let rule_id = rule.id;
-                                    let rule_name = rule.name.clone();
-
-                                    //
-                                    // Spawn async task for summarization. On
-                                    // success, both persist the summary and
-                                    // re-broadcast the match so live viewers
-                                    // see the updated summary without refresh.
-                                    //
-                                    tokio::spawn(async move {
-                                        let result = semantic_helpers::summarize_traffic(
-                                            &cfg,
-                                            &entry_clone,
-                                            &prompt_clone,
-                                        )
-                                        .await;
-                                        if result.success {
-                                            if let Some(summary) = result.summary {
-                                                if let Err(e) = db
-                                                    .update_match_summary(match_id, &summary)
-                                                    .await
-                                                {
-                                                    common::log_error!(
-                                                        "Failed to update match summary: {}",
-                                                        e
-                                                    );
-                                                }
-                                                broadcaster.push_match(TrafficMatchWithDetails {
-                                                    match_info: TrafficMatch {
-                                                        id: match_id,
-                                                        traffic_id,
-                                                        rule_id,
-                                                        rule_name,
-                                                        matched_at: match_info.matched_at,
-                                                        summary: Some(summary),
-                                                    },
-                                                    traffic: entry_clone,
-                                                });
-                                            }
-                                        } else if let Some(err) = result.error {
-                                            common::log_warn!(
-                                                "Summarization failed for match {}: {}",
-                                                match_id,
-                                                err
-                                            );
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            common::log_error!("Failed to check traffic matches: {}", e);
-                        }
-                    }
-
-                    //
-                    // Periodically prune old traffic (7-day retention).
-                    //
-                    let _ = ctx.database.prune_old_traffic().await;
-                }
-                Err(e) => {
-                    common::log_error!("Failed to store intercepted traffic: {}", e);
-                }
+            if !ctx.node_handler.is_node_registered(&entry.node_id).await {
+                common::log_warn!(
+                    "Rejected intercepted traffic from unregistered node {}",
+                    common::short_id(&entry.node_id)
+                );
+                let _ = ctx.node_handler.broadcast_refresh_registration().await;
+                return Ok(());
+            }
+            if let Err(error) = validate_intercept_entry(&entry) {
+                common::log_warn!(
+                    "Rejected invalid intercepted traffic from node {}: {}",
+                    common::short_id(&entry.node_id),
+                    error
+                );
+                return Ok(());
+            }
+            if let Err(error) = ctx.intercept_processor.enqueue(entry) {
+                common::log_error!(
+                    "Dropped intercepted traffic before persistence: {}",
+                    error
+                );
             }
         }
 
         NodeSignalMessage::InterceptStatusUpdate(status) => {
+            if !ctx.node_handler.is_node_registered(&status.node_id).await {
+                common::log_warn!(
+                    "Rejected intercept status from unregistered node {}",
+                    common::short_id(&status.node_id)
+                );
+                let _ = ctx.node_handler.broadcast_refresh_registration().await;
+                return Ok(());
+            }
+            if status.intercepted_domains.len() > 4096
+                || status
+                    .intercepted_domains
+                    .iter()
+                    .any(|domain| domain.is_empty() || domain.len() > 253)
+            {
+                common::log_warn!(
+                    "Rejected invalid intercept status from node {}",
+                    common::short_id(&status.node_id)
+                );
+                return Ok(());
+            }
             common::log_info!(
                 "Received intercept status update from node {}: enabled={}",
                 common::short_id(&status.node_id),
@@ -467,5 +445,48 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
     }
 
+    Ok(())
+}
+
+fn validate_intercept_entry(
+    entry: &common::InterceptedTrafficEntry,
+) -> std::result::Result<(), String> {
+    if entry.node_id.is_empty() || entry.node_id.len() > 256 {
+        return Err("invalid node ID".into());
+    }
+    if entry.agent_short_name.is_empty() || entry.agent_short_name.len() > 1024 {
+        return Err("invalid agent label".into());
+    }
+    if entry.host.is_empty() || entry.host.len() > 253 {
+        return Err("invalid host".into());
+    }
+    if entry.url.is_empty() || entry.url.len() > 64 * 1024 {
+        return Err("invalid URL length".into());
+    }
+    if entry.method.as_ref().is_some_and(|method| method.len() > 1024) {
+        return Err("invalid method length".into());
+    }
+    if entry
+        .request_body
+        .as_ref()
+        .is_some_and(|body| body.len() > common::MAX_INTERCEPT_CAPTURE_BODY_SIZE)
+        || entry
+            .response_body
+            .as_ref()
+            .is_some_and(|body| body.len() > common::MAX_INTERCEPT_CAPTURE_BODY_SIZE)
+    {
+        return Err("captured body exceeds safety limit".into());
+    }
+    let header_bytes = entry
+        .request_headers
+        .iter()
+        .chain(entry.response_headers.iter())
+        .flat_map(|headers| headers.iter())
+        .fold(0usize, |total, (key, value)| {
+            total.saturating_add(key.len()).saturating_add(value.len())
+        });
+    if header_bytes > common::MAX_INTERCEPT_HEADER_BYTES {
+        return Err("captured headers exceed safety limit".into());
+    }
     Ok(())
 }
