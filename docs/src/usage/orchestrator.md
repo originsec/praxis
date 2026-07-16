@@ -68,6 +68,12 @@ Thinking mode is enabled automatically when the configured Orchestrator model su
 
 The Orchestrator can break complex tasks into steps and show progress via the `report_plan` tool. When the AI calls this tool, you'll see a plan panel with step descriptions and their current status (not started, in progress, done).
 
+## Concurrent Tool Calls
+
+When the model emits multiple independent tool-call JSON blocks in a single response, the Orchestrator runs them **concurrently** and returns all results together in one follow-up message before the next model turn. Dependent steps still run across turns (call prerequisites first, wait for results, then continue).
+
+This is useful for fan-out work such as listing nodes and available operations at the same time, or queueing `op_run` against several nodes in one step.
+
 ## Token Usage
 
 Token usage is displayed after each LLM call, showing prompt tokens, completion tokens, and totals. This helps monitor costs when using commercial API providers.

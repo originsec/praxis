@@ -137,6 +137,23 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
     None
 }
 
+///
+/// Collect every tool-call JSON object in `text`, left-to-right.
+///
+/// Returns `(calls, remaining_text)` where `calls` is ordered by appearance
+/// and `remaining_text` is the original text with all tool-call blocks
+/// removed. An empty `calls` vec means no tool calls were found.
+///
+pub fn parse_manual_tool_calls(text: &str) -> (Vec<(String, Value)>, String) {
+    let mut calls = Vec::new();
+    let mut remaining = text.to_string();
+    while let Some((name, args, rest)) = parse_manual_tool_call(&remaining) {
+        calls.push((name, args));
+        remaining = rest;
+    }
+    (calls, remaining)
+}
+
 fn extract_tool_call_parts(parsed: &Value) -> Option<(String, Value)> {
     let tool_name = parsed.get("tool")?.as_str()?.to_string();
 
@@ -424,5 +441,70 @@ The operation is now finished."#;
         let text = "This is just a regular response with no completion signal.";
         let result = parse_completion_signal(text);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_multiple_plain_json_tool_calls() {
+        let text = r#"I'll inspect the fleet first.
+{"tool": "node_list", "args": {}}
+{"tool": "agent_list", "args": {"node_id": "abc"}}
+{"tool": "node_list", "args": {"refresh": true}}
+"#;
+
+        let (calls, remaining) = parse_manual_tool_calls(text);
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].0, "node_list");
+        assert_eq!(calls[0].1, serde_json::json!({}));
+        assert_eq!(calls[1].0, "agent_list");
+        assert_eq!(calls[1].1["node_id"], "abc");
+        assert_eq!(calls[2].0, "node_list");
+        assert_eq!(calls[2].1["refresh"], true);
+        assert!(remaining.contains("I'll inspect the fleet first"));
+        assert!(!remaining.contains("\"tool\""));
+    }
+
+    #[test]
+    fn test_parse_multiple_code_fenced_tool_calls() {
+        let text = r#"Gathering context.
+
+```json
+{"tool": "node_list", "args": {}}
+```
+
+```json
+{"tool": "op_available", "args": {}}
+```
+"#;
+
+        let (calls, remaining) = parse_manual_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "node_list");
+        assert_eq!(calls[1].0, "op_available");
+        assert!(remaining.contains("Gathering context"));
+        assert!(!remaining.contains("node_list"));
+    }
+
+    #[test]
+    fn test_parse_multiple_mixed_prose_and_tools() {
+        let text = r#"Checking nodes then agents.
+{"tool": "node_list", "args": {}}
+Next I'll list agents on the first node.
+{"tool": "agent_list", "node_id": "n1"}
+Done requesting."#;
+
+        let (calls, remaining) = parse_manual_tool_calls(text);
+        assert!(calls.len() >= 2);
+        assert_eq!(calls[0].0, "node_list");
+        assert_eq!(calls[1].0, "agent_list");
+        assert_eq!(calls[1].1["node_id"], "n1");
+        assert!(remaining.contains("Checking nodes then agents"));
+        assert!(remaining.contains("Done requesting"));
+    }
+
+    #[test]
+    fn test_parse_manual_tool_calls_empty() {
+        let (calls, remaining) = parse_manual_tool_calls("No tools here.");
+        assert!(calls.is_empty());
+        assert_eq!(remaining, "No tools here.");
     }
 }

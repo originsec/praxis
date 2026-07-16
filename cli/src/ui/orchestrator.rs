@@ -279,6 +279,7 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
                 name,
                 input,
                 outcome,
+                ..
             } => {
                 lines.extend(build_tool_entry(
                     name,

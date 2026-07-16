@@ -215,6 +215,8 @@ Operator: "Check what agents are available on all nodes"
   the displayed plan stays in sync with reality
 - When waiting, first wait for 1 second, then 2, then 5, and so forth. 
 - Prefer existing operations from the list over manual prompting.
+- When several tool calls are independent (no call needs another's result),
+  emit them together in one response so they run concurrently.
 - You can retry failed ops. Don't do this more than once or twice.
 - **Tool errors: retry, don't give up.** If a tool returns an error
   (missing/invalid arguments, transient failure, etc.), read the error
