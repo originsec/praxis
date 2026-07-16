@@ -389,12 +389,12 @@ impl NodeInterceptManager {
             };
 
             let resolved = match self
-                .race_cancel(dns_resolver.resolve_required_domains(&self.domains))
+                .race_cancel(dns_resolver.resolve_domains_best_effort(&self.domains))
                 .await
             {
                 Ok(resolved) => resolved,
                 Err(e) => {
-                    let cause = e.context("Failed to pre-resolve every Hosts intercept target");
+                    let cause = e.context("Failed to pre-resolve any Hosts intercept target");
                     return Err(self.fail_enable_with_rollback(&ca, cause).await);
                 }
             };

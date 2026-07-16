@@ -232,8 +232,9 @@ impl App {
                 // Enable/disable is a round-trip to the node (cert install,
                 // proxy setup) that can take seconds. Run it off the event
                 // loop and report the outcome via an event so the TUI stays
-                // responsive; the status strip already updates independently
-                // via the broadcast InterceptStatusUpdate.
+                // responsive; live InterceptStatusUpdate still updates
+                // intercept_statuses / node.intercept_active for the
+                // Nodes detail pane.
                 //
                 // pending_toggles is only cleared when the InterceptToggleResult
                 // event is handled, so we must not enter the tracked path

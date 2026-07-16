@@ -126,8 +126,9 @@ from this window).
   HTTP entries show individually; WebSocket frames group by flow id and
   HTTP/2 by flow+stream so concurrent sockets don't flood the list.
 - **Rules** — create, edit, delete, and toggle intercept rules (regex
-  patterns with direction and scope). Rules can carry an optional LLM
-  summarisation prompt.
+  patterns with direction and scope). List on the left; selected-rule
+  detail on the right (prompt, scope, match count). Rules can carry an
+  optional LLM summarisation prompt.
 - **Matches** — matched-traffic review with AI summaries (when a rule
   has a summarisation prompt).
 
@@ -157,6 +158,8 @@ hundred milliseconds after you navigate to an entry.
 
 | Key | Action |
 |-----|--------|
+| `→` | Focus rule detail pane (then `↑`/`↓` scrolls detail) |
+| `←` / `Esc` | Unfocus detail |
 | `Ctrl+N` | Create a new rule |
 | `Ctrl+E` | Edit the selected rule |
 | `Ctrl+D` | Delete the selected rule (with confirmation) |

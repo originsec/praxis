@@ -455,9 +455,27 @@ fn remove_from_shell_profile(profile_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+///
+// Whether a systemd user manager is reachable. `systemctl --user` needs a
+// user D-Bus session; when the node runs as a system service / root neither
+// of these is set and the call can only fail. In that context the real
+// mechanism is the per-home proxy_env.sh shell profiles, so skipping the
+// user-manager calls is correct, not a cleanup failure.
+///
+#[cfg(target_os = "linux")]
+fn user_bus_available() -> bool {
+    std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+        || std::env::var_os("XDG_RUNTIME_DIR").is_some()
+}
+
 /// Set systemd user environment variables
 #[cfg(target_os = "linux")]
 fn set_systemd_user_env(cert_path: &str, proxy_addr: Option<&str>) -> Result<()> {
+    if !user_bus_available() {
+        common::log_debug!("No systemd user bus; skipping user set-environment");
+        return Ok(());
+    }
+
     let mut args = vec![
         "--user".to_string(),
         "set-environment".to_string(),
@@ -492,6 +510,11 @@ fn set_systemd_user_env(cert_path: &str, proxy_addr: Option<&str>) -> Result<()>
 /// Unset systemd user environment variables
 #[cfg(target_os = "linux")]
 fn unset_systemd_user_env() -> Result<()> {
+    if !user_bus_available() {
+        common::log_debug!("No systemd user bus; skipping user unset-environment");
+        return Ok(());
+    }
+
     let args = [
         "--user",
         "unset-environment",

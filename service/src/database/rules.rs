@@ -308,6 +308,54 @@ impl Database {
         Ok(())
     }
 
+    //
+    // Apply a newly created/updated rule to recent stored traffic so the
+    // Matches tab is not empty for patterns that only hit historical
+    // bodies (matching at live ingest cannot rewrite the past).
+    //
+    pub async fn backfill_matches_for_rule(
+        &self,
+        rule: &InterceptRule,
+        limit: usize,
+    ) -> Result<usize> {
+        if !rule.enabled {
+            return Ok(0);
+        }
+        let regex = match Regex::new(&rule.regex_pattern) {
+            Ok(r) => r,
+            Err(_) => return Ok(0),
+        };
+        let limit = limit.min(MAX_TRAFFIC_QUERY_LIMIT).max(1);
+        let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body
+             FROM intercepted_traffic ORDER BY id DESC LIMIT $1";
+        let rows = self.db_fetch_all(sql, db_args![limit as i64]).await?;
+        let mut created = 0usize;
+        for row in rows {
+            let entry = super::traffic::parse_traffic_row_for_backfill(&row)?;
+            let Some(traffic_id) = entry.id else {
+                continue;
+            };
+            if !common::rule_matches_entry(rule, &regex, &entry) {
+                continue;
+            }
+            if self.traffic_match_exists(traffic_id, rule.id).await? {
+                continue;
+            }
+            self.insert_traffic_match(traffic_id, rule.id, None).await?;
+            created += 1;
+        }
+        Ok(created)
+    }
+
+    async fn traffic_match_exists(&self, traffic_id: i64, rule_id: i64) -> Result<bool> {
+        let sql = "SELECT COUNT(*) FROM traffic_matches WHERE traffic_id = $1 AND rule_id = $2";
+        let count: i64 = self
+            .db_fetch_one(sql, db_args![traffic_id, rule_id])
+            .await?
+            .get(0);
+        Ok(count > 0)
+    }
+
     /// Update a traffic match with a summary
     pub async fn update_match_summary(&self, match_id: i64, summary: &str) -> Result<()> {
         self.db_execute(

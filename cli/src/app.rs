@@ -1241,6 +1241,15 @@ impl App {
         }
 
         //
+        // Intercept rule create/edit form: same priority as other
+        // modals so ^s saves instead of opening Settings.
+        //
+        if self.intercept.rule_form.is_some() {
+            self.handle_rule_form_key(key).await;
+            return;
+        }
+
+        //
         // Settings dropdown intercepts all keys.
         //
         if self.settings.dropdown_open {
@@ -2237,9 +2246,37 @@ impl App {
                                 session.scroll_offset.saturating_add(3).min(max);
                         }
                     }
-                    Window::Intercept if self.intercept.detail_focus => {
+                    //
+                    // Gate detail scroll by active tab — traffic
+                    // `detail_focus` can still be true after switching to
+                    // Matches/Rules and would otherwise steal the wheel.
+                    //
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Traffic
+                            && self.intercept.detail_focus =>
+                    {
                         self.intercept.detail_scroll =
                             self.intercept.detail_scroll.saturating_sub(3);
+                    }
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Matches
+                            && self.intercept.match_detail_focus =>
+                    {
+                        self.intercept.match_detail_scroll =
+                            self.intercept.match_detail_scroll.saturating_sub(3);
+                    }
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Rules
+                            && self.intercept.rule_detail_focus =>
+                    {
+                        self.intercept.rule_detail_scroll =
+                            self.intercept.rule_detail_scroll.saturating_sub(3);
+                    }
+                    Window::Intercept if self.intercept.tab == crate::app::intercept::InterceptTab::Rules => {
+                        self.intercept.move_rule_selection(-3);
+                    }
+                    Window::Intercept if self.intercept.tab == crate::app::intercept::InterceptTab::Matches => {
+                        self.intercept.move_match_selection(-3);
                     }
                     Window::Intercept => {
                         self.intercept.move_selection(-3);
@@ -2294,10 +2331,41 @@ impl App {
                             session.scroll_offset = session.scroll_offset.saturating_sub(3);
                         }
                     }
-                    Window::Intercept if self.intercept.detail_focus => {
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Traffic
+                            && self.intercept.detail_focus =>
+                    {
                         let max = self.intercept.detail_max_scroll.get();
                         self.intercept.detail_scroll =
                             self.intercept.detail_scroll.saturating_add(3).min(max);
+                    }
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Matches
+                            && self.intercept.match_detail_focus =>
+                    {
+                        let max = self.intercept.match_detail_max_scroll.get();
+                        self.intercept.match_detail_scroll = self
+                            .intercept
+                            .match_detail_scroll
+                            .saturating_add(3)
+                            .min(max);
+                    }
+                    Window::Intercept
+                        if self.intercept.tab == crate::app::intercept::InterceptTab::Rules
+                            && self.intercept.rule_detail_focus =>
+                    {
+                        let max = self.intercept.rule_detail_max_scroll.get();
+                        self.intercept.rule_detail_scroll = self
+                            .intercept
+                            .rule_detail_scroll
+                            .saturating_add(3)
+                            .min(max);
+                    }
+                    Window::Intercept if self.intercept.tab == crate::app::intercept::InterceptTab::Rules => {
+                        self.intercept.move_rule_selection(3);
+                    }
+                    Window::Intercept if self.intercept.tab == crate::app::intercept::InterceptTab::Matches => {
+                        self.intercept.move_match_selection(3);
                     }
                     Window::Intercept => {
                         self.intercept.move_selection(3);

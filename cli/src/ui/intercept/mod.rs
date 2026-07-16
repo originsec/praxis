@@ -13,10 +13,11 @@ mod search_bar;
 use crate::app::App;
 use crate::app::intercept::{InterceptTab, body::BodyMode};
 use crate::ui::chrome;
-use crate::ui::common::{short_id, table_data_start_titled};
+use crate::ui::common::table_data_start_titled;
 use crate::ui::hits::{split_border_rect, MouseAction, RowSelect, RowSelectKind};
-use crate::ui::theme::{ACCENT, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT, WARN};
-use common::InterceptStatus;
+use crate::ui::theme::{
+    ACCENT, BORDER_SUBTLE, MUTED, OK, STATUS_FAIL, STATUS_RUNNING, TEXT_BRIGHT,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -25,14 +26,6 @@ use ratatui::widgets::Paragraph;
 
 pub(super) fn body_lines(bytes: &[u8], mode: BodyMode) -> Vec<ratatui::text::Line<'static>> {
     crate::app::intercept::body::render_body(bytes, mode)
-}
-
-pub fn show_banner(app: &App) -> bool {
-    let from_status = app.intercept.any_intercept_active();
-    let from_nodes = app.nodes.nodes.iter().any(|n| n.intercept_active);
-    !from_status
-        && !from_nodes
-        && (!app.nodes.nodes.is_empty() || !app.intercept.intercept_statuses.is_empty())
 }
 
 /// Footer is always on: action hints, or a transient error/status banner.
@@ -45,33 +38,22 @@ pub struct InterceptChrome {
     pub body: Rect,
 }
 
-pub fn chrome_layout(area: Rect, show_banner: bool, show_footer: bool) -> InterceptChrome {
+pub fn chrome_layout(area: Rect, show_footer: bool) -> InterceptChrome {
     //
-    // Optional banner, then fixed chrome rows, then Min body so the
-    // tab content always fills remaining height (same pattern as ops).
-    // Optional footer only when an error/status message is showing.
+    // Fixed chrome rows, then Min body so the tab content always fills
+    // remaining height (same pattern as ops). No per-node status strip
+    // or all-off banner — enable/disable lives in the Nodes window.
     //
-    let mut constraints = Vec::new();
-    if show_banner {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.extend([
-        Constraint::Length(1), // status strip
+    let mut constraints = vec![
         Constraint::Length(1), // tab header
         Constraint::Length(1), // divider
         Constraint::Min(1),    // tab body
-    ]);
+    ];
     if show_footer {
         constraints.push(Constraint::Length(1));
     }
     let chunks = Layout::vertical(constraints).split(area);
-    let mut idx = 0usize;
-    if show_banner {
-        idx += 1; // banner (render-only)
-    }
-    idx += 1; // status strip (render-only)
-    idx += 2; // tabs + divider
-    let body = chunks[idx];
+    let body = chunks[2];
     InterceptChrome { body }
 }
 
@@ -97,50 +79,25 @@ pub fn filter_split(body: Rect, split_percent: u16) -> FilterSplit {
     }
 }
 
-/// Filter bar + remaining body (Rules tab; no horizontal split).
-pub fn filter_and_table(body: Rect) -> (Rect, Rect) {
-    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(body);
-    (chunks[0], chunks[1])
-}
-
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let banner = show_banner(app);
     let footer = show_footer(app);
 
     //
-    // Same constraint stack as chrome_layout: do not pre-allocate a
-    // blank Length(1) before the optional banner — that used to shift
-    // Min(1) onto the footer when the banner was visible, leaving
-    // Traffic/Rules/Matches only one row tall.
+    // Same constraint stack as chrome_layout.
     //
-    let mut constraints = Vec::new();
-    if banner {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.extend([
-        Constraint::Length(1), // status strip
+    let mut constraints = vec![
         Constraint::Length(1), // tab header
         Constraint::Length(1), // divider
         Constraint::Min(1),    // content
-    ]);
+    ];
     if footer {
         constraints.push(Constraint::Length(1));
     }
 
     let chunks = Layout::vertical(constraints).split(area);
-    let mut idx = 0usize;
-    if banner {
-        render_banner(f, chunks[idx], app);
-        idx += 1;
-    }
-    render_status_strip(f, chunks[idx], app);
-    idx += 1;
-    render_tabs(f, chunks[idx], app);
-    idx += 1;
-    render_divider(f, chunks[idx]);
-    idx += 1;
-    let content = chunks[idx];
-    idx += 1;
+    render_tabs(f, chunks[0], app);
+    render_divider(f, chunks[1]);
+    let content = chunks[2];
 
     let form_open = app.intercept.rule_form.is_some();
 
@@ -166,7 +123,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     if footer {
-        render_status_footer(f, chunks[idx], app);
+        render_status_footer(f, chunks[3], app);
     }
 
     //
@@ -217,106 +174,20 @@ fn register_matches_hits(app: &App, body: Rect) {
 }
 
 fn register_rules_hits(app: &App, body: Rect) {
-    let (_filter, table) = filter_and_table(body);
+    let panes = filter_split(body, app.intercept.rule_split_percent);
+    app.hits_register(panes.right, MouseAction::InterceptRuleDetailFocus);
     app.hits_register(
-        table,
+        panes.left,
         MouseAction::SelectRow(RowSelect {
             kind: RowSelectKind::InterceptRule,
-            table_area: table,
-            data_start: table_data_start_titled(table),
+            table_area: panes.left,
+            data_start: table_data_start_titled(panes.left),
         }),
     );
-}
-
-fn render_banner(f: &mut Frame, area: Rect, app: &App) {
-    let msg = if app.nodes.nodes.is_empty() && app.intercept.intercept_statuses.is_empty() {
-        "No intercept status yet — enable interception on a node (Nodes window, i)"
-    } else {
-        "Interception is off on all nodes — press i in Nodes to enable"
-    };
-    let line = Line::from(vec![
-        Span::styled("\u{25b3} ", Style::default().fg(WARN)),
-        Span::styled(msg, Style::default().fg(WARN).add_modifier(Modifier::BOLD)),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
-}
-
-fn render_status_strip(f: &mut Frame, area: Rect, app: &App) {
-    let mut spans: Vec<Span> = Vec::new();
-    //
-    // Prefer live InterceptStatus entries; fall back to SystemState nodes
-    // so the strip is useful even before a dedicated status message arrives.
-    //
-    let mut statuses: Vec<InterceptStatus> = app
-        .intercept
-        .intercept_statuses
-        .values()
-        .cloned()
-        .collect();
-    if statuses.is_empty() {
-        for n in &app.nodes.nodes {
-            statuses.push(InterceptStatus {
-                node_id: n.node_id.clone(),
-                enabled: n.intercept_active,
-                method: None,
-                proxy_port: None,
-                intercepted_domains: Vec::new(),
-                cleanup_required: false,
-            });
-        }
-    }
-    if statuses.is_empty() {
-        spans.push(Span::styled(
-            "intercept: no nodes reporting",
-            Style::default().fg(DIM),
-        ));
-    } else {
-        spans.push(Span::styled("intercept ", Style::default().fg(MUTED)));
-        for (i, status) in statuses.iter().take(4).enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
-            }
-            let node_label = app
-                .nodes
-                .nodes
-                .iter()
-                .find(|n| n.node_id == status.node_id)
-                .map(|n| {
-                    if n.machine_name.is_empty() {
-                        short_id(&n.node_id).to_string()
-                    } else {
-                        n.machine_name.clone()
-                    }
-                })
-                .unwrap_or_else(|| short_id(&status.node_id).to_string());
-            //
-            // Prioritize cleanup_required over enabled (partial teardown can
-            // leave both true).
-            //
-            if status.cleanup_required {
-                spans.extend(chrome::pill_two_tone(&node_label, "cleanup", WARN));
-            } else if status.enabled {
-                let method = status
-                    .method
-                    .map(|m| format!("{:?}", m).to_lowercase())
-                    .unwrap_or_else(|| "on".into());
-                let port = status
-                    .proxy_port
-                    .map(|p| format!(":{}", p))
-                    .unwrap_or_default();
-                spans.extend(chrome::pill_two_tone(&node_label, &format!("{method}{port}"), OK));
-            } else {
-                spans.extend(chrome::pill_two_tone(&node_label, "off", DIM));
-            }
-        }
-        if statuses.len() > 4 {
-            spans.push(Span::styled(
-                format!(" +{}", statuses.len() - 4),
-                Style::default().fg(DIM),
-            ));
-        }
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    app.hits_register(
+        split_border_rect(panes.left),
+        MouseAction::InterceptRuleSplitDragStart,
+    );
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, app: &App) {

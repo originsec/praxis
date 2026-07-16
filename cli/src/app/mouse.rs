@@ -106,16 +106,31 @@ impl App {
 
             MouseAction::InterceptTab(tab) => {
                 self.intercept.tab = tab;
+                // Drop other tabs' detail focus so wheel scroll cannot
+                // target a pane that is not on screen.
+                self.intercept.detail_focus = false;
+                self.intercept.match_detail_focus = false;
+                self.intercept.rule_detail_focus = false;
                 true
             }
             MouseAction::InterceptLogDetailFocus => {
                 self.intercept.detail_focus = true;
+                self.intercept.match_detail_focus = false;
+                self.intercept.rule_detail_focus = false;
                 self.fetch_body_for_selected().await;
                 true
             }
             MouseAction::InterceptMatchDetailFocus => {
                 self.intercept.match_detail_focus = true;
+                self.intercept.detail_focus = false;
+                self.intercept.rule_detail_focus = false;
                 self.fetch_body_for_match_selected().await;
+                true
+            }
+            MouseAction::InterceptRuleDetailFocus => {
+                self.intercept.rule_detail_focus = true;
+                self.intercept.detail_focus = false;
+                self.intercept.match_detail_focus = false;
                 true
             }
             MouseAction::InterceptLogSplitDragStart => {
@@ -124,6 +139,10 @@ impl App {
             }
             MouseAction::InterceptMatchSplitDragStart => {
                 self.intercept.match_dragging = true;
+                true
+            }
+            MouseAction::InterceptRuleSplitDragStart => {
+                self.intercept.rule_dragging = true;
                 true
             }
             MouseAction::InterceptCycleNodeFilter => {
@@ -308,9 +327,11 @@ impl App {
                 true
             }
             RowSelectKind::InterceptRule => {
+                self.intercept.rule_detail_focus = false;
                 let ids = self.intercept.filtered_rule_ids();
                 if clicked < ids.len() {
                     self.intercept.rule_selected_id = Some(ids[clicked]);
+                    self.intercept.rule_detail_scroll = 0;
                 }
                 true
             }
@@ -423,12 +444,12 @@ impl App {
     }
 
     pub(crate) async fn handle_window_mouse_drag(&mut self, mouse: MouseEvent, content_area: Rect) {
-        use crate::ui::intercept::{chrome_layout, filter_split, show_banner, show_footer};
+        use crate::ui::intercept::{chrome_layout, filter_split, show_footer};
 
         match mouse.kind {
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.intercept.log_dragging {
-                    let chrome = chrome_layout(content_area, show_banner(self), show_footer(self));
+                    let chrome = chrome_layout(content_area, show_footer(self));
                     let panes = filter_split(chrome.body, self.intercept.log_split_percent);
                     self.intercept.log_split_percent = drag_split_percent(
                         panes.filter.x,
@@ -436,9 +457,17 @@ impl App {
                         mouse.column,
                     );
                 } else if self.intercept.match_dragging {
-                    let chrome = chrome_layout(content_area, show_banner(self), show_footer(self));
+                    let chrome = chrome_layout(content_area, show_footer(self));
                     let panes = filter_split(chrome.body, self.intercept.match_split_percent);
                     self.intercept.match_split_percent = drag_split_percent(
+                        panes.filter.x,
+                        panes.filter.width,
+                        mouse.column,
+                    );
+                } else if self.intercept.rule_dragging {
+                    let chrome = chrome_layout(content_area, show_footer(self));
+                    let panes = filter_split(chrome.body, self.intercept.rule_split_percent);
+                    self.intercept.rule_split_percent = drag_split_percent(
                         panes.filter.x,
                         panes.filter.width,
                         mouse.column,
@@ -545,6 +574,7 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.intercept.log_dragging = false;
                 self.intercept.match_dragging = false;
+                self.intercept.rule_dragging = false;
                 self.nodes.dragging = false;
                 self.operations.dragging = false;
                 self.log_query.editor_dragging = false;

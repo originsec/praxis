@@ -7,9 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use common::{
-    InterceptRule, InterceptedTrafficEntry, RuleScope, TargetDirection, TrafficDirection,
-};
+use common::{InterceptRule, InterceptedTrafficEntry, rule_matches_entry};
 use regex::Regex;
 use tokio::sync::RwLock;
 
@@ -120,80 +118,7 @@ pub fn compiled_rule_matches_traffic(
     compiled: &CompiledRule,
     entry: &InterceptedTrafficEntry,
 ) -> bool {
-    let rule = &compiled.rule;
-    let regex = &compiled.regex;
-
-    match rule.target_direction {
-        TargetDirection::Send if entry.direction != TrafficDirection::Send => return false,
-        TargetDirection::Receive if entry.direction != TrafficDirection::Receive => return false,
-        _ => {}
-    }
-
-    match &rule.scope {
-        RuleScope::Node { node_id } if entry.node_id != *node_id => return false,
-        RuleScope::Agent {
-            node_id,
-            agent_short_name,
-        } if entry.node_id != *node_id
-            || !common::traffic_agent_matches(&entry.agent_short_name, agent_short_name) =>
-        {
-            return false;
-        }
-        _ => {}
-    }
-
-    if regex.is_match(&entry.url) {
-        return true;
-    }
-    if regex.is_match(&entry.host) {
-        return true;
-    }
-    if let Some(method) = entry.method.as_deref()
-        && regex.is_match(method)
-    {
-        return true;
-    }
-
-    if rule.target_direction != TargetDirection::Receive {
-        if let Some(ref headers) = entry.request_headers {
-            for (key, value) in headers {
-                if regex.is_match(key) || regex.is_match(value) {
-                    return true;
-                }
-            }
-        }
-        if let Some(ref body) = entry.request_body {
-            if let Ok(body_str) = std::str::from_utf8(body) {
-                if regex.is_match(body_str) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    if rule.target_direction != TargetDirection::Send {
-        if let Some(status) = entry.response_status
-            && regex.is_match(&status.to_string())
-        {
-            return true;
-        }
-        if let Some(ref headers) = entry.response_headers {
-            for (key, value) in headers {
-                if regex.is_match(key) || regex.is_match(value) {
-                    return true;
-                }
-            }
-        }
-        if let Some(ref body) = entry.response_body {
-            if let Ok(body_str) = std::str::from_utf8(body) {
-                if regex.is_match(body_str) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
+    rule_matches_entry(&compiled.rule, &compiled.regex, entry)
 }
 
 #[cfg(test)]
@@ -267,6 +192,40 @@ mod tests {
         assert!(compiled_rule_matches_traffic(
             &compiled,
             &sample_entry("https://api/secret-token")
+        ));
+    }
+
+    #[test]
+    fn compiled_match_hits_request_body() {
+        let rule = sample_rule(r"(?i)system");
+        let compiled = CompiledRule {
+            regex: Regex::new(&rule.regex_pattern).unwrap(),
+            rule,
+        };
+        let mut entry = sample_entry("https://api.anthropic.com/v1/messages");
+        entry.method = Some("POST".into());
+        entry.request_body = Some(br#"{"text":"<system-reminder>hi"}"#.to_vec());
+        assert!(compiled_rule_matches_traffic(&compiled, &entry));
+        entry.request_body = None;
+        assert!(
+            !compiled_rule_matches_traffic(&compiled, &entry),
+            "URL alone must not match body-only pattern"
+        );
+    }
+
+    #[test]
+    fn compiled_match_respects_scope() {
+        let mut rule = sample_rule("example");
+        rule.scope = RuleScope::Node {
+            node_id: "other-node".into(),
+        };
+        let compiled = CompiledRule {
+            regex: Regex::new(&rule.regex_pattern).unwrap(),
+            rule,
+        };
+        assert!(!compiled_rule_matches_traffic(
+            &compiled,
+            &sample_entry("https://example.com/x")
         ));
     }
 

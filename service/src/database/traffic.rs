@@ -479,6 +479,10 @@ fn entry_matches_regex(entry: &InterceptedTrafficEntry, regex: &Regex) -> bool {
     false
 }
 
+pub(super) fn parse_traffic_row_for_backfill(row: &DbRow) -> Result<InterceptedTrafficEntry> {
+    parse_traffic_row(row)
+}
+
 fn parse_traffic_row(row: &DbRow) -> Result<InterceptedTrafficEntry> {
     let id: i64 = row.get(0);
     let node_id: String = row.get(2);

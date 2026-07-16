@@ -804,4 +804,75 @@ mod foreign_key_tests {
             "deleting a rule must cascade-delete its matches"
         );
     }
+
+    #[tokio::test]
+    async fn backfill_matches_body_only_regex() {
+        let tmp = temp_db().await;
+        let db = &tmp.db;
+
+        let mut hit = sample_entry();
+        hit.url = "https://api.anthropic.com/v1/messages".into();
+        hit.host = "api.anthropic.com".into();
+        hit.method = Some("POST".into());
+        hit.request_body = Some(br#"{"text":"<system-reminder>hi"}"#.to_vec());
+
+        let mut miss = sample_entry();
+        miss.url = "https://api.factory.ai/api/feature-flags".into();
+        miss.host = "api.factory.ai".into();
+        miss.request_body = Some(br#"{"flags":[]}"#.to_vec());
+
+        db.insert_traffic(&hit).await.unwrap();
+        db.insert_traffic(&miss).await.unwrap();
+
+        let rule = db
+            .insert_rule(
+                "system reminder",
+                r"(?i)system",
+                &TargetDirection::Both,
+                &RuleScope::All,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let n = db.backfill_matches_for_rule(&rule, 500).await.unwrap();
+        assert_eq!(n, 1, "only the body hit should backfill");
+        assert_eq!(match_row_count(db).await, 1);
+
+        // Idempotent: second backfill must not duplicate.
+        let n2 = db.backfill_matches_for_rule(&rule, 500).await.unwrap();
+        assert_eq!(n2, 0);
+        assert_eq!(match_row_count(db).await, 1);
+    }
+
+    #[tokio::test]
+    async fn backfill_skips_disabled_rule() {
+        let tmp = temp_db().await;
+        let db = &tmp.db;
+
+        let mut entry = sample_entry();
+        entry.url = "https://example.com/secret".into();
+        db.insert_traffic(&entry).await.unwrap();
+
+        let rule = db
+            .insert_rule(
+                "secret",
+                "secret",
+                &TargetDirection::Both,
+                &RuleScope::All,
+                None,
+            )
+            .await
+            .unwrap();
+        let disabled = db
+            .update_rule(rule.id, None, None, None, None, Some(false), None)
+            .await
+            .unwrap()
+            .expect("rule row");
+        assert!(!disabled.enabled);
+
+        let n = db.backfill_matches_for_rule(&disabled, 500).await.unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(match_row_count(db).await, 0);
+    }
 }

@@ -220,6 +220,11 @@ pub struct InterceptState {
     pub rule_selected_id: Option<i64>,
     pub rule_form: Option<RuleForm>,
     pub rules_loaded: bool,
+    pub rule_detail_focus: bool,
+    pub rule_detail_scroll: u16,
+    pub rule_detail_max_scroll: Cell<u16>,
+    pub rule_split_percent: u16,
+    pub rule_dragging: bool,
 
     //
     // Resizable split percentage for the Log tab (list vs detail). 0-100.
@@ -300,6 +305,11 @@ impl Default for InterceptState {
             rule_selected_id: None,
             rule_form: None,
             rules_loaded: false,
+            rule_detail_focus: false,
+            rule_detail_scroll: 0,
+            rule_detail_max_scroll: Cell::new(0),
+            rule_split_percent: 55,
+            rule_dragging: false,
             log_split_percent: 55,
             log_dragging: false,
             match_split_percent: 55,
@@ -339,10 +349,6 @@ impl InterceptState {
 
     pub fn set_status_message(&mut self, msg: impl Into<String>) {
         self.status_message = Some((msg.into(), Instant::now()));
-    }
-
-    pub fn any_intercept_active(&self) -> bool {
-        self.intercept_statuses.values().any(|s| s.enabled)
     }
 
     //
@@ -456,7 +462,18 @@ impl InterceptState {
         }
     }
 
-    pub fn regex_test_samples(&self, pattern: &str, limit: usize) -> Vec<String> {
+    //
+    // Live form preview: same field set as service matching (URL, host,
+    // method, headers, UTF-8 bodies). Bodies only appear when present on
+    // the entry or already loaded into body_cache (live broadcast strips
+    // them). Pass the form's direction so send/recv pickers stay honest.
+    //
+    pub fn regex_test_samples(
+        &self,
+        pattern: &str,
+        direction: &common::TargetDirection,
+        limit: usize,
+    ) -> Vec<String> {
         let pattern = pattern.trim();
         if pattern.is_empty() {
             return Vec::new();
@@ -467,7 +484,18 @@ impl InterceptState {
         };
         let mut out = Vec::new();
         for entry in &self.buffer {
-            if re.is_match(&entry.url) {
+            let mut probe = entry.clone();
+            if let Some(id) = probe.id
+                && let Some((req, resp)) = self.body_cache.get(&id)
+            {
+                if probe.request_body.is_none() {
+                    probe.request_body = req.clone();
+                }
+                if probe.response_body.is_none() {
+                    probe.response_body = resp.clone();
+                }
+            }
+            if common::pattern_matches_entry(&re, &probe, direction) {
                 out.push(entry.url.clone());
                 if out.len() >= limit {
                     break;
@@ -1362,6 +1390,7 @@ impl InterceptState {
             .unwrap_or(0) as i32;
         let new = (cur + delta).clamp(0, (ids.len() - 1) as i32) as usize;
         self.rule_selected_id = Some(ids[new]);
+        self.rule_detail_scroll = 0;
     }
 
     pub fn selected_rule(&self) -> Option<&InterceptRule> {
@@ -1762,6 +1791,7 @@ impl App {
             Ok(created) => {
                 self.intercept.upsert_rule(created);
                 self.intercept.set_status_message("Rule duplicated");
+                self.refresh_intercept_matches().await;
             }
             Err(e) => self.intercept.set_error(format!("Duplicate rule: {}", e)),
         }
@@ -1802,11 +1832,17 @@ impl App {
             KeyCode::Tab => {
                 self.intercept.tab = self.intercept.tab.next();
                 self.intercept.search_focused = false;
+                self.intercept.detail_focus = false;
+                self.intercept.match_detail_focus = false;
+                self.intercept.rule_detail_focus = false;
                 return;
             }
             KeyCode::BackTab => {
                 self.intercept.tab = self.intercept.tab.prev();
                 self.intercept.search_focused = false;
+                self.intercept.detail_focus = false;
+                self.intercept.match_detail_focus = false;
+                self.intercept.rule_detail_focus = false;
                 return;
             }
             _ => {}
@@ -1884,7 +1920,11 @@ impl App {
                     self.refresh_intercept_log().await;
                 }
             }
-            InterceptTab::Rules => {}
+            InterceptTab::Rules => {
+                if self.intercept.rule_detail_focus {
+                    self.intercept.rule_detail_focus = false;
+                }
+            }
             InterceptTab::Matches => {
                 if self.intercept.match_detail_focus {
                     self.intercept.match_detail_focus = false;
@@ -2024,8 +2064,56 @@ impl App {
 
     async fn handle_intercept_rules_key(&mut self, key: KeyEvent) {
         match (key.code, key.modifiers) {
-            (KeyCode::Up, _) => self.intercept.move_rule_selection(-1),
-            (KeyCode::Down, _) => self.intercept.move_rule_selection(1),
+            (KeyCode::Left, _) => {
+                if self.intercept.rule_detail_focus {
+                    self.intercept.rule_detail_focus = false;
+                }
+            }
+            (KeyCode::Right, _) => {
+                if !self.intercept.rule_detail_focus && self.intercept.selected_rule().is_some() {
+                    self.intercept.rule_detail_focus = true;
+                }
+            }
+            (KeyCode::Up, _) => {
+                if self.intercept.rule_detail_focus {
+                    self.intercept.rule_detail_scroll =
+                        self.intercept.rule_detail_scroll.saturating_sub(1);
+                } else {
+                    self.intercept.move_rule_selection(-1);
+                }
+            }
+            (KeyCode::Down, _) => {
+                if self.intercept.rule_detail_focus {
+                    let max = self.intercept.rule_detail_max_scroll.get();
+                    self.intercept.rule_detail_scroll = self
+                        .intercept
+                        .rule_detail_scroll
+                        .saturating_add(1)
+                        .min(max);
+                } else {
+                    self.intercept.move_rule_selection(1);
+                }
+            }
+            (KeyCode::PageUp, _) => {
+                if self.intercept.rule_detail_focus {
+                    self.intercept.rule_detail_scroll =
+                        self.intercept.rule_detail_scroll.saturating_sub(10);
+                } else {
+                    self.intercept.move_rule_selection(-10);
+                }
+            }
+            (KeyCode::PageDown, _) => {
+                if self.intercept.rule_detail_focus {
+                    let max = self.intercept.rule_detail_max_scroll.get();
+                    self.intercept.rule_detail_scroll = self
+                        .intercept
+                        .rule_detail_scroll
+                        .saturating_add(10)
+                        .min(max);
+                } else {
+                    self.intercept.move_rule_selection(10);
+                }
+            }
             (KeyCode::Char(' '), _) => self.toggle_selected_rule_enabled().await,
             (KeyCode::Char('n'), m) if m.contains(KeyModifiers::CONTROL) => {
                 self.intercept.rule_form = Some(RuleForm::new_create());
@@ -2155,7 +2243,7 @@ impl App {
         }
     }
 
-    async fn handle_rule_form_key(&mut self, key: KeyEvent) {
+    pub(crate) async fn handle_rule_form_key(&mut self, key: KeyEvent) {
         //
         // Key bindings match the new-op form: ↑↓ / Tab / Enter move
         // between fields, ←→ and Space toggle/cycle pickers, free text
@@ -2310,6 +2398,12 @@ impl App {
             Ok(rule) => {
                 self.intercept.upsert_rule(rule);
                 self.intercept.rule_form = None;
+                //
+                // Service backfills recent traffic against the new/updated
+                // pattern; reload Matches so body-only hits appear without
+                // waiting for the next capture.
+                //
+                self.refresh_intercept_matches().await;
             }
             Err(e) => {
                 if let Some(f) = self.intercept.rule_form.as_mut() {
@@ -2958,5 +3052,117 @@ mod body_cache_tests {
             "evicted oldest match must lose its generation"
         );
         assert!(state.live_match_gens.contains_key(&(MATCH_BUFFER_CAP as i64 + 1)));
+    }
+}
+
+#[cfg(test)]
+mod regex_preview_tests {
+    use super::*;
+    use common::{InterceptMethod, InterceptedTrafficEntry, TargetDirection, TrafficDirection};
+
+    fn bodyless(id: i64, url: &str) -> InterceptedTrafficEntry {
+        InterceptedTrafficEntry {
+            id: Some(id),
+            timestamp: chrono::Utc::now(),
+            node_id: "n1".into(),
+            agent_short_name: "claude".into(),
+            intercept_method: InterceptMethod::Proxy,
+            direction: TrafficDirection::Send,
+            method: Some("POST".into()),
+            url: url.into(),
+            host: "api.anthropic.com".into(),
+            request_headers: None,
+            request_body: None,
+            response_status: None,
+            response_headers: None,
+            response_body: None,
+        }
+    }
+
+    #[test]
+    fn preview_matches_url() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(
+            1,
+            "https://api.factory.ai/api/feature-flags",
+        )]);
+        let hits =
+            state.regex_test_samples("feature-flags", &TargetDirection::Both, 5);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].contains("feature-flags"));
+    }
+
+    #[test]
+    fn preview_body_miss_without_cache() {
+        //
+        // Live rows are bodyless; without body_cache a body-only pattern
+        // must not pretend to match.
+        //
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(
+            1,
+            "https://api.anthropic.com/v1/messages",
+        )]);
+        let hits = state.regex_test_samples(r"(?i)system", &TargetDirection::Both, 5);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn preview_body_hit_via_cache() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(
+            1,
+            "https://api.anthropic.com/v1/messages",
+        )]);
+        state.body_cache.insert(
+            1,
+            (
+                Some(br#"{"text":"<system-reminder>hi"}"#.to_vec()),
+                None,
+            ),
+        );
+        let hits = state.regex_test_samples(r"(?i)system", &TargetDirection::Both, 5);
+        assert_eq!(hits.len(), 1, "cached body must be searched in preview");
+        assert!(hits[0].contains("anthropic"));
+    }
+
+    #[test]
+    fn preview_respects_direction() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(1, "https://example.com/secret-path")]);
+        assert_eq!(
+            state
+                .regex_test_samples("secret-path", &TargetDirection::Send, 5)
+                .len(),
+            1
+        );
+        // Send traffic + Receive-only direction → no hit.
+        assert!(
+            state
+                .regex_test_samples("secret-path", &TargetDirection::Receive, 5)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn preview_invalid_regex_returns_empty() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(1, "https://example.com/x")]);
+        assert!(
+            state
+                .regex_test_samples("(", &TargetDirection::Both, 5)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn preview_empty_pattern_returns_empty() {
+        let mut state = InterceptState::default();
+        state.push_entries(vec![bodyless(1, "https://example.com/x")]);
+        assert!(
+            state
+                .regex_test_samples("   ", &TargetDirection::Both, 5)
+                .is_empty()
+        );
     }
 }

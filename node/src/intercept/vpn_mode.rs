@@ -52,9 +52,9 @@ impl NodeInterceptManager {
         );
         self.check_enable_cancelled()?;
         let resolved = self
-            .race_cancel(dns_resolver.resolve_required_domains(&self.domains))
+            .race_cancel(dns_resolver.resolve_domains_best_effort(&self.domains))
             .await
-            .context("Failed to resolve VPN intercept targets")?;
+            .context("Failed to resolve any VPN intercept target")?;
         self.check_enable_cancelled()?;
         let intercept_ips: std::collections::HashSet<std::net::IpAddr> = resolved
             .into_values()
@@ -202,9 +202,9 @@ impl NodeInterceptManager {
         );
         self.check_enable_cancelled()?;
         let resolved = self
-            .race_cancel(dns_resolver.resolve_required_domains(&self.domains))
+            .race_cancel(dns_resolver.resolve_domains_best_effort(&self.domains))
             .await
-            .context("Failed to resolve VPN intercept targets")?;
+            .context("Failed to resolve any VPN intercept target")?;
         self.check_enable_cancelled()?;
         let intercept_ips: std::collections::HashSet<std::net::IpAddr> = resolved
             .into_values()

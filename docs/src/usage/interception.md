@@ -370,8 +370,9 @@ Failed or cancelled enable whose rollback cannot fully clean up enters
 **CleanupRequired**: re-enable is blocked until Disable or node Reset runs
 `force_cleanup` successfully. Manager-owned CA/resource handles are retained
 while cleanup is incomplete; recovery metadata is not overwritten by a fresh
-enable. The TUI status strip shows `cleanup` for nodes reporting
-`InterceptStatus.cleanup_required`.
+enable. Clients surface `InterceptStatus.cleanup_required` via CLI
+`intercept status`; the Intercept TUI window does not list per-node state
+(fleets can be large — enable/disable lives in the Nodes window).
 
 A node also refuses to proceed while stale cleanup is incomplete or its
 recovery file cannot be parsed. Async enable phases (DNS, proxy start, packet
@@ -447,9 +448,15 @@ Rules let you match and process specific traffic.
    - **Summarization prompt** - optional LLM analysis
 
 Matching covers host, URL, method, response status, headers, and UTF-8
-bodies (respecting send/receive direction).
+bodies (respecting send/receive direction). The TUI rule-form “Recent
+matches” preview uses the local traffic buffer and only sees bodies that
+have already been loaded into the detail cache (live rows arrive bodyless).
 
 ### Rule Matching
+
+Matching runs when traffic is **captured**. Creating or updating a rule
+also backfills against the most recent ~500 stored entries so historical
+body-only patterns appear in Matches without waiting for new traffic.
 
 When traffic matches a rule:
 - Entry is tagged with the rule

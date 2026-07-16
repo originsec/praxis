@@ -74,6 +74,28 @@ pub(super) async fn handle_intercept_rule_create(
                     //
                 }
             }
+            //
+            // Match recent stored traffic so body-only patterns light up
+            // Matches immediately (ingest only evaluates at capture time).
+            //
+            match ctx.database.backfill_matches_for_rule(&rule, 500).await {
+                Ok(n) if n > 0 => {
+                    common::log_info!(
+                        "Backfilled {} match(es) for new rule {} (id={})",
+                        n,
+                        name,
+                        rule.id
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    common::log_warn!(
+                        "Failed to backfill matches for new rule {}: {}",
+                        rule.id,
+                        e
+                    );
+                }
+            }
             common::log_info!("Created intercept rule: {} (id={})", name, rule.id);
             let message = ClientDirectMessage::InterceptRuleCreated { rule };
             if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
@@ -162,6 +184,25 @@ pub(super) async fn handle_intercept_rule_update(
                         ),
                     };
                     let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+                }
+            }
+            if rule.enabled {
+                match ctx.database.backfill_matches_for_rule(&rule, 500).await {
+                    Ok(n) if n > 0 => {
+                        common::log_info!(
+                            "Backfilled {} match(es) for updated rule {}",
+                            n,
+                            id
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        common::log_warn!(
+                            "Failed to backfill matches for updated rule {}: {}",
+                            id,
+                            e
+                        );
+                    }
                 }
             }
             common::log_info!("Updated intercept rule: {}", id);

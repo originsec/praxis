@@ -2793,7 +2793,8 @@ pub struct InterceptRule {
     pub id: i64,
     /// Human-readable rule name
     pub name: String,
-    /// Regex pattern to match against URL
+    /// Regex pattern matched against URL, host, method, headers, and UTF-8 bodies
+    /// (respecting rule direction).
     pub regex_pattern: String,
     /// Which direction(s) to match
     pub target_direction: TargetDirection,

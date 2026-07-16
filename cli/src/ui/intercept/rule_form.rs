@@ -88,7 +88,9 @@ pub fn content(
     }
 
     if form.focus == RuleFormField::Regex {
-        let samples = app.intercept.regex_test_samples(&form.regex, 5);
+        let samples =
+            app.intercept
+                .regex_test_samples(&form.regex, &form.direction, 5);
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Recent matches",
@@ -98,7 +100,7 @@ pub fn content(
         )));
         if samples.is_empty() {
             lines.push(Line::from(Span::styled(
-                "  (no matches in current traffic buffer)",
+                "  (no matches in buffer — body hits need a loaded body; rules match on capture)",
                 Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
             )));
         } else {

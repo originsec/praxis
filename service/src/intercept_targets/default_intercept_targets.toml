@@ -19,7 +19,7 @@ domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
 [cursor]
-domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
+domains = ["agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 
 [droid]
 domains = [

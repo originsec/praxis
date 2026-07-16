@@ -65,7 +65,13 @@ impl DomainResolver {
         Ok(ips)
     }
 
-    pub async fn resolve_required_domains(
+    ///
+    // Resolve every configured domain, best-effort. A domain that fails to
+    // resolve (e.g. a retired endpoint) is skipped with a warning rather
+    // than failing the whole enable — one dead target must not block
+    // interception of all the others. Only errors if nothing resolved.
+    ///
+    pub async fn resolve_domains_best_effort(
         &self,
         domains: &HashSet<String>,
     ) -> Result<HashMap<String, HashSet<IpAddr>>> {
@@ -83,8 +89,17 @@ impl DomainResolver {
 
         if !failures.is_empty() {
             failures.sort();
+            common::log_warn!(
+                "Skipping {} unresolvable intercept domain(s); continuing with {} that resolved: {}",
+                failures.len(),
+                resolved.len(),
+                failures.join("; ")
+            );
+        }
+
+        if resolved.is_empty() {
             anyhow::bail!(
-                "Failed to resolve required intercept domain(s): {}",
+                "No intercept domains could be resolved: {}",
                 failures.join("; ")
             );
         }

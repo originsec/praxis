@@ -43,9 +43,9 @@ impl NodeInterceptManager {
 
         self.check_enable_cancelled()?;
         let resolved = self
-            .race_cancel(dns_resolver.resolve_required_domains(&self.domains))
+            .race_cancel(dns_resolver.resolve_domains_best_effort(&self.domains))
             .await
-            .context("Failed to resolve TPROXY intercept targets")?;
+            .context("Failed to resolve any TPROXY intercept target")?;
 
         //
         // 2. Get IPv4 addresses for TPROXY rules.
