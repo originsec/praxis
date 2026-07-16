@@ -11,7 +11,7 @@ use lapin::{
     types::FieldTable,
 };
 
-use crate::messaging::{CLIENT_BROADCAST_EXCHANGE, client_queue_name};
+use crate::messaging::{CLIENT_BROADCAST_EXCHANGE, client_queue_name, durable_queue_options};
 
 //
 // Shared RabbitMQ transport for service clients (TUI, MCP server). Owns the
@@ -45,7 +45,7 @@ impl ClientTransport {
         let declared = channel
             .queue_declare(
                 client_queue.as_str().into(),
-                QueueDeclareOptions::default(),
+                durable_queue_options(),
                 FieldTable::default(),
             )
             .await?;

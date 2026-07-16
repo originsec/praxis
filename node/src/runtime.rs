@@ -12,7 +12,7 @@ use crate::utils::semantic_parser::{self, SemanticParserTracker};
 use common::{
     CommandRequest, CommandResponse, InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE,
     NODE_SIGNAL_QUEUE, NodeBroadcastMessage, NodeCommand, NodeDirectMessage, NodeSignalMessage,
-    TerminalCommand, publish_json,
+    TerminalCommand, durable_queue_options, publish_json,
 };
 use futures::StreamExt;
 use info::{fingerprint_all_agents, send_node_information_update};
@@ -191,7 +191,7 @@ async fn listen_to_queues(
     channel
         .queue_declare(
             semantic_queue_name.as_str().into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -273,7 +273,7 @@ async fn listen_to_queues(
     channel
         .queue_declare(
             reset_queue_name.as_str().into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;

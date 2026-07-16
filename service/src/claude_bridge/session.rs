@@ -18,8 +18,8 @@ use agent_client_protocol as acp;
 
 use common::{
     AcpFrame, DiscoveredAgent, NODE_SIGNAL_QUEUE, NodeCapability, NodeDirectMessage,
-    NodeInformationUpdate, NodeRegistration, NodeSignalMessage, SelectedAgent, node_queue_name,
-    publish_json,
+    NodeInformationUpdate, NodeRegistration, NodeSignalMessage, SelectedAgent,
+    durable_queue_options, node_queue_name, publish_json,
 };
 
 use super::Transport;
@@ -199,7 +199,7 @@ impl BridgeSession {
                 node_queue.as_str().into(),
                 QueueDeclareOptions {
                     auto_delete: true,
-                    ..Default::default()
+                    ..durable_queue_options()
                 },
                 FieldTable::default(),
             )

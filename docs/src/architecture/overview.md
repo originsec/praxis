@@ -117,6 +117,12 @@ RabbitMQ provides:
 - Easy scaling (nodes can come and go)
 - Persistence for messages in flight
 
+Named queues (`NodeSignal`, `ClientSignal`, `Node_{id}`, `Client_{id}`, event-log
+queues, etc.) are declared **durable** so their definitions survive broker
+restarts and stay compatible with RabbitMQ 4.3+, which denies transient
+non-exclusive classic queues by default. Per-connection broadcast queues remain
+exclusive + auto-delete (not subject to that deprecation).
+
 ### Message Flow Example
 
 Here's what happens when a CLI driver runs a prompt over ACP:

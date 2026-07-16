@@ -1,10 +1,25 @@
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use lapin::{BasicProperties, Channel, PublisherConfirm, options::BasicPublishOptions};
+use lapin::{
+    BasicProperties, Channel, PublisherConfirm,
+    options::{BasicPublishOptions, QueueDeclareOptions},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use uuid::Uuid;
+
+///
+/// Options for named queues shared across connections.
+/// Durable so definitions survive broker restarts and avoid RabbitMQ 4.x
+/// `transient_nonexcl_queues` deprecation (denied by default in 4.3+).
+///
+pub fn durable_queue_options() -> QueueDeclareOptions {
+    QueueDeclareOptions {
+        durable: true,
+        ..QueueDeclareOptions::default()
+    }
+}
 
 /// Node signal queue - nodes send messages here
 pub const NODE_SIGNAL_QUEUE: &str = "NodeSignal";

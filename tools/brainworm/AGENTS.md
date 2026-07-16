@@ -145,12 +145,12 @@ basic auth with the credentials above.
 
 ### Declare a Queue
 
-Create a non-durable, non-auto-delete queue.
+Create a durable, non-auto-delete queue.
 
 - **Method**: `PUT`
 - **URL**: `http://localhost:15672/api/queues/%2F/{queue_name}`
 - **Content-Type**: `application/json`
-- **Body**: `{"durable":false,"auto_delete":false}`
+- **Body**: `{"durable":true,"auto_delete":false}`
 
 ### Publish a Message
 

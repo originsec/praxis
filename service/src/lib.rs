@@ -30,14 +30,13 @@ include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientSignalMessage,
     NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE, NodeBroadcastMessage, NodeSignalMessage,
-    publish_json_exchange,
+    durable_queue_options, publish_json_exchange,
 };
 use futures_util::StreamExt;
 use lapin::{
     Connection, ConnectionProperties, ExchangeKind,
     options::{
-        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions,
-        QueuePurgeOptions,
+        BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueuePurgeOptions,
     },
     types::FieldTable,
 };
@@ -128,7 +127,7 @@ async fn run_main_loop() -> Result<()> {
     node_signal_channel
         .queue_declare(
             NODE_SIGNAL_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -159,7 +158,7 @@ async fn run_main_loop() -> Result<()> {
     client_signal_channel
         .queue_declare(
             CLIENT_SIGNAL_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -523,7 +522,7 @@ async fn run_main_loop() -> Result<()> {
     web_event_log_channel
         .queue_declare(
             common::WEB_EVENT_LOG_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;
@@ -533,7 +532,7 @@ async fn run_main_loop() -> Result<()> {
     node_event_log_channel
         .queue_declare(
             common::NODE_EVENT_LOG_QUEUE.into(),
-            QueueDeclareOptions::default(),
+            durable_queue_options(),
             FieldTable::default(),
         )
         .await?;

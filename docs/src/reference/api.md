@@ -16,6 +16,8 @@ This reference documents the message types and RabbitMQ queues/exchanges used fo
 | `NodeEventLog` | Node → Service | Application log entries |
 | `ServiceEventLog` | Service → Service | Service log entries |
 
+Named classic queues above are declared durable. Fanout broadcast consumers use exclusive auto-delete server-named queues bound to `NodeBroadcast` / `ClientBroadcast`.
+
 ## Message Flow
 
 ```diagram

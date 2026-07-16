@@ -389,7 +389,7 @@ int amqp_queue_declare(amqp *c, const char *queue)
     buf a = {0};
     put_u16(&a, 0);                         /* reserved-1 */
     put_shortstr(&a, queue);
-    put_u8(&a, 0);                          /* passive=0 durable=0 exclusive=0 auto-delete=0 no-wait=0 */
+    put_u8(&a, 0x02);                        /* passive=0 durable=1 exclusive=0 auto-delete=0 no-wait=0 */
     put_empty_table(&a);
     int rc = send_method(c, 1, CLASS_QUEUE, 10, a.data, a.len);
     buf_free(&a);
