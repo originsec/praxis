@@ -111,6 +111,15 @@ impl Database {
                 sqlx::query("PRAGMA locking_mode = NORMAL")
                     .execute(&pool)
                     .await?;
+                //
+                // SQLite ignores foreign keys unless enabled per-connection.
+                // clear_all_traffic and rule deletes rely on ON DELETE CASCADE
+                // to remove dependent traffic_matches rows; without this they
+                // would be silently orphaned.
+                //
+                sqlx::query("PRAGMA foreign_keys = ON")
+                    .execute(&pool)
+                    .await?;
 
                 DatabasePool::Sqlite(pool)
             }

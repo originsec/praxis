@@ -401,12 +401,23 @@ impl NodeInterceptManager {
 
             let mut ip_map = HashMap::with_capacity(resolved.len());
             for (domain, ips) in resolved {
-                let ip = ips
+                let Some(ip) = ips
                     .iter()
                     .find(|ip| ip.is_ipv4())
                     .or_else(|| ips.iter().next())
                     .copied()
-                    .expect("required DNS resolution returned an empty address set");
+                else {
+                    //
+                    // Empty address set for a required domain: fail the enable
+                    // with rollback rather than panicking the node mid-enable
+                    // while holding the manager lock.
+                    //
+                    let cause = anyhow::anyhow!(
+                        "required DNS resolution for {} returned an empty address set",
+                        domain
+                    );
+                    return Err(self.fail_enable_with_rollback(&ca, cause).await);
+                };
                 common::log_info!("Pre-resolved {} -> {} for hosts mode", domain, ip);
                 ip_map.insert(domain, ip);
             }
@@ -890,13 +901,19 @@ impl NodeInterceptManager {
         //
         // Uninstall root CA.
         //
+        let mut ca_uninstall_failed = false;
         if let Some(ca) = &self.ca {
             let ca_guard = ca.read().await;
             if let Err(e) = ca_guard.uninstall_root_cert() {
                 failures.push(format!("root CA uninstall: {}", e));
+                ca_uninstall_failed = true;
             }
         }
-        if !failures.iter().any(|failure| failure.starts_with("root CA uninstall:")) {
+        //
+        // Retain the CA handle for retry only if uninstall actually failed;
+        // keyed on a typed flag, not the failure message text.
+        //
+        if !ca_uninstall_failed {
             self.ca = None;
         }
 
@@ -1313,9 +1330,27 @@ impl NodeInterceptManager {
     //
 
     fn cleanup_proxy_sync(&mut self) -> Result<()> {
-        disable_system_proxy(self.saved_proxy_settings.as_ref())
+        //
+        // Prefer in-memory saved settings. Fall back to write-ahead recovery
+        // (in-memory or disk) so partial enable after proxy_modified=true still
+        // restores the user's original proxy instead of forcing ProxyEnable=0.
+        //
+        let recovered = self.saved_proxy_settings.take().or_else(|| {
+            let st = self
+                .intercept_state
+                .as_ref()
+                .cloned()
+                .or_else(|| state::load_state().ok().flatten())?;
+            if !st.proxy_modified {
+                return None;
+            }
+            Some(SavedProxySettings {
+                proxy_enable: st.saved_proxy_enable.unwrap_or(0),
+                proxy_server: st.saved_proxy_server,
+            })
+        });
+        disable_system_proxy(recovered.as_ref())
             .context("Failed to restore system proxy settings")?;
-        self.saved_proxy_settings = None;
         Ok(())
     }
 

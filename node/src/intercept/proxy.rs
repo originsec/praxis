@@ -358,9 +358,12 @@ impl InterceptProxy {
                     handle.abort();
                     match tokio::time::timeout(std::time::Duration::from_secs(2), &mut handle).await
                     {
-                        Ok(_) => failures.push(
-                            "primary listener join timed out; aborted and stopped".into(),
-                        ),
+                        //
+                        // Abort confirmed the task is gone and its socket
+                        // released — a clean stop, not a failure. (Matches the
+                        // additional-listener handling below.)
+                        //
+                        Ok(_) => {}
                         Err(_) => {
                             self.task_handle = Some(handle);
                             failures.push(

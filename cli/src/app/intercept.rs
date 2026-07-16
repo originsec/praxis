@@ -693,7 +693,21 @@ impl InterceptState {
             self.paused_pending.extend(deferred);
             if self.paused_pending.len() > BUFFER_CAP {
                 let overflow = self.paused_pending.len() - BUFFER_CAP;
-                self.paused_pending.drain(..overflow);
+                //
+                // Prune generation metadata for evicted rows so the gen maps
+                // stay bounded by the buffers, not by total traffic seen. Only
+                // drop a gen once no buffer or still-queued row references the
+                // id (the same id can be deferred more than once while paused).
+                //
+                let dropped_ids: Vec<i64> =
+                    self.paused_pending.drain(..overflow).filter_map(|e| e.id).collect();
+                for id in dropped_ids {
+                    let still_referenced = self.paused_pending.iter().any(|e| e.id == Some(id))
+                        || self.buffer.iter().any(|e| e.id == Some(id));
+                    if !still_referenced {
+                        self.live_entry_gens.remove(&id);
+                    }
+                }
                 self.set_error(format!(
                     "Dropped {} paused intercept update(s); paused buffer is full",
                     overflow
@@ -984,7 +998,15 @@ impl InterceptState {
                 self.matches[pos] = m;
             } else {
                 self.matches.insert(0, m);
-                self.matches.truncate(MATCH_BUFFER_CAP);
+                //
+                // Prune gen metadata for any match evicted past the cap so the
+                // map stays bounded by the buffer, not by total matches seen.
+                //
+                if self.matches.len() > MATCH_BUFFER_CAP {
+                    for dropped in self.matches.drain(MATCH_BUFFER_CAP..) {
+                        self.live_match_gens.remove(&dropped.match_info.id);
+                    }
+                }
                 self.match_total = self.match_total.saturating_add(1);
             }
         }

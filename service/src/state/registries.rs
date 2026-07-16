@@ -39,8 +39,10 @@ impl RegisteredNode {
 
 ///
 /// Pure merge of a CommandResponse enable into retained full status.
-/// Preserves proxy_port, domains, and cleanup_required from a prior
-/// InterceptStatusUpdate.
+/// Preserves proxy_port and domains from a prior InterceptStatusUpdate.
+/// Always clears cleanup_required: a successful Enabled result means enable
+/// finished (a fuller InterceptStatusUpdate may still overwrite later, and a
+/// failed enable returns Error, which never reaches this path).
 ///
 pub fn merge_command_enabled_into_status(
     retained: Option<&InterceptStatus>,
@@ -52,6 +54,7 @@ pub fn merge_command_enabled_into_status(
             let mut next = st.clone();
             next.enabled = true;
             next.method = Some(method);
+            next.cleanup_required = false;
             next
         }
         None => InterceptStatus {
@@ -178,7 +181,15 @@ impl NodeRegistry {
             node.intercept_active = active;
             if let Some(ref mut st) = node.intercept_status {
                 st.enabled = active;
-                if !active && !st.cleanup_required {
+                if !active {
+                    //
+                    // Reached only via a successful Disabled CommandResponse
+                    // (the sole caller): cleanup finished, so clear the
+                    // residual cleanup signal and sparse fields. A failed
+                    // cleanup returns Error and leaves status for the fuller
+                    // InterceptStatusUpdate to set.
+                    //
+                    st.cleanup_required = false;
                     st.method = None;
                     st.proxy_port = None;
                     st.intercepted_domains.clear();
@@ -202,8 +213,9 @@ impl NodeRegistry {
     }
 
     ///
-    /// Apply enable/disable from CommandResponse without clobbering a fuller
-    /// InterceptStatusUpdate (port/domains/cleanup_required) already retained.
+    /// Apply enable from CommandResponse without clobbering a fuller
+    /// InterceptStatusUpdate (port/domains) already retained. Clears
+    /// cleanup_required because a successful Enabled means enable finished.
     ///
     pub async fn note_intercept_command_enabled(
         &self,
@@ -338,7 +350,7 @@ mod merge_status_tests {
     use common::{InterceptMethod, InterceptStatus};
 
     #[test]
-    fn command_enable_preserves_port_domains_and_cleanup_flag() {
+    fn command_enable_preserves_port_domains_and_clears_cleanup_flag() {
         let retained = InterceptStatus {
             node_id: "n1".into(),
             enabled: false,
@@ -353,7 +365,21 @@ mod merge_status_tests {
         assert_eq!(merged.method, Some(InterceptMethod::Vpn));
         assert_eq!(merged.proxy_port, Some(8443));
         assert_eq!(merged.intercepted_domains, vec!["a.example".to_string()]);
-        assert!(merged.cleanup_required);
+        //
+        // A stale cleanup_required from a prior failed op must not survive a
+        // successful enable and re-stick on the client's command result.
+        //
+        assert!(!merged.cleanup_required);
+    }
+
+    #[test]
+    fn command_enable_without_retained_status_is_clean() {
+        let merged = merge_command_enabled_into_status(None, "n1", InterceptMethod::Proxy);
+        assert!(merged.enabled);
+        assert_eq!(merged.method, Some(InterceptMethod::Proxy));
+        assert!(merged.proxy_port.is_none());
+        assert!(merged.intercepted_domains.is_empty());
+        assert!(!merged.cleanup_required);
     }
 }
 

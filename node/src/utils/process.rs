@@ -57,7 +57,12 @@ pub fn output_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<O
         Err(_) => {
             kill_owned_process_tree(pid);
             //
-            // Drain the waiter so we do not leave a zombie join forever.
+            // Reap the killed tree synchronously in the common case. The
+            // waiter thread owns the Child and is detached: if the process
+            // does not die within this window (e.g. uninterruptible I/O), the
+            // thread stays blocked in wait_with_output until the kill finally
+            // takes effect, then exits on its own. It is not leaked
+            // permanently unless the process is truly unkillable.
             //
             let _ = rx.recv_timeout(Duration::from_secs(2));
             Err(io::Error::new(

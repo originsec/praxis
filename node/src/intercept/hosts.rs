@@ -32,8 +32,16 @@ pub fn add_hosts_entry(domain: &str) -> Result<()> {
         common::log_info!("Hosts entry already exists for {}", domain);
         return Ok(());
     }
-    for line in content.lines() {
-        let line = line.split('#').next().unwrap_or_default();
+    for raw_line in content.lines() {
+        //
+        // Skip our own entries (any formatting) so leftover residue from a
+        // crash-interrupted cleanup doesn't block re-enable; only foreign
+        // mappings should trip the override guard.
+        //
+        if raw_line.contains(INTERCEPT_MARKER) {
+            continue;
+        }
+        let line = raw_line.split('#').next().unwrap_or_default();
         let mut fields = line.split_whitespace();
         let Some(address) = fields.next() else {
             continue;
@@ -233,10 +241,30 @@ fn replace_hosts_file(path: &PathBuf, content: &str) -> Result<()> {
         fs::rename(&temp_path, path).context("Failed to atomically replace the hosts file")?;
         #[cfg(target_os = "windows")]
         {
-            let replacement = fs::read(&temp_path)
-                .context("Failed to read prepared hosts replacement")?;
-            fs::write(path, replacement).context("Failed to replace the hosts file")?;
-            fs::remove_file(&temp_path).context("Failed to remove temporary hosts file")?;
+            //
+            // Atomic replace so a crash mid-swap cannot truncate the live
+            // hosts file. MOVEFILE_REPLACE_EXISTING overwrites the destination
+            // and MOVEFILE_WRITE_THROUGH flushes before returning.
+            //
+            use std::os::windows::ffi::OsStrExt;
+            use windows::core::PCWSTR;
+            use windows::Win32::Storage::FileSystem::{
+                MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            };
+
+            let to_wide = |p: &std::path::Path| -> Vec<u16> {
+                p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+            };
+            let src = to_wide(&temp_path);
+            let dst = to_wide(path);
+            unsafe {
+                MoveFileExW(
+                    PCWSTR(src.as_ptr()),
+                    PCWSTR(dst.as_ptr()),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            }
+            .context("Failed to atomically replace the hosts file")?;
         }
         Ok(())
     })();

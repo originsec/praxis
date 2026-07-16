@@ -228,11 +228,6 @@ impl App {
                 enable,
                 method,
             } => {
-                if !self.intercept.pending_toggles.insert(node_id.clone()) {
-                    self.intercept
-                        .set_error("An intercept command is already pending for this node");
-                    return;
-                }
                 //
                 // Enable/disable is a round-trip to the node (cert install,
                 // proxy setup) that can take seconds. Run it off the event
@@ -240,8 +235,27 @@ impl App {
                 // responsive; the status strip already updates independently
                 // via the broadcast InterceptStatusUpdate.
                 //
+                // pending_toggles is only cleared when the InterceptToggleResult
+                // event is handled, so we must not enter the tracked path
+                // without an event channel — otherwise the node is stranded
+                // "pending" forever. With no channel, fire-and-forget.
+                //
                 let client = self.client.clone();
-                let tx = self.event_tx.clone();
+                let Some(tx) = self.event_tx.clone() else {
+                    tokio::spawn(async move {
+                        let _ = if enable {
+                            client.enable_intercept(node_id, method).await
+                        } else {
+                            client.disable_intercept(node_id).await
+                        };
+                    });
+                    return;
+                };
+                if !self.intercept.pending_toggles.insert(node_id.clone()) {
+                    self.intercept
+                        .set_error("An intercept command is already pending for this node");
+                    return;
+                }
                 let result_node_id = node_id.clone();
                 tokio::spawn(async move {
                     let result = if enable {
@@ -249,13 +263,11 @@ impl App {
                     } else {
                         client.disable_intercept(node_id).await
                     };
-                    if let Some(tx) = tx {
-                        let _ = tx.send(crate::event::AppEvent::InterceptToggleResult {
-                            node_id: result_node_id,
-                            enable,
-                            result: result.map_err(|e| e.to_string()),
-                        });
-                    }
+                    let _ = tx.send(crate::event::AppEvent::InterceptToggleResult {
+                        node_id: result_node_id,
+                        enable,
+                        result: result.map_err(|e| e.to_string()),
+                    });
                 });
             }
             ConfirmKind::DiscardChainForm => {

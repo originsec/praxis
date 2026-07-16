@@ -192,7 +192,24 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                             intercept_status = ctx
                                 .node_registry
                                 .get_intercept_status(&response.node_id)
-                                .await;
+                                .await
+                                .or_else(|| {
+                                    //
+                                    // Node deregistered between command and
+                                    // response: fabricate a minimal success
+                                    // status so the waiting client still gets
+                                    // an ok result instead of hanging until the
+                                    // reaper fires. Mirrors the Disabled arm.
+                                    //
+                                    Some(common::InterceptStatus {
+                                        node_id: response.node_id.clone(),
+                                        enabled: true,
+                                        method: Some(*method),
+                                        proxy_port: None,
+                                        intercepted_domains: Vec::new(),
+                                        cleanup_required: false,
+                                    })
+                                });
                         }
                         common::InterceptCommandResult::Disabled => {
                             ctx.node_registry
