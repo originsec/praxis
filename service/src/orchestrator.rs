@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use lapin::Channel;
 use serde_json::{Value, json};
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{RwLock, mpsc};
 
 use futures_util::StreamExt;
 
@@ -32,34 +32,34 @@ const ORCHESTRATOR_PROMPT: &str = include_str!("prompts/orchestrator.prompt");
 
 //
 // One orchestrator session per client. The service holds no persistent
-// state — when the client disconnects or the session is closed, the
-// in-memory conversation is dropped. Clients are responsible for any
-// history persistence they want and may seed a new session with prior
-// messages via the `history` argument to create_session.
+// conversation state — when the client disconnects or the session is
+// closed, the in-memory conversation is dropped. Clients are responsible
+// for any history persistence they want and may seed a new session with
+// prior messages via the `history` argument to create_session.
+//
+// MCP is process-wide and shared across sessions: session/close tears
+// down conversation only; session/new reuses the warm MCP client so
+// close+new (e.g. /clear) stays milliseconds after the first connect.
 //
 
 //
-// Commands for the per-client session task. Prompt runs a model turn;
-// Reset wipes conversation history and adopts a new session id without
-// tearing down the MCP connection (used by /clear).
+// Long-lived MCP client + tool list. Owned by OrchestratorManager, not by
+// individual sessions. Dropped on service shutdown or invalidate.
 //
 
-enum SessionCommand {
-    Prompt {
-        prompt_id: String,
-        message: String,
-    },
-    Reset {
-        new_session_id: String,
-        reply: oneshot::Sender<()>,
-    },
+struct SharedMcp {
+    //
+    // Keeps the streamable-http client (and its RabbitMQ-backed server
+    // session) alive. Sessions only hold a Peer clone.
+    //
+    _service: rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    peer: rmcp::service::Peer<rmcp::RoleClient>,
+    tools: Vec<Tool>,
 }
 
 struct OrchestratorSession {
     session_id: String,
-    provider: String,
-    model: String,
-    prompt_tx: mpsc::Sender<SessionCommand>,
+    prompt_tx: mpsc::Sender<(String, String)>,
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
     current_prompt_id: RwLock<String>,
@@ -77,17 +77,94 @@ impl OrchestratorSession {
 }
 
 //
-// Manages orchestrator sessions, one per client_id.
+// Manages orchestrator sessions, one per client_id, plus a shared MCP
+// connection used by every session.
 //
 
 pub struct OrchestratorManager {
     sessions: RwLock<HashMap<String, OrchestratorSession>>,
+    shared_mcp: RwLock<Option<SharedMcp>>,
 }
 
 impl OrchestratorManager {
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            shared_mcp: RwLock::new(None),
+        }
+    }
+
+    //
+    // Connect to the MCP server once and cache peer + tools. Subsequent
+    // session/new calls hit this cache (warm path for /clear).
+    //
+
+    async fn ensure_shared_mcp(&self, mcp_port: u16) -> Result<(rmcp::service::Peer<rmcp::RoleClient>, Vec<Tool>), String> {
+        {
+            let guard = self.shared_mcp.read().await;
+            if let Some(shared) = guard.as_ref() {
+                return Ok((shared.peer.clone(), shared.tools.clone()));
+            }
+        }
+
+        let mut guard = self.shared_mcp.write().await;
+        //
+        // Double-check after acquiring the write lock so concurrent
+        // session/new only pay for one cold connect.
+        //
+        if let Some(shared) = guard.as_ref() {
+            return Ok((shared.peer.clone(), shared.tools.clone()));
+        }
+
+        let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
+        common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
+
+        let service = connect_orchestrator_mcp(&mcp_url).await?;
+        let peer = service.peer().clone();
+
+        let mcp_tools =
+            match tokio::time::timeout(std::time::Duration::from_secs(20), peer.list_all_tools())
+                .await
+            {
+                Ok(Ok(t)) => t,
+                Ok(Err(e)) => {
+                    common::log_error!("Failed to list MCP tools: {}", e);
+                    return Err(format!(
+                        "Connected to the MCP server but failed to load its tools: {e}"
+                    ));
+                }
+                Err(_) => {
+                    common::log_error!("Timed out listing MCP tools");
+                    return Err(
+                        "Connected to the MCP server but timed out loading its tools.".to_string(),
+                    );
+                }
+            };
+
+        common::log_info!(
+            "Orchestrator fetched {} tools from MCP server (shared)",
+            mcp_tools.len()
+        );
+
+        let tools = convert_mcp_tools(mcp_tools);
+        *guard = Some(SharedMcp {
+            _service: service,
+            peer: peer.clone(),
+            tools: tools.clone(),
+        });
+
+        Ok((peer, tools))
+    }
+
+    //
+    // Drop the shared MCP so the next ensure reconnects. Used on shutdown
+    // and when the transport is known dead.
+    //
+
+    async fn invalidate_shared_mcp(&self) {
+        let mut guard = self.shared_mcp.write().await;
+        if guard.take().is_some() {
+            common::log_info!("Orchestrator shared MCP connection invalidated");
         }
     }
 
@@ -166,57 +243,15 @@ impl OrchestratorManager {
         let session_id_owned = session_id.to_string();
 
         //
-        // Connect to the MCP server and load its tools up front, before the
-        // session is registered. Doing this synchronously means a failure
-        // (server not listening, backend unreachable) is reported straight
-        // back on session/new with a real message, instead of being
-        // discovered later by the detached task — which used to leave a
-        // registered-but-dead session that failed every prompt with the
-        // opaque "channel closed". Bounded by a timeout so a hung server
-        // can't stall session creation indefinitely.
-        //
-        // Each MCP HTTP session spins up a full RabbitMQ-backed
-        // ServiceMcpClient on the server side; cold connect + register
-        // commonly takes several seconds, and more right after a prior
-        // session's MCP client is still tearing down. Use a generous
-        // timeout and one retry so /clear (session replace) is reliable.
+        // Shared MCP: first session/new pays for connect + list tools;
+        // subsequent creates (close+new /clear) reuse the warm client.
+        // Failure is still reported on session/new before we register a
+        // session, so the client never gets a dead session id.
         //
 
-        let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
-        common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
+        let (peer, mcp_tools) = self.ensure_shared_mcp(mcp_port).await?;
 
-        let mcp_service = match connect_orchestrator_mcp(&mcp_url).await {
-            Ok(s) => s,
-            Err(message) => return Err(message),
-        };
-
-        let peer = mcp_service.peer().clone();
-
-        let mcp_tools =
-            match tokio::time::timeout(std::time::Duration::from_secs(20), peer.list_all_tools())
-                .await
-            {
-                Ok(Ok(t)) => t,
-                Ok(Err(e)) => {
-                    common::log_error!("Failed to list MCP tools: {}", e);
-                    return Err(format!(
-                        "Connected to the MCP server but failed to load its tools: {e}"
-                    ));
-                }
-                Err(_) => {
-                    common::log_error!("Timed out listing MCP tools");
-                    return Err(
-                        "Connected to the MCP server but timed out loading its tools.".to_string(),
-                    );
-                }
-            };
-
-        common::log_info!(
-            "Orchestrator fetched {} tools from MCP server",
-            mcp_tools.len()
-        );
-
-        let mut tools = convert_mcp_tools(mcp_tools);
+        let mut tools = mcp_tools;
         tools.extend(get_local_tool_definitions());
 
         let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
@@ -247,9 +282,10 @@ impl OrchestratorManager {
         }
 
         //
-        // MCP setup succeeded — now replace any prior session for this client
-        // (one session per client). Done after setup so a failed create never
-        // tears down a still-working session.
+        // MCP ensure succeeded — now replace any prior session for this
+        // client (one session per client). Done after ensure so a failed
+        // create never tears down a still-working session. Shared MCP is
+        // not tied to the previous session.
         //
 
         {
@@ -259,23 +295,21 @@ impl OrchestratorManager {
             }
         }
 
-        let (prompt_tx, mut prompt_rx) = mpsc::channel::<SessionCommand>(32);
+        let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, String)>(32);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let cancel_flag_clone = Arc::clone(&cancel_flag);
 
         let client_id_owned = client_id.to_string();
-        let mut sid = session_id_owned.clone();
+        let sid = session_id_owned.clone();
         let publish_channel_clone = publish_channel.clone();
-        let provider_name = model_def.provider.clone();
-        let model_name = model.clone();
 
         //
         // The session task is detached: dropping a JoinHandle does not abort
         // the task; it exits via the stop flag / prompt channel closing. It
-        // owns the connected MCP service (keeping the connection alive) and
-        // the seeded conversation history.
+        // owns the conversation history and uses the shared MCP peer for
+        // tools (MCP lifetime is independent of this task).
         //
         tokio::spawn(async move {
             macro_rules! send_msg {
@@ -284,44 +318,10 @@ impl OrchestratorManager {
                 }};
             }
 
-            while let Some(cmd) = prompt_rx.recv().await {
+            while let Some((prompt_id, prompt)) = prompt_rx.recv().await {
                 if stop_flag_clone.load(Ordering::SeqCst) {
                     break;
                 }
-
-                let (prompt_id, prompt) = match cmd {
-                    SessionCommand::Reset {
-                        new_session_id,
-                        reply,
-                    } => {
-                        //
-                        // Keep the system prompt; drop all turns. MCP and
-                        // tools stay warm — only the conversation id and
-                        // history change.
-                        //
-                        let system = conversation_history
-                            .iter()
-                            .find(|m| m.role == common::ai::Role::System)
-                            .cloned();
-                        conversation_history.clear();
-                        if let Some(sys) = system {
-                            conversation_history.push(sys);
-                        }
-                        sid = new_session_id;
-                        cancel_flag_clone.store(false, Ordering::SeqCst);
-                        let _ = reply.send(());
-                        common::log_info!(
-                            "Orchestrator session reset for {} -> {}",
-                            common::short_id(&client_id_owned),
-                            common::short_id(&sid)
-                        );
-                        continue;
-                    }
-                    SessionCommand::Prompt {
-                        prompt_id,
-                        message,
-                    } => (prompt_id, message),
-                };
 
                 cancel_flag_clone.store(false, Ordering::SeqCst);
 
@@ -607,14 +607,10 @@ impl OrchestratorManager {
                     ));
                 }
             }
-
-            drop(mcp_service);
         });
 
         let session = OrchestratorSession {
             session_id: session_id_owned.clone(),
-            provider: provider_name,
-            model: model_name,
             prompt_tx,
             stop_flag,
             cancel_flag,
@@ -629,84 +625,6 @@ impl OrchestratorManager {
         Ok(())
     }
 
-    //
-    // Mint a new session id and wipe conversation history on the live
-    // session task. MCP connection and tools are retained — this is the
-    // fast path for /clear (avoids a full MCP reconnect).
-    //
-    // Returns (new_session_id, provider, model).
-    //
-
-    pub async fn reset_session(
-        &self,
-        client_id: &str,
-        session_id: &str,
-    ) -> Result<(String, String, String), String> {
-        let prefix = if client_id.starts_with("cli_") {
-            "CLI"
-        } else if client_id.starts_with("web_") {
-            "WEB"
-        } else {
-            "ACP"
-        };
-        let new_session_id = format!("{}_{}", prefix, uuid::Uuid::new_v4());
-
-        let (prompt_tx, provider, model) = {
-            let sessions = self.sessions.read().await;
-            let session = sessions
-                .get(client_id)
-                .ok_or_else(|| "No active Orchestrator session for this client.".to_string())?;
-            if session.session_id != session_id {
-                return Err("Session id does not match the active Orchestrator session.".into());
-            }
-            (
-                session.prompt_tx.clone(),
-                session.provider.clone(),
-                session.model.clone(),
-            )
-        };
-
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if prompt_tx
-            .send(SessionCommand::Reset {
-                new_session_id: new_session_id.clone(),
-                reply: reply_tx,
-            })
-            .await
-            .is_err()
-        {
-            return Err("Orchestrator session is no longer active.".into());
-        }
-
-        if reply_rx.await.is_err() {
-            return Err("Orchestrator session reset was cancelled.".into());
-        }
-
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(session) = sessions.get_mut(client_id) {
-                //
-                // Only adopt the new id if this is still the session we
-                // reset (a concurrent full recreate would have replaced
-                // the entry).
-                //
-                if session.session_id == session_id
-                    || session.prompt_tx.same_channel(&prompt_tx)
-                {
-                    session.session_id = new_session_id.clone();
-                }
-            }
-        }
-
-        common::log_info!(
-            "Orchestrator reset session for {} -> {}",
-            common::short_id(client_id),
-            common::short_id(&new_session_id)
-        );
-
-        Ok((new_session_id, provider, model))
-    }
-
     pub async fn send_prompt(
         &self,
         client_id: &str,
@@ -719,14 +637,7 @@ impl OrchestratorManager {
         match sessions.get(client_id) {
             Some(session) if session.session_id == session_id => {
                 *session.current_prompt_id.write().await = prompt_id.clone();
-                if let Err(e) = session
-                    .prompt_tx
-                    .send(SessionCommand::Prompt {
-                        prompt_id: prompt_id.clone(),
-                        message,
-                    })
-                    .await
-                {
+                if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
                     //
                     // The session is registered but its task has exited, so
                     // the channel is closed. Treat it as a lost session
@@ -790,6 +701,8 @@ impl OrchestratorManager {
         for (_, session) in sessions.drain() {
             session.stop();
         }
+        drop(sessions);
+        self.invalidate_shared_mcp().await;
     }
 
     pub async fn cancel_prompt(
@@ -833,11 +746,10 @@ fn prompt_id_to_json_rpc_id(prompt_id: &str) -> Value {
 }
 
 //
-// Connect the orchestrator as an MCP client. Each attempt waits for the
-// streamable-http handshake, which on the server side opens a new
-// RabbitMQ client and registers it — often several seconds. One retry
-// covers the window where a just-closed prior session is still
-// releasing its MCP HTTP session.
+// Cold-path MCP connect for the shared client. Each attempt waits for
+// the streamable-http handshake (server-side RabbitMQ client register).
+// One retry covers transient startup races. Warm session/new reuses the
+// cached SharedMcp and never calls this.
 //
 
 async fn connect_orchestrator_mcp(

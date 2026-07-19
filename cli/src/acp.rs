@@ -8,7 +8,7 @@ use acp::schema::{
     ToolCallContent, ToolCallStatus,
 };
 use agent_client_protocol as acp;
-use common::acp_ext::{ERR_ORCHESTRATOR_SESSION_NOT_FOUND, EXT_PRAXIS_SESSION_RESET};
+use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -110,14 +110,6 @@ enum BridgeCommand {
         session_id: String,
         reply: oneshot::Sender<acp::Result<CloseSessionResponse>>,
     },
-    //
-    // In-place conversation reset: new session id, same MCP. Fast path
-    // for /clear.
-    //
-    ResetSession {
-        session_id: String,
-        reply: oneshot::Sender<anyhow::Result<(String, Option<String>, Option<String>)>>,
-    },
     Prompt {
         session_id: String,
         text: String,
@@ -186,28 +178,6 @@ impl AcpBridgeHandle {
         match rx.await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(anyhow::anyhow!("close session failed: {e}")),
-            Err(_) => Err(anyhow::anyhow!("ACP bridge closed")),
-        }
-    }
-
-    //
-    // Reset conversation in place. Returns (new_session_id, provider, model).
-    // Also emits SessionCreated so the TUI installs the new id.
-    //
-    pub async fn reset_session(
-        &self,
-        session_id: &str,
-    ) -> anyhow::Result<(String, Option<String>, Option<String>)> {
-        let (tx, rx) = oneshot::channel();
-        self.cmd_tx
-            .send(BridgeCommand::ResetSession {
-                session_id: session_id.to_string(),
-                reply: tx,
-            })
-            .map_err(|_| anyhow::anyhow!("ACP bridge closed"))?;
-        match rx.await {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(e),
             Err(_) => Err(anyhow::anyhow!("ACP bridge closed")),
         }
     }
@@ -692,56 +662,6 @@ async fn run_bridge(
                                 ));
                             }
                             let _ = reply.send(result);
-                        }
-
-                        BridgeCommand::ResetSession { session_id, reply } => {
-                            let req = match acp::UntypedMessage::new(
-                                EXT_PRAXIS_SESSION_RESET,
-                                serde_json::json!({ "sessionId": session_id }),
-                            ) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    let _ = reply.send(Err(anyhow::anyhow!(
-                                        "failed to build reset request: {e}"
-                                    )));
-                                    return Ok(());
-                                }
-                            };
-                            let result = cx_clone.send_request(req).block_task().await;
-                            match result {
-                                Ok(value) => {
-                                    let new_id = value
-                                        .get("sessionId")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or_default()
-                                        .to_string();
-                                    if new_id.is_empty() {
-                                        let _ = reply.send(Err(anyhow::anyhow!(
-                                            "session reset returned empty sessionId"
-                                        )));
-                                    } else {
-                                        let provider = value
-                                            .get("provider")
-                                            .and_then(|v| v.as_str())
-                                            .map(String::from);
-                                        let model = value
-                                            .get("model")
-                                            .and_then(|v| v.as_str())
-                                            .map(String::from);
-                                        let _ = event_tx.send(AppEvent::AcpNotification(
-                                            AcpNotification::SessionCreated {
-                                                session_id: new_id.clone(),
-                                                provider: provider.clone(),
-                                                model: model.clone(),
-                                            },
-                                        ));
-                                        let _ = reply.send(Ok((new_id, provider, model)));
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = reply.send(Err(anyhow::anyhow!("{e}")));
-                                }
-                            }
                         }
 
                         BridgeCommand::Prompt {

@@ -287,12 +287,11 @@ impl App {
     }
 
     //
-    // Start a fresh orchestrator conversation. Prefer an in-place reset
-    // (`_praxis/session/reset`): mints a new session id and wipes model
-    // history while keeping the live MCP connection. Falls back to a
-    // full session/new when there is no live session to reset.
-    // Prior session files under ~/.praxis/sessions/ are left for
-    // `praxis --resume`.
+    // Start a fresh orchestrator conversation via standard ACP:
+    // session/close (if any) then session/new. The service holds a
+    // shared MCP client, so warm close+new is milliseconds after the
+    // first connect. Prior session files under ~/.praxis/sessions/ are
+    // left for `praxis --resume`.
     //
 
     pub(crate) async fn clear_orchestrator_session(&mut self) {
@@ -311,6 +310,13 @@ impl App {
             .active_session()
             .map(|s| s.session_id.clone())
             .filter(|s| !s.is_empty());
+        if let Some(sid) = active_sid {
+            //
+            // Await close so session/new cannot race service-side
+            // teardown (bridge commands are otherwise concurrent).
+            //
+            let _ = self.acp.close_session(&sid).await;
+        }
 
         self.orchestrator.stored = None;
         self.orchestrator.sessions.clear();
@@ -318,18 +324,6 @@ impl App {
         self.orchestrator.pending_history = None;
         self.orchestrator.pending_seed_messages = None;
         self.orchestrator.pending_prompt = None;
-
-        if let Some(sid) = active_sid {
-            //
-            // Reset emits SessionCreated with the new id. On failure
-            // (no live service session) fall back to a full create.
-            //
-            if let Err(e) = self.acp.reset_session(&sid).await {
-                tracing::debug!("orchestrator reset failed, falling back to create: {e}");
-                self.create_new_orchestrator_session().await;
-            }
-            return;
-        }
 
         self.create_new_orchestrator_session().await;
     }
@@ -445,36 +439,6 @@ impl App {
         }
     }
 
-    pub(crate) async fn switch_to_session(&mut self, index: usize) {
-        self.orchestrator.active_session_index = Some(index);
-    }
-
-    pub(crate) async fn close_active_orchestrator_session(&mut self) {
-        if let Some(session) = self.orchestrator.active_session() {
-            let session_id = session.session_id.clone();
-            let _ = self.acp.close_session(&session_id).await;
-
-            //
-            // Remove locally immediately and switch to another session if
-            // one exists.
-            //
-
-            if let Some(idx) = self
-                .orchestrator
-                .sessions
-                .iter()
-                .position(|s| s.session_id == session_id)
-            {
-                self.orchestrator.sessions.remove(idx);
-                if self.orchestrator.sessions.is_empty() {
-                    self.orchestrator.active_session_index = None;
-                } else {
-                    let new_idx = idx.min(self.orchestrator.sessions.len() - 1);
-                    self.switch_to_session(new_idx).await;
-                }
-            }
-        }
-    }
     pub(crate) async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {

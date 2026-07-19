@@ -469,16 +469,23 @@ impl App {
 
     pub(crate) async fn select_model(&mut self, model_name: &str) {
         //
-        // Replace via session/new (service drops the prior session only
-        // after the new MCP connection is ready). Avoid close-then-create
-        // which races MCP teardown and can time out reconnecting.
+        // Standard ACP: close current session if any, then session/new
+        // with the selected model. Shared MCP keeps this fast.
         //
-        if self.orchestrator.create_in_flight {
-            return;
+        if let Some(sid) = self
+            .orchestrator
+            .active_session()
+            .map(|s| s.session_id.clone())
+            .filter(|s| !s.is_empty())
+        {
+            let _ = self.acp.close_session(&sid).await;
         }
         self.orchestrator.pending_history = None;
         self.orchestrator.pending_seed_messages = None;
         self.orchestrator.pending_prompt = None;
+        if self.orchestrator.create_in_flight {
+            return;
+        }
         self.orchestrator.create_in_flight = true;
         if let Err(e) = self
             .acp

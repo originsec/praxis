@@ -8,11 +8,6 @@ pub const EXT_PRAXIS_READ_FILE: &str = "_praxis/read_file";
 pub const EXT_PRAXIS_WRITE_FILE: &str = "_praxis/write_file";
 pub const EXT_PRAXIS_GREP_FILES: &str = "_praxis/grep_files";
 pub const EXT_PRAXIS_WRITE_SESSION_CONTENT: &str = "_praxis/write_session_content";
-//
-// Reset an orchestrator conversation in place: mint a new session id and
-// wipe model history while keeping the live MCP connection and tools.
-//
-pub const EXT_PRAXIS_SESSION_RESET: &str = "_praxis/session/reset";
 
 //
 // JSON-RPC error code the service returns when a prompt targets an
