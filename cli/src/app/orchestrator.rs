@@ -147,6 +147,13 @@ pub struct OrchestratorState {
     pub recovery_prompt: Option<String>,
     pub recovery_history: Option<Vec<(String, String)>>,
     //
+    // True while a session/new is outstanding. Prevents a second create
+    // (e.g. first prompt after /clear before SessionCreated arrives) from
+    // racing the first one and dropping the pending prompt onto a session
+    // that is immediately replaced.
+    //
+    pub create_in_flight: bool,
+    //
     // When a plan is showing, conversation | plan horizontal split.
     // Percentage is the conversation (left) share.
     //
@@ -199,6 +206,7 @@ impl Default for OrchestratorState {
             recovery_attempts: 0,
             recovery_prompt: None,
             recovery_history: None,
+            create_in_flight: false,
             plan_split_percent: 67,
             plan_dragging: false,
         }
@@ -279,21 +287,30 @@ impl App {
     }
 
     //
-    // Start a fresh orchestrator conversation in place. Closes the
-    // live service session and clears the local transcript, but leaves
-    // the prior session's record under ~/.praxis/sessions/ so it can
-    // be brought back later with `praxis --resume`.
+    // Start a fresh orchestrator conversation. Prefer an in-place reset
+    // (`_praxis/session/reset`): mints a new session id and wipes model
+    // history while keeping the live MCP connection. Falls back to a
+    // full session/new when there is no live session to reset.
+    // Prior session files under ~/.praxis/sessions/ are left for
+    // `praxis --resume`.
     //
 
     pub(crate) async fn clear_orchestrator_session(&mut self) {
+        //
+        // Abort any in-flight recovery so a delayed retry cannot
+        // recreate the old conversation after we start fresh.
+        //
+        self.orchestrator.recovering = false;
+        self.orchestrator.recovery_attempts = 0;
+        self.orchestrator.recovery_prompt = None;
+        self.orchestrator.recovery_history = None;
+        self.orchestrator.create_in_flight = false;
+
         let active_sid = self
             .orchestrator
             .active_session()
             .map(|s| s.session_id.clone())
             .filter(|s| !s.is_empty());
-        if let Some(sid) = active_sid {
-            let _ = self.acp.close_session(&sid).await;
-        }
 
         self.orchestrator.stored = None;
         self.orchestrator.sessions.clear();
@@ -302,19 +319,64 @@ impl App {
         self.orchestrator.pending_seed_messages = None;
         self.orchestrator.pending_prompt = None;
 
+        if let Some(sid) = active_sid {
+            //
+            // Reset emits SessionCreated with the new id. On failure
+            // (no live service session) fall back to a full create.
+            //
+            if let Err(e) = self.acp.reset_session(&sid).await {
+                tracing::debug!("orchestrator reset failed, falling back to create: {e}");
+                self.create_new_orchestrator_session().await;
+            }
+            return;
+        }
+
         self.create_new_orchestrator_session().await;
     }
 
     pub(crate) async fn create_new_orchestrator_session(&mut self) {
-        let history = self.orchestrator.pending_history.take().unwrap_or_default();
-        if let Err(e) = self.acp.create_session(".", None, history).await {
-            if let Some(session) = self.orchestrator.active_session_mut() {
-                session.messages.push(ConversationEntry::Error(format!(
-                    "Failed to create session: {}",
-                    e
-                )));
-            }
+        //
+        // A second session/new while one is already outstanding replaces
+        // the first service session and can steal/drop a pending_prompt
+        // that was already attached to the first SessionCreated.
+        //
+        if self.orchestrator.create_in_flight {
+            return;
         }
+
+        let history = self.orchestrator.pending_history.take().unwrap_or_default();
+        self.orchestrator.create_in_flight = true;
+        if let Err(e) = self.acp.create_session(".", None, history).await {
+            self.orchestrator.create_in_flight = false;
+            self.push_orchestrator_error(format!("Failed to create session: {e}"));
+        }
+    }
+
+    //
+    // Attach an error to the active/streaming session, or install a
+    // placeholder empty-id session so the message is visible (e.g.
+    // create failed after /clear left sessions empty).
+    //
+    pub(crate) fn push_orchestrator_error(&mut self, message: String) {
+        let idx = self
+            .orchestrator
+            .sessions
+            .iter()
+            .position(|s| s.is_streaming)
+            .or(self.orchestrator.active_session_index);
+
+        if let Some(session) = idx.and_then(|i| self.orchestrator.sessions.get_mut(i)) {
+            session.is_streaming = false;
+            session.messages.push(ConversationEntry::Error(message));
+            return;
+        }
+
+        let mut session = OrchestratorSessionState::new(String::new(), "Session".to_string());
+        session.loaded = true;
+        session.messages.push(ConversationEntry::Error(message));
+        self.orchestrator.sessions.clear();
+        self.orchestrator.sessions.push(session);
+        self.orchestrator.active_session_index = Some(0);
     }
 
     //
@@ -333,6 +395,11 @@ impl App {
             session.is_streaming = true;
         }
 
+        //
+        // Recovery must always issue a fresh session/new; clear any stale
+        // in-flight guard left by a prior failed create.
+        //
+        self.orchestrator.create_in_flight = false;
         self.create_new_orchestrator_session().await;
     }
 
@@ -480,19 +547,25 @@ impl App {
                     }
 
                     //
-                    // Create a session if none exists. The prompt will be
-                    // sent when SessionCreated arrives.
+                    // Create a session if none exists (or create is still
+                    // outstanding after /clear / init). The prompt is
+                    // held in pending_prompt and sent on SessionCreated.
                     //
 
-                    let needs_create = self
-                        .orchestrator
-                        .active_session()
-                        .map(|s| s.session_id.is_empty())
-                        .unwrap_or(true);
+                    let needs_create = self.orchestrator.create_in_flight
+                        || self
+                            .orchestrator
+                            .active_session()
+                            .map(|s| s.session_id.is_empty())
+                            .unwrap_or(true);
                     if needs_create {
                         self.orchestrator.pending_prompt = Some(input.clone());
                         self.orchestrator.input.clear();
                         self.orchestrator.cursor_pos = 0;
+                        //
+                        // create_new is a no-op when create_in_flight —
+                        // only queue the prompt for the outstanding create.
+                        //
                         self.create_new_orchestrator_session().await;
                         return;
                     }
@@ -675,6 +748,8 @@ impl App {
                 // One orchestrator session per client. Drop any prior
                 // local session state and install the new one.
                 //
+
+                self.orchestrator.create_in_flight = false;
 
                 let label = "Session".to_string();
                 let mut session = OrchestratorSessionState::new(session_id.clone(), label);
@@ -1006,6 +1081,12 @@ impl App {
 
             AcpNotification::Error { message } => {
                 //
+                // Create failures also arrive here; release the in-flight
+                // guard so the user can retry (or /clear again).
+                //
+                self.orchestrator.create_in_flight = false;
+
+                //
                 // While recovering, an error means the recreate attempt
                 // failed (the service is still coming up). Retry with
                 // backoff rather than surfacing it, until the attempt cap.
@@ -1015,21 +1096,7 @@ impl App {
                     return;
                 }
 
-                //
-                // Show error in the streaming session if one exists,
-                // otherwise the active session.
-                //
-                let idx = self
-                    .orchestrator
-                    .sessions
-                    .iter()
-                    .position(|s| s.is_streaming)
-                    .or(self.orchestrator.active_session_index);
-
-                if let Some(session) = idx.and_then(|i| self.orchestrator.sessions.get_mut(i)) {
-                    session.is_streaming = false;
-                    session.messages.push(ConversationEntry::Error(message));
-                }
+                self.push_orchestrator_error(message);
             }
         }
     }

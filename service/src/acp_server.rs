@@ -164,6 +164,19 @@ impl AcpServer {
 
         let params_value: Value = serde_json::from_str(raw_params.get()).unwrap_or(Value::Null);
 
+        //
+        // Extension methods (leading `_`) are not in the stock ClientRequest
+        // map. Handle them before typed parse, same pattern as the node ACP
+        // server.
+        //
+        if method.starts_with('_') {
+            if let Some(id) = id {
+                self.handle_extension_method(client_id, id, &method, &params_value, publish_channel)
+                    .await;
+            }
+            return;
+        }
+
         if id.is_some() {
             match ClientRequest::parse_message(&method, &params_value) {
                 Ok(request) => {
@@ -515,6 +528,73 @@ impl AcpServer {
             )
             .await;
         }
+    }
+
+    //
+    // Custom `_praxis/*` methods on the service ACP surface.
+    //
+
+    async fn handle_extension_method(
+        &self,
+        client_id: &str,
+        id: Value,
+        method: &str,
+        params: &Value,
+        publish_channel: &Channel,
+    ) {
+        if method == common::acp_ext::EXT_PRAXIS_SESSION_RESET {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if session_id.is_empty() {
+                let _ = send_to_client(
+                    publish_channel,
+                    client_id,
+                    acp_error_response(id, -32602, "Missing sessionId"),
+                )
+                .await;
+                return;
+            }
+
+            match self
+                .orchestrator_manager
+                .reset_session(client_id, session_id)
+                .await
+            {
+                Ok((new_session_id, provider, model)) => {
+                    let _ = send_to_client(
+                        publish_channel,
+                        client_id,
+                        acp_response(
+                            id,
+                            json!({
+                                "sessionId": new_session_id,
+                                "provider": provider,
+                                "model": model,
+                            }),
+                        ),
+                    )
+                    .await;
+                }
+                Err(message) => {
+                    let _ = send_to_client(
+                        publish_channel,
+                        client_id,
+                        acp_error_response(id, -32000, &message),
+                    )
+                    .await;
+                }
+            }
+            return;
+        }
+
+        let _ = send_to_client(
+            publish_channel,
+            client_id,
+            acp_error_response(id, -32601, &format!("Method not found: {method}")),
+        )
+        .await;
     }
 }
 

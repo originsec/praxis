@@ -138,6 +138,11 @@ automatically starts a fresh session (re-seeding it with the prior transcript)
 and resends your prompt — no action needed. If recovery can't re-establish the
 session, use `/clear` to start a clean one.
 
+`/clear` resets the conversation **in place**: the service mints a new session
+id and wipes model history while keeping the live MCP connection and tool set
+warm. That makes clear near-instant (no MCP reconnect). If there is no live
+session to reset, the TUI falls back to a full `session/new`.
+
 To bring back a prior conversation deliberately, start the TUI with
 `praxis --continue` (or `--resume`): the saved transcript is replayed locally
 and re-seeded as history for the next prompt.

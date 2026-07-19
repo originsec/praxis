@@ -936,6 +936,21 @@ impl McpServerManager {
         let rabbitmq_url = rabbitmq_url.to_string();
 
         let service_ct = ct.clone();
+
+        //
+        // Orchestrator (and other) MCP clients hold a session for the life of
+        // a conversation — often idle for long stretches between prompts.
+        // rmcp's default LocalSessionManager keep_alive is 5 minutes of
+        // inactivity, which kills the session worker and leaves the client
+        // reconnecting to a deleted session (404 spam) while tool calls fail.
+        // Session lifetime is already owned by the orchestrator task (it drops
+        // the RunningService on close/replace), so disable the inactivity
+        // timeout here.
+        //
+        let mut session_manager =
+            rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default();
+        session_manager.session_config.keep_alive = None;
+
         let service: rmcp::transport::streamable_http_server::StreamableHttpService<
             PraxisServer<ServiceMcpClient>,
             rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
@@ -955,9 +970,7 @@ impl McpServerManager {
                     }
                 }
             },
-            std::sync::Arc::new(
-                rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default(),
-            ),
+            std::sync::Arc::new(session_manager),
             rmcp::transport::streamable_http_server::StreamableHttpServerConfig::default()
                 .with_cancellation_token(service_ct),
         );
