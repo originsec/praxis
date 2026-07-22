@@ -75,32 +75,62 @@ fn plain_tool_marker_state(candidate: &[u8]) -> ToolMarkerState {
     }
 }
 
-fn streaming_tool_marker_position(text: &str) -> Option<usize> {
-    let plain = text
-        .bytes()
+//
+// Some models (GLM, Qwen, and other Hermes-style tool-calling templates)
+// wrap a call in `<tool_call>...</tool_call>` by default, even though
+// orchestrator.prompt asks for bare JSON with no wrapper. Treat the
+// opening tag as its own marker so it is held back from the display the
+// same way `{"tool":` is — once it appears, Rule 2 (stop talking after
+// the call) means nothing meaningful ever follows it anyway.
+//
+const TOOL_CALL_TAG: &[u8] = b"<tool_call>";
+
+fn tag_marker_state(candidate: &[u8]) -> ToolMarkerState {
+    if candidate.first() != Some(&b'<') {
+        return ToolMarkerState::None;
+    }
+
+    let compare_len = candidate.len().min(TOOL_CALL_TAG.len());
+    if candidate[..compare_len] != TOOL_CALL_TAG[..compare_len] {
+        return ToolMarkerState::None;
+    }
+
+    if candidate.len() < TOOL_CALL_TAG.len() {
+        ToolMarkerState::Prefix
+    } else {
+        ToolMarkerState::Complete
+    }
+}
+
+fn marker_state_at(bytes: &[u8], index: usize) -> ToolMarkerState {
+    match bytes[index] {
+        b'{' => plain_tool_marker_state(&bytes[index..]),
+        b'<' => tag_marker_state(&bytes[index..]),
+        _ => ToolMarkerState::None,
+    }
+}
+
+fn earliest_marker(text: &str, want: ToolMarkerState) -> Option<usize> {
+    let bytes = text.as_bytes();
+    bytes
+        .iter()
         .enumerate()
-        .filter(|(_, byte)| *byte == b'{')
-        .find_map(|(index, _)| {
-            (plain_tool_marker_state(&text.as_bytes()[index..]) == ToolMarkerState::Complete)
-                .then_some(index)
-        });
-    match (plain, text.find("```")) {
-        (Some(plain), Some(fence)) => Some(plain.min(fence)),
-        (Some(plain), None) => Some(plain),
+        .filter(|(_, byte)| **byte == b'{' || **byte == b'<')
+        .find_map(|(index, _)| (marker_state_at(bytes, index) == want).then_some(index))
+}
+
+fn streaming_tool_marker_position(text: &str) -> Option<usize> {
+    let marker = earliest_marker(text, ToolMarkerState::Complete);
+    match (marker, text.find("```")) {
+        (Some(marker), Some(fence)) => Some(marker.min(fence)),
+        (Some(marker), None) => Some(marker),
         (None, Some(fence)) => Some(fence),
         (None, None) => None,
     }
 }
 
 fn trailing_tool_marker_prefix_start(text: &str) -> Option<usize> {
-    let plain = text
-        .bytes()
-        .enumerate()
-        .filter(|(_, byte)| *byte == b'{')
-        .find_map(|(index, _)| {
-            (plain_tool_marker_state(&text.as_bytes()[index..]) == ToolMarkerState::Prefix)
-                .then_some(index)
-        });
+    let marker = earliest_marker(text, ToolMarkerState::Prefix);
     let fence = if text.ends_with("``") {
         Some(text.len() - 2)
     } else if text.ends_with('`') {
@@ -109,9 +139,9 @@ fn trailing_tool_marker_prefix_start(text: &str) -> Option<usize> {
         None
     };
 
-    match (plain, fence) {
-        (Some(plain), Some(fence)) => Some(plain.min(fence)),
-        (Some(plain), None) => Some(plain),
+    match (marker, fence) {
+        (Some(marker), Some(fence)) => Some(marker.min(fence)),
+        (Some(marker), None) => Some(marker),
         (None, Some(fence)) => Some(fence),
         (None, None) => None,
     }
@@ -1195,6 +1225,36 @@ mod tests {
     fn streaming_tool_marker_does_not_hold_ordinary_braces() {
         assert_eq!(trailing_tool_marker_prefix_start("Result: {done"), None);
         assert_eq!(streaming_tool_marker_position("Result: {done}"), None);
+    }
+
+    #[test]
+    fn streaming_tool_marker_detects_tool_call_tag() {
+        assert_eq!(
+            streaming_tool_marker_position(
+                "Checking nodes. <tool_call>{\"tool\": \"node_list\", \"args\": {}}"
+            ),
+            Some(16)
+        );
+    }
+
+    #[test]
+    fn streaming_tool_marker_tag_survives_a_chunk_boundary() {
+        let first_chunk = "Checking nodes and operations available. <tool_call";
+        let marker_start = trailing_tool_marker_prefix_start(first_chunk)
+            .expect("the trailing partial tag must be retained");
+        let visible = &first_chunk[..marker_start];
+        let retained = &first_chunk[marker_start..];
+
+        assert_eq!(visible, "Checking nodes and operations available. ");
+
+        let next_buffer = format!("{retained}>{{\"tool\": \"node_list\", \"args\": {{}}}}");
+        assert_eq!(streaming_tool_marker_position(&next_buffer), Some(0));
+    }
+
+    #[test]
+    fn streaming_tool_marker_does_not_hold_ordinary_angle_brackets() {
+        assert_eq!(trailing_tool_marker_prefix_start("Result: <done"), None);
+        assert_eq!(streaming_tool_marker_position("Result: <done>"), None);
     }
 
     #[tokio::test]
