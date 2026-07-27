@@ -105,7 +105,7 @@ fn left_segments(
 
     for (i, (key, label, window)) in NAV_PAIRS.iter().enumerate() {
         if i > 0 {
-            segments.push(Segment::text(vec![Span::raw("  ")]));
+            segments.push(Segment::text(vec![chrome::mid_dot()]));
         }
         segments.push(Segment::button(
             nav_label(key, label, active_window == *window),
