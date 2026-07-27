@@ -214,9 +214,9 @@ default TUI flow uses the OS-appropriate privileged method.
 The same operations are available without the TUI:
 
 ```bash
-praxis_cli intercept status
-praxis_cli intercept enable <node-prefix> --method tproxy
-praxis_cli intercept disable <node-prefix>
+praxis intercept status
+praxis intercept enable <node-prefix> --method tproxy
+praxis intercept disable <node-prefix>
 ```
 
 The node will:

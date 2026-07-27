@@ -205,7 +205,7 @@ The shipped chain builder is the **praxis TUI** (Operations → Library → New 
 5. Open properties with `Enter` or double-click; assign session groups and block config
 6. Save with `Ctrl+S` (invalid graphs are rejected with a clear error list)
 
-See [CLI usage — chain builder](cli.md#library-tab--chain-builder) for keybindings and interaction details.
+See [TUI — chain builder](tui.md#library-tab--chain-builder) for keybindings and interaction details.
 
 ### Chain Structure
 

@@ -433,7 +433,7 @@ For production and multi-instance deployments, use PostgreSQL. See [Database Con
 
 ## CLI Configuration
 
-The Praxis CLI (`praxis_cli`) stores state and can be configured via command-line options or environment variables.
+The Praxis CLI (`praxis`) stores state and can be configured via command-line options or its config file.
 
 ### CLI State File
 
@@ -482,7 +482,7 @@ the resolved URL and its source.
 |------|------|
 | Database | `~/.praxis/operations.db` |
 | CLI State | `~/.praxis/cli.json` |
-| CLI Binary | `~/.praxis/bin/praxis_cli` |
+| CLI Binary | `/usr/local/bin/praxis` (symlink to `praxis_cli`) |
 | Claude Config | `~/.claude/settings.json` and `~/.claude.json` |
 | Gemini Config | `~/.gemini/settings.json` |
 
@@ -492,7 +492,7 @@ the resolved URL and its source.
 |------|------|
 | Database | `~/.praxis/operations.db` |
 | CLI State | `~/.praxis/cli.json` |
-| CLI Binary | `~/.praxis/bin/praxis_cli` |
+| CLI Binary | `/usr/local/bin/praxis` (symlink to `praxis_cli`) |
 | Claude Config | `~/.claude/settings.json` and `~/.claude.json` |
 | Gemini Config | `~/.gemini/settings.json` |
 
@@ -502,6 +502,6 @@ the resolved URL and its source.
 |------|------|
 | Database | `%USERPROFILE%\.praxis\operations.db` |
 | CLI State | `%USERPROFILE%\.praxis\cli.json` |
-| CLI Binary | `%USERPROFILE%\.praxis\bin\praxis_cli.exe` |
+| CLI Binary | `%USERPROFILE%\.praxis\bin\praxis.exe` (copy of `praxis_cli.exe`) |
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |

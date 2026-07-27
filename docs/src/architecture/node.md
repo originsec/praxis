@@ -347,7 +347,7 @@ reconnection loop immediately re-registers without the usual reconnect delay.
 | `CleanupRequired` | Rollback incomplete; re-enable blocked until Disable/Reset cleanup succeeds |
 
 `InterceptStatus.cleanup_required` surfaces this to service/CLI status
-(e.g. `praxis_cli intercept status`); the Intercept TUI window does not
+(e.g. `praxis intercept status`); the Intercept TUI window does not
 enumerate per-node pills.
 
 ## Registration

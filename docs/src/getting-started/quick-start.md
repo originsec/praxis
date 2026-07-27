@@ -133,7 +133,7 @@ proxy settings), **VPN** (TUN adapter for packet-level routing),
 default/recommended method on Linux) — but the TUI's auto-pick only
 ever chooses TPROXY or VPN. To set a method explicitly (e.g. Proxy or
 Hosts), use the non-interactive CLI instead:
-`praxis_cli intercept enable <node-prefix> --method <proxy|vpn|hosts|tproxy>`.
+`praxis intercept enable <node-prefix> --method <proxy|vpn|hosts|tproxy>`.
 
 Open the **Intercept** window (`Ctrl+T`) to watch captured traffic
 stream into the **Traffic** tab. You can see:

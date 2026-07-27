@@ -14,7 +14,7 @@ For deeper discovery, click **Semantic Recon** (requires Semantic Parser LLM con
 
 ## TUI
 
-The CLI (`praxis_cli`) provides the same reconnaissance capabilities in
+The CLI (`praxis`) provides the same reconnaissance capabilities in
 the terminal. From the **Nodes** window (`Ctrl+L`), navigate into the
 detail pane (`→`), select an agent (`↑`/`↓`), and press **`r`** to open
 the recon overlay.
