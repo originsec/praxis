@@ -42,9 +42,18 @@ $HomeDir       = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) {
 $PraxisRepo    = "originsec/praxis"
 $PraxisVersion = $env:PRAXIS_VERSION
 $PraxisDir     = if ($env:PRAXIS_DIR) { $env:PRAXIS_DIR } else { Join-Path $HomeDir ".praxis-docker" }
-$CliInstallDir = if ($env:PRAXIS_CLI_DIR) { $env:PRAXIS_CLI_DIR } else { Join-Path $HomeDir ".praxis\bin" }
 $ComposeCmd    = $null
 $BuildFromSource = [bool]$Src
+
+#
+# CLI layout. $CliRootDir is the `cargo install --root`, which always
+# places binaries in a `bin` subdirectory -- so $CliBinDir is what holds
+# praxis.exe and what goes on PATH. Do not conflate the two: pointing the
+# cargo root at the bin directory yields a doubled `bin\bin`.
+#
+
+$CliRootDir = if ($env:PRAXIS_CLI_DIR) { $env:PRAXIS_CLI_DIR.TrimEnd('\') } else { Join-Path $HomeDir ".praxis" }
+$CliBinDir  = Join-Path $CliRootDir "bin"
 
 #
 # Unicode glyphs are declared here as code points (and the banner is decoded
@@ -329,10 +338,8 @@ function Ensure-Rust {
 
 function Install-Cli {
     Write-Section "Installing CLI"
-    if (-not (Test-Path $CliInstallDir)) { New-Item -ItemType Directory -Force -Path $CliInstallDir | Out-Null }
-    $binDir = Join-Path $CliInstallDir "bin"
-    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Force -Path $binDir | Out-Null }
-    $exe = Join-Path $binDir "praxis_cli.exe"
+    if (-not (Test-Path $CliBinDir)) { New-Item -ItemType Directory -Force -Path $CliBinDir | Out-Null }
+    $exe = Join-Path $CliBinDir "praxis_cli.exe"
 
     if ($script:BuildFromSource) {
         if (-not (Test-Command "git"))   { Write-Err "git not found. Install git from https://git-scm.com/download/win" }
@@ -340,12 +347,17 @@ function Install-Cli {
 
         Write-Info "Building Praxis CLI for Windows..."
         $repoUrl = "https://github.com/$PraxisRepo"
-        $cliRoot = $CliInstallDir.TrimEnd('\')
         $cargoLog = Join-Path $env:TEMP "praxis-cargo-install.log"
+
+        #
+        # cargo install writes to <root>\bin, so the root is the parent of
+        # $CliBinDir -- passing $CliBinDir here is what caused the doubled
+        # path.
+        #
 
         $exitCode = Run-WithProgressBar -LogFile $cargoLog -Exe "cargo" -ExeArgs @(
             "install", "--git", $repoUrl, "--tag", $script:PraxisVersion,
-            "--root", $cliRoot, "praxis_cli"
+            "--root", $CliRootDir, "praxis_cli"
         )
         if ($exitCode -ne 0) {
             Write-Host ""
@@ -373,16 +385,16 @@ function Install-Cli {
     # from argv[0], so this gives users a clean `praxis` command.
     #
 
-    $praxisCopy = Join-Path $CliInstallDir "bin\praxis.exe"
+    $praxisCopy = Join-Path $CliBinDir "praxis.exe"
     Copy-Item -Force $exe $praxisCopy
 
     #
     # Add to user PATH if not already present.
     #
 
-    $binDir = (Resolve-Path (Join-Path $CliInstallDir "bin")).Path
+    $binDir = (Resolve-Path $CliBinDir).Path
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (-not ($userPath -split ';' | Where-Object { $_ -ieq $binDir })) {
+    if (-not ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $binDir.TrimEnd('\') })) {
         $newPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
         Write-Success "Added $binDir to user PATH (open a new shell to use 'praxis')"
@@ -503,7 +515,7 @@ function Print-Docker-Summary {
 
 function Print-Cli-Summary {
     Print-Summary-Box "Praxis CLI installed"
-    Write-Host "  Binary       $CliInstallDir\bin\praxis.exe"
+    Write-Host "  Binary       $CliBinDir\praxis.exe"
     Write-Host "  Config file  $env:USERPROFILE\.config\praxis\config " -NoNewline
     Write-Host "(or %APPDATA%\praxis\config)" -ForegroundColor DarkGray
     Write-Host ""
@@ -536,18 +548,35 @@ function Remove-All {
         Write-Success "Removed $PraxisDir"
     }
 
-    if (Test-Path $CliInstallDir) {
-        Write-Info "Removing CLI install at $CliInstallDir..."
-        Remove-Item -Recurse -Force $CliInstallDir
-        Write-Success "Removed $CliInstallDir"
+    #
+    # Only the binaries and cargo's install metadata are removed. The CLI
+    # root also holds user data (cli.json, operations.db), so it is never
+    # deleted recursively.
+    #
 
-        $binDir = $CliInstallDir.TrimEnd('\') + "\bin"
+    if (Test-Path $CliBinDir) {
+        Write-Info "Removing CLI binaries in $CliBinDir..."
+        Remove-Item -Force -ErrorAction SilentlyContinue `
+            (Join-Path $CliBinDir "praxis.exe"), (Join-Path $CliBinDir "praxis_cli.exe")
+
+        if (-not (Get-ChildItem -Force $CliBinDir | Select-Object -First 1)) {
+            Remove-Item -Force $CliBinDir
+        }
+        Write-Success "Removed CLI binaries"
+
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        $newPath = ($userPath -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ine $binDir) }) -join ';'
+        $newPath = ($userPath -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ine $CliBinDir.TrimEnd('\')) }) -join ';'
         if ($newPath -ne $userPath) {
             [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-            Write-Success "Removed $binDir from user PATH"
+            Write-Success "Removed $CliBinDir from user PATH"
         }
+    }
+
+    Remove-Item -Force -ErrorAction SilentlyContinue `
+        (Join-Path $CliRootDir ".crates.toml"), (Join-Path $CliRootDir ".crates2.json")
+
+    if (Test-Path $CliRootDir) {
+        Write-Info "Left CLI state and database in $CliRootDir (delete by hand to wipe)"
     }
 
     Write-Host ""
