@@ -27,6 +27,28 @@ use super::graph::ExecutionGraph;
 use super::implicit::is_implicit_chain;
 use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
+//
+// Loop element output ports, as drawn in the TUI chain builder: `r` is
+// the retry path back into earlier elements, `x` is the exit taken once
+// iterations are exhausted.
+//
+
+const LOOP_PORT_RETRY: u32 = 0;
+const LOOP_PORT_EXIT: u32 = 1;
+
+//
+// Pick the output port a Loop element activates for a given visit.
+// `iteration` is 1-based: the first visit is iteration 1.
+//
+
+fn loop_active_port(iteration: u32, max_iterations: u32) -> u32 {
+    if iteration <= max_iterations {
+        LOOP_PORT_RETRY
+    } else {
+        LOOP_PORT_EXIT
+    }
+}
+
 struct CancelHandle {
     cancel_token: CancellationToken,
     //
@@ -792,11 +814,11 @@ impl ChainExecutor {
                 ChainElement::Loop { max_iterations, .. } => {
                     let counter = loop_counters.entry(element_id.clone()).or_insert(0);
                     *counter += 1;
-                    if *counter <= *max_iterations {
-                        (Ok(merged_input.clone()), Some(0), None)
-                    } else {
-                        (Ok(merged_input.clone()), Some(u32::MAX), None)
-                    }
+                    (
+                        Ok(merged_input.clone()),
+                        Some(loop_active_port(*counter, *max_iterations)),
+                        None,
+                    )
                 }
                 ChainElement::Operation {
                     operation_name,
@@ -981,6 +1003,12 @@ impl ChainExecutor {
                 if !connection_fires(conn, &edge_success) {
                     continue;
                 }
+                //
+                // Port-gated elements (currently just Loop) fan out only
+                // along the port they activated. A Loop with no edge on
+                // that port simply ends the path, which is what happens
+                // when a chain is authored without an exit branch.
+                //
                 if let Some(port) = active_port {
                     if conn.from_port != port {
                         continue;
@@ -1367,4 +1395,55 @@ fn has_any_fired_input(
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loop_retries_until_max_iterations() {
+        for iteration in 1..=3 {
+            assert_eq!(
+                loop_active_port(iteration, 3),
+                LOOP_PORT_RETRY,
+                "iteration {iteration} of 3 should retry"
+            );
+        }
+    }
+
+    #[test]
+    fn loop_exits_once_iterations_are_exhausted() {
+        assert_eq!(loop_active_port(4, 3), LOOP_PORT_EXIT);
+        assert_eq!(loop_active_port(100, 3), LOOP_PORT_EXIT);
+    }
+
+    //
+    // max_iterations = 1 is the smallest value the graph validator accepts
+    // (0 is rejected with "max_iterations must be >= 1"), so this is the
+    // real boundary: retry once, then exit.
+    //
+
+    #[test]
+    fn loop_with_single_iteration_retries_once_then_exits() {
+        assert_eq!(loop_active_port(1, 1), LOOP_PORT_RETRY);
+        assert_eq!(loop_active_port(2, 1), LOOP_PORT_EXIT);
+    }
+
+    //
+    // Every visit resolves to a port the chain builder can actually draw --
+    // it exposes two output ports on a Loop. A port outside that range is
+    // what silently broke authored exit connections before.
+    //
+
+    #[test]
+    fn loop_always_activates_a_drawable_port() {
+        for iteration in 1..=10 {
+            let port = loop_active_port(iteration, 3);
+            assert!(
+                port == LOOP_PORT_RETRY || port == LOOP_PORT_EXIT,
+                "iteration {iteration} activated undrawable port {port}"
+            );
+        }
+    }
 }
