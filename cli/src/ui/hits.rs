@@ -11,6 +11,7 @@ use crate::ui::common::point_in;
 #[derive(Clone)]
 pub enum MouseAction {
     SwitchWindow(Window),
+    OpenHelp,
     Quit,
 
     InterceptTab(InterceptTab),
