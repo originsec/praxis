@@ -4,20 +4,11 @@ Reconnaissance discovers what an AI agent can do-its tools, configuration, and h
 
 ## Running Recon
 
-With an agent selected:
-
-1. Click **Recon** in the agent panel
-2. Static recon runs immediately
-3. Results appear organized by category
-
-For deeper discovery, click **Semantic Recon** (requires Semantic Parser LLM configured).
-
-## TUI
-
-The CLI (`praxis`) provides the same reconnaissance capabilities in
-the terminal. From the **Nodes** window (`Ctrl+L`), navigate into the
-detail pane (`→`), select an agent (`↑`/`↓`), and press **`r`** to open
-the recon overlay.
+From the **Nodes** window (`Ctrl+L`), navigate into the detail pane
+with `→`, select an agent with `↑`/`↓`, and press `r` to open the recon
+overlay. Static recon runs automatically when no cached result is
+available; press `r` to refresh it. Press `Ctrl+U` for deeper semantic
+recon, which requires a Semantic Parser LLM.
 
 The overlay is a hierarchical browser (similar to a connectors/MCP
 picker): group headers expand and collapse, leaf items open a detail
@@ -29,23 +20,8 @@ Three tabs:
 2. **Tools** — MCP servers (with nested tools), skills, and internal tools
 3. **Sessions** — conversation history grouped by project path
 
-| Key | Action |
-|-----|--------|
-| `Tab` / `1` `2` `3` | Switch tab |
-| `↑` / `↓` | Move among visible tree rows |
-| `←` / `→` | Collapse / expand (or focus detail) |
-| `Space` / `Enter` | Toggle expand on branches; open leaf detail |
-| `/` | Focus filter bar (type to filter; `Esc` blurs) |
-| `PgUp` / `PgDn` | Scroll detail pane |
-| `r` | Refresh (static recon) |
-| `Ctrl+U` | Discover (semantic recon) |
-| `Ctrl+E` | Edit selected Config file in `$EDITOR` |
-| `Esc` | Unfocus filter → clear filter → leave detail → close |
-| `Ctrl+Q` | Close overlay |
-
-**Mouse:** click chevrons to expand/collapse; click a row to select (second
-click on a branch toggles expand); hover highlights rows; drag the pane
-split; click the filter bar to type.
+See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
+keybindings and mouse controls.
 
 On first open, the TUI checks the service cache. If no recon data is
 stored, it triggers an ACP `_praxis/recon` request on the node and polls

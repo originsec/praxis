@@ -19,7 +19,6 @@
 - [Orchestrator](./usage/orchestrator.md)
 - [Help Assistant](./usage/help-assistant.md)
 - [Semantic Operations](./usage/semantic-operations.md)
-- [Toolkit](./usage/toolkit.md)
 - [MCP Server](./usage/mcp.md)
 - [TUI](./usage/tui.md)
 - [CLI](./usage/cli.md)

@@ -7,11 +7,11 @@ Sessions let you interact with AI agents in real-time. When you create a session
 From the **Nodes** window (`Ctrl+L`) in the praxis TUI, with an agent
 selected:
 
-1. Open a session chat
+1. Press `Enter` on the selected agent to open the session options
 2. Optionally enable **YOLO Mode** and pick a working directory
-3. Wait for the session to initialize
+3. Press `Enter` to confirm, then wait for the session to initialize
 
-The agent process starts on the target node with a PTY attached.
+The selected connector creates an isolated session on the target node.
 
 ## Session Interface
 
@@ -20,7 +20,7 @@ The chat view shows a conversation:
 - Your messages and agent responses interleave in the transcript
 - Responses are rendered as markdown with syntax highlighting
 
-Type in the input field and press Enter to send a prompt.
+Type in the input field and press `Enter` to send a prompt.
 
 ## YOLO Mode
 
@@ -92,7 +92,6 @@ sessions, and external ACP bridges — are prefixed by caller type so a
 client can filter the orchestrator session list to its own entries:
 
 - `CLI_` — created by the TUI's orchestrator
-- `WEB_` — created by the web frontend
 - `ACP_` — created by an external ACP client
 
 ## Session Messages
@@ -105,7 +104,7 @@ The TUI tracks messages per session:
 
 ## Ending a Session
 
-Press Ctrl+C in a chat view (when idle) or `Ctrl+D` on the Active Sessions
+Press `Ctrl+C` in a chat view (when idle) or `Ctrl+D` on the Active Sessions
 overlay to terminate. This sends `session/close` to the node, which
 drops the per-session Lua VM and any owned subprocess. Only the targeted
 session is affected — any other live sessions on the same connector keep
@@ -116,7 +115,7 @@ running.
 Semantic operations always create their own dedicated session. When an
 operation runs it calls `session/new`, executes, and then closes. Because
 each ACP session owns its own Lua VM (and, where applicable, its own ACP
-subprocess or PTY), operations run concurrently with interactive sessions
+subprocess), operations run concurrently with interactive sessions
 on the same agent without interfering.
 
 ## Bridge Sessions

@@ -15,18 +15,8 @@ the documentation bundled with Praxis and never takes actions on your behalf.
 Press `Ctrl+H` from **any** window to summon the Help Assistant overlay. Press
 `Ctrl+H` again, or `Esc`, to dismiss it. Because the overlay floats above the
 current window, you can ask a question and return to exactly what you were
-doing.
-
-| Key | Action |
-| --- | --- |
-| `Ctrl+H` | Open / close the assistant |
-| `Enter` | Send the current question |
-| `Ctrl+T` | Toggle inclusion of screen context (when available) |
-| `Ctrl+C` | Stop a streaming response (keeps the overlay open) |
-| `Ctrl+L` | Clear the conversation |
-| `Esc` | Close the assistant (cancels any in-flight response) |
-| `Up` / `Down` / `PageUp` / `PageDown` | Scroll the conversation |
-| Mouse wheel | Scroll the conversation |
+doing. See [Terminal UI](./tui.md#help-assistant-ctrlh) for the complete
+shortcut list.
 
 Every question is sent to the model assigned to the Documentation Helper. The
 model decides whether the available conversation and screen context are enough

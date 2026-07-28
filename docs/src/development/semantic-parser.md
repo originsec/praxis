@@ -23,25 +23,6 @@ Schema: { "tools": [{ "name": string, "description": string }] }
 Output: Structured tool list
 ```
 
-### Traffic Analysis
-
-Traffic summarization does not go through this crate. When traffic parsing is enabled, the service calls the AI client directly (`service/src/semantic_helpers/traffic_summarizer.rs`) using its own `llm_feature_traffic_parser` configuration, and returns a free-text summary - there's no schema, structured JSON output, or retry logic involved:
-
-```
-Input: Intercepted request/response
-Output: Free-text summary (no schema, no retries)
-```
-
-### Session Analysis (Not Yet Implemented)
-
-Parsing session transcripts for capability discovery is a planned use of the parser - no code path currently wires this up:
-
-```
-Input: Session history file
-Schema: { "capabilities": [...], "sensitive_data": [...] }
-Output: Extracted information
-```
-
 ## Library API
 
 ### Basic Usage

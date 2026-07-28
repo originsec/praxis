@@ -33,7 +33,7 @@ This is a Linux/macOS mechanism only (it switches the process's Unix user based 
 
 Each node reports whether it is running with elevated privileges. On Linux/macOS this means running as root (UID 0); on Windows this means running as an elevated administrator.
 
-Privileged nodes display a **ROOT** badge in the praxis TUI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The TUI disables the intercept Enable button on non-privileged nodes.
+Privileged nodes display a **priv** badge in the praxis TUI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The TUI disables the intercept Enable button on non-privileged nodes.
 
 ### Node List
 

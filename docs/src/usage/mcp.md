@@ -14,7 +14,7 @@ The MCP server serves two purposes:
 
 The MCP server is controlled via service settings:
 
-1. Open **Settings** (`Ctrl+S`) > **MCP Server** in the praxis TUI
+1. Open **Settings** (`Ctrl+S`) > **Service** in the praxis TUI
 2. Toggle **MCP Server** to turn it on
 3. Configure the port (default: `8585`)
 
@@ -28,7 +28,7 @@ When running with Docker, port 8585 is exposed by default. To use a different po
 PRAXIS_MCP_PORT=9090 docker compose up --build
 ```
 
-Then update the port in **Settings** > **MCP Server** to match.
+Then update the port under **Settings** > **Service** to match.
 
 ## AI Agent Integration
 

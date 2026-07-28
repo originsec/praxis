@@ -15,7 +15,7 @@ This reference documents the message types and RabbitMQ queues/exchanges used fo
 | `ClientBroadcast` | Service → All Clients | System state updates (fanout exchange) |
 | `Client_{id}` | Service → Client | Responses for specific client |
 | `NodeEventLog` | Node → Service | Application log entries |
-| `WebEventLog` | Web → Service | Web frontend log entries |
+| `WebEventLog` | Legacy client → Service | Compatibility queue retained after removal of the web frontend |
 | `ServiceEventLog` | Service → Service | Service log entries |
 
 Named classic queues above are declared durable. Fanout broadcast consumers use exclusive auto-delete server-named queues bound to `NodeBroadcast` / `ClientBroadcast`.

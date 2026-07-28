@@ -128,7 +128,7 @@ The Claude Bridge allows Claude Code to connect directly to the service as a vir
 
 ### MCP Server Settings
 
-Access via **Settings** (`Ctrl+S`) > **MCP Server** in the praxis TUI.
+Access via **Settings** (`Ctrl+S`) > **Service** in the praxis TUI.
 
 | Key | Default | Description |
 |-----|---------|-------------|

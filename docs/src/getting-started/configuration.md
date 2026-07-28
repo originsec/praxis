@@ -40,7 +40,7 @@ base URL.
 
 Once you've added models, assign them to features under **Feature Selection**:
 
-**Orchestrator** - Powers the free-form Orchestrator chat. This is the "brain" that orchestrates what the agent should do — needs a capable model that follows tool-calling instructions reliably. A companion **Max Tokens** setting caps how long its responses can run.
+**Orchestrator** - Powers an interactive AI agent that can autonomously manage operations. It will drive target agents through multi-turn conversations to achieve a given task, so it needs a capable model that follows tool-calling instructions reliably. A companion **Max Tokens** setting caps how long its responses can run.
 
 **Semantic Operations** - Used when executing operations through agents. Pick something capable.
 

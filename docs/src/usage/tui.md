@@ -57,8 +57,8 @@ sessions left alive from previous runs or other clients.
 The recon overlay opens as a full-screen modal from the Nodes detail
 pane. It is a hierarchical browser (expand/collapse groups, filter bar,
 detail pane) with three tabs: **Config**, **Tools**, and **Sessions**.
-See [Reconnaissance](./recon.md#tui) for the full tree layout and key
-table.
+See [Reconnaissance](./recon.md#running-recon) for the result contents
+and refresh behavior.
 
 | Key | Action |
 |-----|--------|
@@ -73,6 +73,10 @@ table.
 | `Ctrl+E` | Edit selected Config file in `$EDITOR` (Config tab only) |
 | `Esc` | Unfocus filter → clear filter → leave detail → close |
 | `Ctrl+Q` | Close overlay |
+
+With the mouse, click chevrons to expand or collapse, click rows to
+select, click a selected branch again to toggle it, drag the pane split,
+and click the filter bar to type.
 
 When opened, the TUI first checks the service cache for existing recon
 data. If none is cached, it sends an ACP `_praxis/recon` request to the
@@ -262,6 +266,17 @@ Configuration management:
 Press `Ctrl+H` from **any** window to open the floating [Help Assistant](./help-assistant.md)
 overlay — a documentation-aware chat that answers questions about Praxis
 without leaving the TUI. Press `Ctrl+H` again or `Esc` to dismiss.
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+H` | Open / close the assistant |
+| `Enter` | Send the current question |
+| `Ctrl+T` | Toggle inclusion of screen context (when available) |
+| `Ctrl+C` | Stop a streaming response; close the overlay when idle |
+| `Ctrl+L` | Clear the conversation |
+| `Esc` | Close the assistant (cancels any in-flight response) |
+| `Up` / `Down` / `PageUp` / `PageDown` | Scroll the conversation |
+| Mouse wheel | Scroll the conversation |
 
 ## Mouse Support
 

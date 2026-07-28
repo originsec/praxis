@@ -611,6 +611,39 @@ Low-level functions available on the `praxis` global, wrapped by `require("praxi
 ## Rust Connector (for native/OS-level agents)
 
 Use this approach only when Lua cannot access the required OS capabilities.
+Native connectors implement the `Agent`, `AgentSession`, and optional
+`AgentRecon` Rust traits directly. Lua scripts do not implement these
+traits themselves; the shared `LuaAgent` and `LuaAgentSession` adapters
+translate their callbacks into the same runtime interfaces.
+
+The abbreviated trait shapes are:
+
+```rust
+#[async_trait]
+trait Agent {
+    fn name(&self) -> &str;
+    fn short_name(&self) -> &str;
+    fn as_recon(&self) -> Option<&dyn AgentRecon>;
+    async fn do_fingerprint(&self) -> bool;
+    fn version(&self) -> Option<String>;
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>>;
+    fn drop_session(&self, session_id: Uuid);
+}
+
+trait AgentSession {
+    fn transact(&self, prompt: &str) -> Result<String>;
+    fn close(&self);
+}
+
+#[async_trait]
+trait AgentRecon {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
+}
+```
 
 ### Step 1: Create the Directory Structure
 
@@ -627,7 +660,7 @@ node/src/agent_connectors/
 └── traits.rs
 ```
 
-## Step 2: Implement the Agent Trait
+### Step 2: Implement the Agent Trait
 
 In `mod.rs`:
 
@@ -721,7 +754,7 @@ The `Agent` trait has two session-related hooks:
 - `drop_session(session_id)` — called on `session/close` (and on node
   reset). Release per-session resources keyed by that id.
 
-## Step 3: Implement Fingerprinting
+### Step 3: Implement Fingerprinting
 
 In `fingerprint.rs`:
 
@@ -775,7 +808,7 @@ fn is_process_running(name: &str) -> bool {
 }
 ```
 
-## Step 4: Configure Interception
+### Step 4: Configure Interception
 
 Traffic interception is no longer declared on the connector itself.
 Domains and URL filters live as **intercept targets** in a TOML virtual
@@ -802,7 +835,7 @@ built-in defaults** action to discard local edits and start over. To
 disable a target without deleting it, comment out the entire section
 with `#`.
 
-## Step 5: Implement Reconnaissance
+### Step 5: Implement Reconnaissance
 
 In `recon.rs`:
 
@@ -853,7 +886,7 @@ fn discover_sessions() -> Vec<common::SessionItem> {
 }
 ```
 
-## Step 6: Implement Session Management
+### Step 6: Implement Session Management
 
 In `session.rs`:
 
@@ -931,7 +964,7 @@ impl AgentSession for ExampleAISession {
 - `set_cancel_flag(&self, flag: Arc<AtomicBool>)` — adopt the shared cancellation flag the handler hands in before calling `transact`, so `session/cancel` and in-loop polling share one flag.
 - `transact_with_context(&self, prompt: &str, ctx: SessionTransactContext) -> Result<String>` — the default implementation wires `set_cancel_flag` and registers `acp_handle`'s update/permission channels, then calls `transact`. Override only if a session needs different wiring.
 
-## Step 7: Register in Factory
+### Step 7: Register in Factory
 
 **Lua connectors need no factory changes at all.** Dropping the `.lua` file into `agents/` (see [Deploying](#deploying) above) is enough: `AgentRegistry::rebuild()` calls `lua::load_embedded_agents()` to load every embedded script and register it directly, without `AgentFactory` ever being involved. Claude Code, Gemini, M365 Copilot, and every other shipped connector except Praxis itself work this way.
 
@@ -965,7 +998,7 @@ Update `node/src/agent_connectors/mod.rs`:
 pub mod exampleai;  // Add this line
 ```
 
-## Step 8: Test
+### Step 8: Test
 
 1. Build the node: `cargo build -p praxis_node`
 2. Run with the target agent installed

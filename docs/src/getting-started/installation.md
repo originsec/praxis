@@ -39,7 +39,7 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --service native 
 curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --cli --src
 ```
 
-`--src` has no effect on `--service docker`, which always builds from source inside the container. Prebuilt binaries exist for linux/x86_64 and macos/arm64 (Apple Silicon); anything else — including Intel Macs — falls back to `--src` automatically.
+`--src` has no effect on `--service docker`, which always builds from source inside the container. Prebuilt binaries exist for Linux/x86_64, macOS/arm64 (Apple Silicon), and Windows/x86_64. The Linux/macOS installer falls back to `--src` automatically on unsupported architectures, including Intel Macs; the Windows installer downloads the Windows binary unless `-Src` is passed.
 
 #### Cross-compiling the Windows node binary (optional)
 

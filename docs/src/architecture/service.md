@@ -2,7 +2,7 @@
 
 The service is the central backend that coordinates nodes, manages data, and
 orchestrates operations. It is the only component that talks to nodes —
-clients (CLI, web, external ACP tools) always reach nodes through the
+clients (the TUI and external ACP tools) always reach nodes through the
 service's ACP server and proxy layer.
 
 ## Overview
@@ -33,9 +33,8 @@ service's ACP server and proxy layer.
 │                         RabbitMQ                             │
 └─────────────────────────────┬────────────────────────────────┘
                               │
-              ┌───────────────┼───────────────┐
-              │               │               │
-           Nodes           Clients          Web
+                              │
+                        Nodes and Clients
 ```
 
 ## ACP server and node proxy
@@ -352,7 +351,7 @@ The service processes messages from multiple queues:
 
 ### Client Messages (ClientSignal)
 
-- `Registration` - client (web) connection
+- `Registration` - client connection
 - `Command` - forward to node
 - `SemanticOpRun` - execute operation
 - `ChainRun` - execute chain

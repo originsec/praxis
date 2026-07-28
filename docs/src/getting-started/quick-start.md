@@ -122,6 +122,8 @@ For more complex workflows, you can chain multiple operations together. See [Sem
 
 To see the traffic between the agent and its LLM backend:
 
+> **Privilege required:** The node must run as root on Linux or as an elevated administrator on Windows before interception can be enabled.
+
 1. In the **Nodes** window (`Ctrl+L`), select your node
 2. Press **`i`** and confirm — the TUI auto-picks the method by node
    OS (**TPROXY** on Linux, **VPN** on Windows); macOS and other

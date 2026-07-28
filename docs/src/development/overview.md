@@ -189,4 +189,3 @@ Open an issue with:
 ## Contact
 
 - Issues: [GitHub Issues](https://github.com/originsec/praxis/issues)
-- Email: team@originhq.com

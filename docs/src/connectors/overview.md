@@ -36,31 +36,12 @@ Want to add support for another agent? Contributions welcome! See [Adding New Co
 
 ## The Trait System
 
-Connectors implement a set of Rust traits:
-
-```rust
-// Required: core agent functionality
-trait Agent {
-    fn name(&self) -> &str;
-    fn short_name(&self) -> &str;
-    async fn do_fingerprint(&self) -> bool;  // re-checked on every fingerprint cycle
-    fn version(&self) -> Option<String>;     // extracted during fingerprinting
-    fn create_session_with_id(&self, context: &SessionContext, session_id: Uuid) -> Option<Arc<dyn AgentSession>>;
-    // ...
-}
-
-// Required for sessions: session management
-trait AgentSession {
-    fn transact(&self, prompt: &str) -> Result<String>;
-    fn close(&self);
-    // ...
-}
-
-// Optional: reconnaissance support
-trait AgentRecon {
-    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
-}
-```
+The connector runtime uses three Rust traits: `Agent`, `AgentSession`,
+and `AgentRecon`. Native connectors implement them directly. Lua
+connectors provide Lua callbacks that the shared `LuaAgent` and
+`LuaAgentSession` adapters expose through the same traits. See
+[Adding New Connectors](./adding-new.md#rust-connector-for-nativeos-level-agents)
+for the trait shapes and an implementation example.
 
 Traffic interception is no longer per-agent. The set of domains and URL
 filters captured by the proxy is configured centrally in the praxis TUI

@@ -6,7 +6,7 @@ The Orchestrator is an interactive AI agent that can autonomously manage nodes, 
 
 Before using the Orchestrator, you need:
 
-1. **MCP Server enabled** — Go to **Settings** > **MCP Server** and enable it. The Orchestrator connects to the [MCP server](./mcp.md) as a client to access all Praxis tools.
+1. **MCP Server enabled** — Go to **Settings** > **Service** and enable **MCP Server**. The Orchestrator connects to the [MCP server](./mcp.md) as a client to access all Praxis tools.
 
 2. **Orchestrator LLM configured** — Go to **Settings** > **LLM Providers** and configure a model definition, then assign it to the Orchestrator feature in the Feature Selection section.
 
@@ -14,16 +14,15 @@ If the MCP server is not enabled when you start a session, you'll see an error m
 
 ## Starting a Session
 
-1. Click **Orchestrator** in the sidebar
+1. Open the **Orchestrator** window with `Ctrl+O`
 2. Type your goal or question — the session is opened on demand
-3. The Orchestrator connects to the MCP server and fetches available tools
+3. Press `Enter`; the Orchestrator connects to the MCP server and fetches available tools
 
 ## Sessions and State
 
-The service holds **no orchestrator state**. Each client (TUI or web) keeps a single in-flight session against the service; when the client disconnects or closes the session the conversation is dropped server-side.
+The service holds **no persistent orchestrator state**. The TUI keeps one in-flight session against the service; when the TUI disconnects or closes the session, the conversation is dropped server-side.
 
-- **Web** — One ephemeral session per page load. Closing the tab or navigating away ends the conversation; nothing is persisted.
-- **TUI (`praxis`)** — One session per CLI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
+- **TUI (`praxis`)** — One session per TUI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
   - `praxis --continue` resumes the most recent saved session.
   - `praxis --resume` lists saved sessions and prompts you to pick one.
 
@@ -108,7 +107,7 @@ The Orchestrator is best for exploration, debugging, and complex ad-hoc tasks. S
 
 ### "MCP server is not enabled"
 
-Go to **Settings** > **MCP Server** and enable it. The Orchestrator requires the MCP server to function.
+Go to **Settings** > **Service** and enable **MCP Server**. The Orchestrator requires the MCP server to function.
 
 ### "Could not connect to the MCP server"
 
