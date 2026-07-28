@@ -27,6 +27,36 @@ use super::graph::ExecutionGraph;
 use super::implicit::is_implicit_chain;
 use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
+//
+// Loop element output ports, as drawn in the TUI chain builder: `r` is
+// the retry path back into earlier elements, `x` is the exit taken once
+// iterations are exhausted.
+//
+
+const LOOP_PORT_RETRY: u32 = 0;
+const LOOP_PORT_EXIT: u32 = 1;
+
+//
+// An element's output, semantic result, and (for port-gated elements) the
+// output port it activated. Keeping the port with the resolved result lets
+// readiness and input collection apply the same routing rule as fan-out.
+//
+
+type ResolvedElement = (String, Option<bool>, Option<u32>);
+
+//
+// Pick the output port a Loop element activates for a given visit.
+// `iteration` is 1-based: the first visit is iteration 1.
+//
+
+fn loop_active_port(iteration: u32, max_iterations: u32) -> u32 {
+    if iteration <= max_iterations {
+        LOOP_PORT_RETRY
+    } else {
+        LOOP_PORT_EXIT
+    }
+}
+
 struct CancelHandle {
     cancel_token: CancellationToken,
     //
@@ -467,7 +497,7 @@ impl ChainExecutor {
         use std::collections::VecDeque;
 
         let mut work_queue: VecDeque<String> = VecDeque::new();
-        let mut resolved: HashMap<String, (String, Option<bool>)> = HashMap::new();
+        let mut resolved: HashMap<String, ResolvedElement> = HashMap::new();
         let mut loop_counters: HashMap<String, u32> = HashMap::new();
         let mut hit_counts: HashMap<String, u32> = HashMap::new();
         let mut initial_inputs: HashMap<String, String> = HashMap::new();
@@ -611,8 +641,10 @@ impl ChainExecutor {
                     .incoming_connections(&element_id)
                     .iter()
                     .filter_map(|conn| {
-                        if let Some((output, success)) = resolved.get(&conn.from_element) {
-                            if connection_fires(conn, success) {
+                        if let Some((output, success, active_port)) =
+                            resolved.get(&conn.from_element)
+                        {
+                            if connection_fires(conn, success, *active_port) {
                                 Some(output.clone())
                             } else {
                                 None
@@ -792,11 +824,11 @@ impl ChainExecutor {
                 ChainElement::Loop { max_iterations, .. } => {
                     let counter = loop_counters.entry(element_id.clone()).or_insert(0);
                     *counter += 1;
-                    if *counter <= *max_iterations {
-                        (Ok(merged_input.clone()), Some(0), None)
-                    } else {
-                        (Ok(merged_input.clone()), Some(u32::MAX), None)
-                    }
+                    (
+                        Ok(merged_input.clone()),
+                        Some(loop_active_port(*counter, *max_iterations)),
+                        None,
+                    )
                 }
                 ChainElement::Operation {
                     operation_name,
@@ -966,7 +998,10 @@ impl ChainExecutor {
 
             let edge_success = semantic_success.map(Some).unwrap_or(success);
 
-            resolved.insert(element_id.clone(), (output.clone(), edge_success));
+            resolved.insert(
+                element_id.clone(),
+                (output.clone(), edge_success, active_port),
+            );
 
             if graph.outgoing_connections(&element_id).is_empty() {
                 if edge_success == Some(true) {
@@ -978,13 +1013,14 @@ impl ChainExecutor {
             }
 
             for conn in graph.outgoing_connections(&element_id) {
-                if !connection_fires(conn, &edge_success) {
+                //
+                // Port-gated elements (currently just Loop) fan out only
+                // along the port they activated. A Loop with no edge on
+                // that port simply ends the path, which is what happens
+                // when a chain is authored without an exit branch.
+                //
+                if !connection_fires(conn, &edge_success, active_port) {
                     continue;
-                }
-                if let Some(port) = active_port {
-                    if conn.from_port != port {
-                        continue;
-                    }
                 }
                 if is_target_ready(&conn.to_element, &graph, &resolved) {
                     work_queue.push_back(conn.to_element.clone());
@@ -1301,16 +1337,22 @@ impl ChainExecutor {
 }
 
 //
-// Check if a connection fires based on its condition and the source
-// element's success.
+// Check whether a connection fires based on its condition, source element's
+// success, and (when the source is port-gated) the selected output port.
 //
 
-fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bool>) -> bool {
-    match &conn.condition {
+fn connection_fires(
+    conn: &crate::database::ChainConnection,
+    success: &Option<bool>,
+    active_port: Option<u32>,
+) -> bool {
+    let condition_fires = match &conn.condition {
         None => true,
         Some(crate::database::ConnectionCondition::OnSuccess) => matches!(success, Some(true)),
         Some(crate::database::ConnectionCondition::OnFailure) => matches!(success, Some(false)),
-    }
+    };
+
+    condition_fires && active_port.map_or(true, |port| conn.from_port == port)
 }
 
 //
@@ -1325,7 +1367,7 @@ fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bo
 fn is_target_ready(
     target_id: &str,
     graph: &ExecutionGraph,
-    resolved: &HashMap<String, (String, Option<bool>)>,
+    resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
     let first_execution = !resolved.contains_key(target_id);
     let incoming = graph.incoming_connections(&target_id.to_string());
@@ -1333,8 +1375,8 @@ fn is_target_ready(
     let mut any_fires = false;
 
     for conn in &incoming {
-        if let Some((_, success)) = resolved.get(&conn.from_element) {
-            if connection_fires(conn, success) {
+        if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success, *active_port) {
                 any_fires = true;
             }
         } else {
@@ -1356,15 +1398,130 @@ fn is_target_ready(
 fn has_any_fired_input(
     target_id: &str,
     graph: &ExecutionGraph,
-    resolved: &HashMap<String, (String, Option<bool>)>,
+    resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
     let incoming = graph.incoming_connections(&target_id.to_string());
     for conn in &incoming {
-        if let Some((_, success)) = resolved.get(&conn.from_element) {
-            if connection_fires(conn, success) {
+        if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success, *active_port) {
                 return true;
             }
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port_connection(
+        from_element: &str,
+        to_element: &str,
+        from_port: u32,
+    ) -> crate::database::ChainConnection {
+        crate::database::ChainConnection {
+            id: format!("{from_element}-{to_element}-{from_port}"),
+            from_element: from_element.to_string(),
+            to_element: to_element.to_string(),
+            from_port,
+            to_port: 0,
+            condition: None,
+        }
+    }
+
+    fn graph_with_connection(connection: crate::database::ChainConnection) -> ExecutionGraph {
+        ExecutionGraph {
+            nodes: HashMap::new(),
+            trigger_id: "trigger".to_string(),
+            connections: vec![connection],
+            session_groups: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn loop_retries_until_max_iterations() {
+        for iteration in 1..=3 {
+            assert_eq!(
+                loop_active_port(iteration, 3),
+                LOOP_PORT_RETRY,
+                "iteration {iteration} of 3 should retry"
+            );
+        }
+    }
+
+    #[test]
+    fn loop_exits_once_iterations_are_exhausted() {
+        assert_eq!(loop_active_port(4, 3), LOOP_PORT_EXIT);
+        assert_eq!(loop_active_port(100, 3), LOOP_PORT_EXIT);
+    }
+
+    //
+    // max_iterations = 1 is the smallest value the graph validator accepts
+    // (0 is rejected with "max_iterations must be >= 1"), so this is the
+    // real boundary: retry once, then exit.
+    //
+
+    #[test]
+    fn loop_with_single_iteration_retries_once_then_exits() {
+        assert_eq!(loop_active_port(1, 1), LOOP_PORT_RETRY);
+        assert_eq!(loop_active_port(2, 1), LOOP_PORT_EXIT);
+    }
+
+    //
+    // Every visit resolves to a port the chain builder can actually draw --
+    // it exposes two output ports on a Loop. A port outside that range is
+    // what silently broke authored exit connections before.
+    //
+
+    #[test]
+    fn loop_always_activates_a_drawable_port() {
+        for iteration in 1..=10 {
+            let port = loop_active_port(iteration, 3);
+            assert!(
+                port == LOOP_PORT_RETRY || port == LOOP_PORT_EXIT,
+                "iteration {iteration} activated undrawable port {port}"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_loop_port_does_not_fire_or_ready_a_target() {
+        let connection = port_connection("loop", "exit", LOOP_PORT_EXIT);
+        let graph = graph_with_connection(connection.clone());
+        let resolved: HashMap<String, ResolvedElement> = HashMap::from([(
+            "loop".to_string(),
+            (
+                "retry output".to_string(),
+                Some(true),
+                Some(LOOP_PORT_RETRY),
+            ),
+        )]);
+
+        assert!(!connection_fires(
+            &connection,
+            &Some(true),
+            Some(LOOP_PORT_RETRY),
+        ));
+        assert!(!is_target_ready("exit", &graph, &resolved));
+        assert!(!has_any_fired_input("exit", &graph, &resolved));
+    }
+
+    #[test]
+    fn selected_loop_port_fires_and_readies_its_target() {
+        let connection = port_connection("loop", "exit", LOOP_PORT_EXIT);
+        let graph = graph_with_connection(connection.clone());
+        let resolved: HashMap<String, ResolvedElement> = HashMap::from([(
+            "loop".to_string(),
+            ("exit output".to_string(), Some(true), Some(LOOP_PORT_EXIT)),
+        )]);
+
+        assert!(connection_fires(
+            &connection,
+            &Some(true),
+            Some(LOOP_PORT_EXIT),
+        ));
+        assert!(is_target_ready("exit", &graph, &resolved));
+        assert!(has_any_fired_input("exit", &graph, &resolved));
+    }
 }
