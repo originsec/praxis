@@ -68,7 +68,8 @@ Best for: Quick overview, checking configuration
 
 ### Semantic Recon
 
-Click the **Discover** button to run semantic recon. This performs deeper analysis using an LLM:
+In the recon overlay, press `Ctrl+U` to run semantic recon. This performs
+deeper analysis using an LLM:
 - Parses complex configurations
 - Extracts tool definitions from text
 - Identifies capabilities from session transcripts
@@ -98,19 +99,19 @@ These are useful for quick lookups and for AI agents that need to browse specifi
 
 ### View Config Files
 
-Click any config file to see its contents. The viewer shows:
+Select a config leaf in the TUI tree to view its contents. The detail pane
+shows:
 - File path
 - Full contents
 - Syntax highlighting (JSON, YAML)
 
 ### Edit Configurations
 
-Some configurations can be edited directly (like Claude's config.json or MCP server definitions):
-
-1. Click on a config file
-2. Make changes in the editor
-3. Click **Save**
-4. Changes are written to disk on the target
+Some configurations can be edited directly (like Claude's config.json or MCP
+server definitions). Select the config leaf and press `Ctrl+E` to open it in
+`$VISUAL` or `$EDITOR`; save and exit the editor to write changes to the
+target. See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
+controls.
 
 This is useful for exploring the offensive impact of configuration changes - adding MCP servers, modifying permissions, changing model settings, or injecting tool configurations.
 
@@ -118,7 +119,7 @@ This is useful for exploring the offensive impact of configuration changes - add
 
 ### View Session History
 
-Click on a session to see the conversation:
+Select a session leaf to view the conversation:
 - Full transcript with prompts and responses
 - Tool calls and results
 - Timestamps

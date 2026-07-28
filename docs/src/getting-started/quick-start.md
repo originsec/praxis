@@ -19,7 +19,8 @@ praxis
 ```
 
 Open the **Nodes** window with `Ctrl+L`. You should see your node in the
-node list. Use the arrow keys (or click) to select it. The detail pane
+node list. Use `↑`/`↓` to select it, then press `Enter` or `→` to focus the
+agent pane. The detail pane
 shows:
 
 - **Machine name** and OS details
@@ -30,8 +31,8 @@ If no agents show up, make sure the target system actually has Claude Code, Code
 
 ## Step 2: Select an Agent
 
-In the Nodes window, focus the agent list and select one. This focuses
-all subsequent operations on that specific agent.
+In the agent pane, use `↑`/`↓` to select an agent. This focuses all subsequent
+recon and session actions on that agent.
 
 ## Step 3: Run Reconnaissance
 
@@ -70,8 +71,11 @@ plugins are available to the agent.
 
 ## Step 5: Create a Session
 
-In the Nodes window, with an agent selected, start a session chat. You
-can specify a working directory and toggle YOLO mode.
+In the Nodes window, with an agent selected, press `Enter` to open the
+session options. You can specify a working directory and toggle YOLO mode;
+press `Enter` again to start the chat. See [Sessions](../usage/sessions.md)
+for the session lifecycle and [Terminal UI](../usage/tui.md#nodes-ctrll) for
+the complete chat controls.
 
 **Working Directory** — where the agent should operate. Affects what
 files it can see and work with.
@@ -89,7 +93,7 @@ Operations are predefined tasks you can execute through agents. The **Operations
 ### Create Your First Operation
 
 1. Open the **Operations** window (`Ctrl+P`) and switch to the **Library** tab
-2. Create a new operation
+2. Press `Ctrl+N` to create a new operation
 3. Fill in:
    - **Name**: `hello-world`
    - **Short Name**: `hello-world` — this (not Name) is what builds the `category::short_name` reference used to run the operation later, and saving is blocked until it's set
@@ -99,16 +103,16 @@ Operations are predefined tasks you can execute through agents. The **Operations
    - **Mode**: `one-shot`
    - **Timeout**: `60`
    - **YOLO**: leave off (toggle on later to auto-approve tool calls for this operation)
-4. Save
+4. Save the form with `Ctrl+S`
 
 ### Run It
 
-1. Switch to the **Executions** tab
-2. Run the operation, selecting your node and agent
-3. Choose `test::hello-world`
+1. In **Library**, select `test::hello-world` and press `Ctrl+R`
+2. Choose your node and agent
+3. Confirm the operation reference `test::hello-world`
 
 The operation executes through your agent. Watch the output in
-real-time in the Executions tab — you'll see the agent's response
+real-time in the **Executions** tab — you'll see the agent's response
 appear as it completes.
 
 ### Operation Modes
@@ -137,13 +141,14 @@ ever chooses TPROXY or VPN. To set a method explicitly (e.g. Proxy or
 Hosts), use the non-interactive CLI instead:
 `praxis intercept enable <node-prefix> --method <proxy|vpn|hosts|tproxy>`.
 
-Open the **Intercept** window (`Ctrl+T`) to watch captured traffic
-stream into the **Traffic** tab. You can see:
+Open the **Intercept** window (`Ctrl+T`) to watch captured traffic in the
+**Traffic** tab. You can see:
 - Full request/response bodies
 - Prompts and completions
 - Tool calls and results
 
-See [Interception](../usage/interception.md) for details on each method.
+See [Interception](../usage/interception.md) for setup and scope, and
+[Terminal UI](../usage/tui.md#intercept-ctrlt) for traffic-view controls.
 
 ## What's Next?
 

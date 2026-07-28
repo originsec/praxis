@@ -4,16 +4,21 @@ Praxis uses LLMs for several features-semantic operations, tool discovery during
 
 ## LLM Providers
 
-Open **Settings** (`Ctrl+S`) → **LLM Providers** in the praxis TUI.
+Open **Settings** (`Ctrl+S`) → **LLM** in the praxis TUI.
 
 ### Adding a Model
 
-1. Click **Add Model**
-2. Select a **Provider**
-3. Enter your **API Key** (optional for local providers — Ollama and Custom)
-4. For **Custom**, and optionally for **Ollama**, set a **Base URL**
-5. Click the refresh button to pull available models from the provider (not supported by all providers), or enter the model name manually
-6. Click **Save**
+In **Settings** (`Ctrl+S`), stay on the **LLM** tab, use `↑`/`↓` to select
+**Add Model**, and press `Enter`. In the form:
+
+1. Choose a **Provider**
+2. Enter your **API Key** (optional for local providers — Ollama and Custom)
+3. For **Custom**, and optionally for **Ollama**, set a **Base URL**
+4. Refresh the provider model list when supported, or enter a model name manually
+5. Save with `Ctrl+S`
+
+Use `Tab` / `Shift+Tab` to move between Settings tabs. The TUI status bar
+lists the available form controls.
 
 ### Supported Providers
 
@@ -26,7 +31,7 @@ Two providers are designed for local or self-hosted inference:
 **Ollama** — defaults to `http://localhost:11434/v1`, so if you are
 running a stock Ollama install nothing else is needed. API key is
 optional. Model discovery uses Ollama's native `/api/tags` endpoint, so
-the refresh button works even though Ollama is strictly OpenAI-API
+the model-refresh action works even though Ollama is strictly OpenAI-API
 compatible for inference. Override the base URL on the model definition
 if Ollama is listening elsewhere.
 

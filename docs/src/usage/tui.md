@@ -40,6 +40,7 @@ Node and agent management with integrated session chat and terminal access:
 - **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `Ctrl+D` / `Del` to discard, Esc to dismiss
 - **Terminal** (`Ctrl+Y` to toggle) — full PTY terminal emulation with scrollback (see [Terminal](./terminal.md))
 - **Recon** (`r` with an agent selected in the detail pane) — view reconnaissance results directly in the terminal
+- **Reset** (`Ctrl+R` with a node selected) — cancel work, close sessions, and re-register the node after confirmation
 
 Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
 running on the node; resume from the Active Sessions overlay). `Ctrl+C`
@@ -221,6 +222,7 @@ Common actions:
 - Edit an existing op or chain (`Ctrl+E` with the row selected — opens the op form for ops, the chain builder for chains)
 - Run operations and chains with node/agent selection and YOLO mode (`Ctrl+R`)
 - Delete the selected op or chain (`Ctrl+D`)
+- In **Executions**, cancel the selected running operation or chain (`Ctrl+C`) or clear completed history (`Ctrl+X`, with confirmation)
 - Create, edit, enable/disable and delete chain triggers
 
 ### Library tab — chain builder

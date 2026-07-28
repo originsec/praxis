@@ -4,13 +4,13 @@ The terminal feature gives you direct shell access to nodes. This is a full PTY 
 
 ## Opening a Terminal
 
-From a node:
+Open **Nodes** with `Ctrl+L`, select a node, and press `Ctrl+Y` to toggle
+its terminal. The terminal is rendered directly in the TUI and provides
+ANSI terminal emulation with colors, cursor movement, escape sequences, and
+scrollback. Press `Ctrl+Y` again to close it.
 
-1. Click the **Terminal** button
-2. A terminal panel opens
-3. You have a shell on that node
-
-The terminal uses xterm.js for rendering, so you get proper terminal emulation with colors, cursor movement, and escape sequences.
+See [Terminal UI](./tui.md#nodes-ctrll) for the canonical Nodes and terminal
+controls.
 
 ## What You Can Do
 

@@ -37,8 +37,7 @@ cd praxis
 cargo build --release
 ```
 
-This builds the service, node, and CLI components. The web frontend has
-been removed from the codebase; use the TUI (`praxis`) as the client.
+This builds the service, node, and TUI (`praxis`) components.
 
 ### Cross-Compiling the Node for Windows
 

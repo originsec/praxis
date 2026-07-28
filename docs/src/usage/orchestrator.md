@@ -6,9 +6,13 @@ The Orchestrator is an interactive AI agent that can autonomously manage nodes, 
 
 Before using the Orchestrator, you need:
 
-1. **MCP Server enabled** — Go to **Settings** > **Service** and enable **MCP Server**. The Orchestrator connects to the [MCP server](./mcp.md) as a client to access all Praxis tools.
+1. **MCP Server enabled** — Open **Settings** with `Ctrl+S`, select
+   **Service**, and enable **MCP Server**. The Orchestrator connects to the
+   [MCP server](./mcp.md) as a client to access all Praxis tools.
 
-2. **Orchestrator LLM configured** — Go to **Settings** > **LLM Providers** and configure a model definition, then assign it to the Orchestrator feature in the Feature Selection section.
+2. **Orchestrator LLM configured** — Open **Settings** with `Ctrl+S`, select
+   **LLM**, configure a model definition, then assign it to the Orchestrator
+   feature.
 
 If the MCP server is not enabled when you start a session, you'll see an error message directing you to the settings page.
 
@@ -77,8 +81,10 @@ Token usage is displayed after each LLM call, showing prompt tokens, completion 
 
 ## Session Controls
 
-- **Cancel** — Stops the current inference but keeps the session alive. Useful if the AI is going in the wrong direction.
-- **Stop** — Ends the session entirely. You'll need to start a new session to continue.
+`Ctrl+C` cancels an in-flight inference while keeping the conversation. Type
+`/clear` and press `Enter` to start a fresh conversation. See
+[Terminal UI](./tui.md#orchestrator-ctrlo) for the complete Orchestrator
+controls.
 
 ## Model Recommendations
 
@@ -107,7 +113,8 @@ The Orchestrator is best for exploration, debugging, and complex ad-hoc tasks. S
 
 ### "MCP server is not enabled"
 
-Go to **Settings** > **Service** and enable **MCP Server**. The Orchestrator requires the MCP server to function.
+Open **Settings** with `Ctrl+S`, select **Service**, and enable **MCP Server**.
+The Orchestrator requires the MCP server to function.
 
 ### "Could not connect to the MCP server"
 
@@ -115,7 +122,7 @@ The Orchestrator connects to the MCP server when the session is created, so a
 connection problem is reported up front with the reason (rather than surfacing
 later as an opaque error on your first prompt). If you see this:
 
-- Verify the MCP server is running (check the Settings page for status)
+- Verify the MCP server is running in **Settings** (`Ctrl+S`) → **Service**
 - Check that the configured port is not in use by another process
 - Look at service logs for MCP server startup errors
 - If you just enabled the MCP server, give it a moment to bind, then start the

@@ -100,15 +100,15 @@ The TUI tracks messages per session:
 
 - Messages persist while the session is active
 - Conversation history shows the full exchange
-- You can save a transcript with `Ctrl+Alt+W`
 
 ## Ending a Session
 
-Press `Ctrl+C` in a chat view (when idle) or `Ctrl+D` on the Active Sessions
-overlay to terminate. This sends `session/close` to the node, which
-drops the per-session Lua VM and any owned subprocess. Only the targeted
-session is affected — any other live sessions on the same connector keep
-running.
+From a chat, `Ctrl+C` cancels a running prompt or closes an idle session. The
+Active Sessions overlay also lets you discard a selected session. This sends
+`session/close` to the node, which drops the per-session Lua VM and any owned
+subprocess. Only the targeted session is affected — any other live sessions
+on the same connector keep running. See [Terminal UI](./tui.md#nodes-ctrll)
+for the complete session controls.
 
 ## Sessions and Operations
 
@@ -149,20 +149,12 @@ become resumable.
 
 ### In the TUI
 
-`Ctrl+W` in the Nodes window toggles the **Active Sessions** overlay. It
-lists every live session with node, agent, session id preview, status
-(`idle` / `working`), and how long ago it was created.
-
-- `Enter` resumes the selected session
-- `Ctrl+D` or `Del` discards (sends `session/cancel` if the session is
-  mid-prompt, then `session/close`)
-- `Esc` or `Ctrl+W` dismisses the overlay
-
-Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (hides the
-chat; the session stays alive on the node and can be resumed from the
-overlay). `Ctrl+C` cancels the in-flight prompt when the agent is
-working, and closes the session when the agent is idle. The status bar
-shows an `N sessions` counter when any concurrent sessions are live.
+`Ctrl+W` in the Nodes window opens the **Active Sessions** overlay, which
+lists every live session with node, agent, session ID preview, status, and
+creation time. From a chat, `Esc` or `Ctrl+W` pauses the session without
+closing it; resume it from the overlay. The status bar shows an `N sessions`
+counter when any concurrent sessions are live. The [Terminal UI](./tui.md#nodes-ctrll)
+page is the canonical reference for resume, discard, and chat shortcuts.
 
 ## Troubleshooting
 

@@ -152,7 +152,7 @@ if result.success {
 
 The semantic parser LLM is configured in Settings:
 
-1. Go to **Settings** → **LLM Providers**
+1. Open **Settings** (`Ctrl+S`) → **LLM**
 2. Configure **Semantic Parser** provider and model
 3. Save
 

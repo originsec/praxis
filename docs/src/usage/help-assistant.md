@@ -46,9 +46,9 @@ or sent to the model provider.
 ## Configuration
 
 The assistant uses the model assigned to the **Documentation Helper** feature
-under **Settings > LLM > Feature Assignments**. If no model is assigned,
-it falls back to the model configured for the Orchestrator, so it works out of
-the box once any conversational model is configured.
+in **Settings** (`Ctrl+S`) → **LLM**. If no model is assigned, it falls back
+to the model configured for the Orchestrator, so it works out of the box once
+any conversational model is configured.
 
 Relevant service configuration keys:
 

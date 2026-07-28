@@ -66,7 +66,7 @@ current setting to nodes and clients at startup and on registration.
 
 ### LLM Provider Settings
 
-Access via **Settings** (`Ctrl+S`) > **LLM Providers** in the praxis TUI.
+Access via **Settings** (`Ctrl+S`) > **LLM** in the praxis TUI.
 
 LLM configuration has two levels: a single list of named model
 definitions, and per-feature keys that each point at one definition by
