@@ -14,6 +14,7 @@
 /// Global window navigation and process control.
 pub mod global {
     pub const QUIT: &str = "^q";
+    pub const HELP: &str = "^h";
     pub const ORCHESTRATOR: &str = "^o";
     pub const NODES: &str = "^l";
     pub const OPERATIONS: &str = "^p";

@@ -288,6 +288,8 @@ The TUI supports mouse interactions across all windows:
 - **Double-click** — activate items (e.g. open an operation, select a node)
 - **Drag** — scroll through lists and content areas
 - **Scroll wheel** — scroll through lists, chat history, and scrollable content
+- **Status bar** — every hint in the bottom bar is a button: the six window
+  names switch windows, `^h help` opens the Help Assistant, and `^q quit` exits
 
 Mouse interactions work alongside keyboard controls in all windows and popups.
 
@@ -305,7 +307,8 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 | `Ctrl+Y` | Toggle terminal mode (Nodes) |
 | `Ctrl+Q` | Quit |
 
-Status bar short labels: `orchestrator · nodes · ops · intercept · logs · settings`.
+Status bar short labels: `orchestrator · nodes · ops · intercept · logs ·
+settings · help · quit`.
 
 `Ctrl+W` is window-scoped: in Nodes it toggles the Active Sessions
 overlay (or pauses the current chat session).

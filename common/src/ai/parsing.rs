@@ -47,14 +47,26 @@ fn find_matching_brace(text: &str, start: usize) -> Option<usize> {
     None
 }
 
+//
+// Some models (GLM, Qwen, and other Hermes-style tool-calling templates)
+// wrap a call in `<tool_call>...</tool_call>` by default, even though
+// `tool_calling.prompt` asks for bare JSON with no wrapper. Strip the tags
+// unconditionally before searching so the JSON underneath is found the
+// same way regardless of which convention the model actually used.
+//
+fn strip_tool_call_tags(text: &str) -> String {
+    text.replace("<tool_call>", "").replace("</tool_call>", "")
+}
+
 /// Parse manual tool calls from AI response text
 ///
 /// Returns: (tool_name, tool_args, remaining_text_without_tool_call)
 ///
 /// Looks for a JSON block in the documented `{"tool": "tool_name", "args":
 /// {...}}` format (see `tool_calling.prompt`), in either code-fenced or
-/// plain form. A call missing the `args` object is not recognized here —
-/// see `parse_manual_tool_call_lenient` for callers that need to tolerate
+/// plain form, optionally wrapped in `<tool_call>` tags. A call missing
+/// the `args` object is not recognized here — see
+/// `parse_manual_tool_call_lenient` for callers that need to tolerate
 /// that.
 pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
     parse_manual_tool_call_with(text, extract_tool_call_parts)
@@ -81,6 +93,9 @@ fn parse_manual_tool_call_with(
     text: &str,
     extract: impl Fn(&Value) -> Option<(String, Value)>,
 ) -> Option<(String, Value, String)> {
+    let text = strip_tool_call_tags(text);
+    let text = text.as_str();
+
     //
     // Try to find a tool call pattern using brace-counting for robustness
     // This handles nested braces inside JSON string values correctly.
@@ -208,20 +223,24 @@ fn extract_tool_call_parts_lenient(parsed: &Value) -> Option<(String, Value)> {
 
 /// Strip a trailing, unterminated tool-call JSON fragment from `text`.
 /// Returns the text with the fragment (and any trailing whitespace before
-/// it) removed, and whether a fragment was found.
+/// it) removed, and whether a fragment was found. A dangling `<tool_call>`
+/// wrapper tag (with or without a JSON fragment after it) is always
+/// removed too, since it is never meaningful to show the operator.
 pub fn strip_incomplete_tool_call(text: &str) -> (String, bool) {
+    let text = strip_tool_call_tags(text);
+
     let Ok(tool_re) = Regex::new(r#"\{\s*"tool"\s*:"#) else {
-        return (text.to_string(), false);
+        return (text.trim_end().to_string(), false);
     };
 
-    for tool_match in tool_re.find_iter(text) {
+    for tool_match in tool_re.find_iter(&text) {
         let json_start = tool_match.start();
-        if find_matching_brace(text, json_start).is_none() {
+        if find_matching_brace(&text, json_start).is_none() {
             return (text[..json_start].trim_end().to_string(), true);
         }
     }
 
-    (text.to_string(), false)
+    (text.trim_end().to_string(), false)
 }
 
 /// Parse completion signal from AI response text
@@ -379,6 +398,24 @@ This will help me understand."#;
     }
 
     #[test]
+    fn test_parse_tool_call_wrapped_in_tool_call_tags() {
+        //
+        // GLM/Qwen/Hermes-style models default to this wrapper regardless
+        // of the bare-JSON format the prompt asks for.
+        //
+        let text = r#"I'll check available operations.
+<tool_call>{"tool": "op_available", "args": {}}</tool_call>"#;
+
+        let result = parse_manual_tool_call(text);
+        assert!(result.is_some());
+
+        let (tool_name, _args, remaining) = result.unwrap();
+        assert_eq!(tool_name, "op_available");
+        assert!(remaining.contains("I'll check available operations"));
+        assert!(!remaining.contains("tool_call"));
+    }
+
+    #[test]
     fn test_parse_tool_call_with_direct_arguments_lenient() {
         let text = r#"I'll check the Interception documentation for that.
 {"tool": "search_docs", "query": "node not showing in intercept window"}"#;
@@ -415,6 +452,32 @@ This will help me understand."#;
         let (cleaned, stripped) = strip_incomplete_tool_call(text);
 
         assert!(stripped);
+        assert_eq!(cleaned, "I'll check the node setup documentation for that.");
+    }
+
+    #[test]
+    fn test_strip_incomplete_tool_call_removes_dangling_wrapped_fragment() {
+        //
+        // Truncated mid-JSON, with the tag wrapper still present.
+        //
+        let text = "I'll check the node setup documentation for that.\n\
+                     <tool_call>{\"tool\": \"read_doc\", \"path\": \"usa";
+
+        let (cleaned, stripped) = strip_incomplete_tool_call(text);
+
+        assert!(stripped);
+        assert_eq!(cleaned, "I'll check the node setup documentation for that.");
+    }
+
+    #[test]
+    fn test_strip_incomplete_tool_call_removes_dangling_tag_before_json() {
+        //
+        // Truncated right after the opening tag, before any JSON at all.
+        //
+        let text = "I'll check the node setup documentation for that.\n<tool_call>";
+
+        let (cleaned, _stripped) = strip_incomplete_tool_call(text);
+
         assert_eq!(cleaned, "I'll check the node setup documentation for that.");
     }
 
@@ -552,6 +615,23 @@ The operation is now finished."#;
         assert_eq!(calls[2].1["refresh"], true);
         assert!(remaining.contains("I'll inspect the fleet first"));
         assert!(!remaining.contains("\"tool\""));
+    }
+
+    #[test]
+    fn test_parse_multiple_tool_calls_wrapped_in_tags() {
+        //
+        // Reproduces the GLM-via-OpenRouter shape: multiple calls emitted
+        // together inside a single <tool_call> wrapper.
+        //
+        let text = r#"I'll check operations and current nodes.
+<tool_call>{"tool": "op_available", "args": {}},{"tool": "node_list", "args": {}}</tool_call>"#;
+
+        let (calls, remaining) = parse_manual_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "op_available");
+        assert_eq!(calls[1].0, "node_list");
+        assert!(remaining.contains("I'll check operations and current nodes"));
+        assert!(!remaining.contains("tool_call"));
     }
 
     #[test]
