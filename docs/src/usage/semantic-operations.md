@@ -10,6 +10,7 @@ An operation is a task specification:
 - **Prompt** - What you want the agent to do
 - **Mode** - How to execute (one-shot or agent)
 - **Timeout** - How long to wait
+- **Max Iterations** - Cap on orchestrator/target-agent turns in agent mode (default 5)
 - **YOLO Mode** - Auto-approve actions
 
 Think of operations as reusable prompts with execution settings.
@@ -85,45 +86,42 @@ These define the JSON format the orchestrator uses to call tools and signal comp
 ```
 
 ```json
-{"complete": true, "summary": "...", "result": "..."}
+{"complete": true, "summary": "...", "result": true}
 ```
+
+`result` is a boolean success flag, not a text field — put findings, extracted data, or other output in `summary` instead.
 
 ## Creating Operations
 
 Operations are stored in the library:
 
-1. Go to **Operations** → **Library** tab
-2. Click **New Operation**
+1. Open **Operations** with `Ctrl+P` and select the **Library** tab
+2. Press `Ctrl+N` to open the operation form
 3. Fill in the details:
    - Name and description
    - Operation prompt
    - Mode (one-shot or agent)
    - Timeout value
+   - Max iterations (agent mode)
    - YOLO mode setting
-4. Save
+4. Save with `Ctrl+S`
 
 Operations are stored in the database and available across sessions.
+See [Terminal UI](./tui.md#operations-ctrlp) for the complete Operations
+controls.
 
 ## Running Operations
 
 ### From the Library
 
-1. Go to **Operations** → **Library**
-2. Find the operation
-3. Click **Run**
-4. Select node and agent
-5. Watch execution in the Runs tab
-
-### From an Agent
-
-1. Open an agent's detail page
-2. Go to the **Ops** tab
-3. Click **Run Operation**
-4. Select from available operations
+1. Open **Operations** with `Ctrl+P` and select the **Library** tab
+2. Select the operation and press `Ctrl+R`
+3. Select the node and agent in the run form
+4. Watch execution in the **Executions** tab
 
 ## Monitoring Execution
 
-The Runs tab shows all running and completed operations:
+The **Executions** tab shows all running and completed operations:
 
 | Column | Description |
 |--------|-------------|
@@ -132,7 +130,7 @@ The Runs tab shows all running and completed operations:
 | Status | Running, Completed, Failed, Cancelled |
 | Started | When execution began |
 
-Click a run to see details:
+Select a run and press `Enter` to focus its details:
 - Full execution output
 - Iteration history (agent mode)
 - Final result or error
@@ -172,8 +170,8 @@ Operations can specify a different model than the default:
 ## Cancellation
 
 Running operations can be cancelled:
-1. Find the operation in Runs
-2. Click **Cancel**
+1. Open **Operations** with `Ctrl+P` and select the **Executions** tab
+2. Select the running operation and press `Ctrl+C`
 3. The operation terminates
 
 Cancellation is best-effort-if the agent is mid-action, that action may complete.
@@ -192,16 +190,13 @@ Operations can be combined into chains for complex workflows. A chain is a graph
 
 ### Visual Chain Builder
 
-The shipped chain builder is the **praxis TUI** (Operations → Library → New Chain / Edit). It is a terminal canvas with drag-and-drop blocks, port connections, and a properties modal — not a web/React Flow editor.
+The shipped chain builder is part of the **praxis TUI**. Open
+**Operations** with `Ctrl+P`, select **Library**, then use `Ctrl+Alt+N` to
+create a chain or `Ctrl+E` to edit the selected chain. It is a terminal
+canvas with blocks, connections, and properties.
 
-1. Go to **Operations** → **Library**
-2. Create a chain (`Ctrl+Alt+N` or the new-chain action) or edit an existing one (`Ctrl+E`)
-3. Add elements from the palette (or keyboard shortcuts) — new nodes auto-wire from the selection
-4. Connect outputs to inputs by dragging ports (forgiving multi-cell hit targets)
-5. Open properties with `Enter` or double-click; assign session groups and block config
-6. Save with `Ctrl+S` (invalid graphs are rejected with a clear error list)
-
-See [CLI usage — chain builder](cli.md#library-tab--chain-builder) for keybindings and interaction details.
+See [TUI — chain builder](tui.md#library-tab--chain-builder) for the
+canonical keyboard and mouse controls.
 
 ### Chain Structure
 
@@ -211,7 +206,9 @@ Every chain starts with a **Trigger** element and must include exactly one **Ter
 
 Chains support several element types:
 
-**Trigger** - Every chain must start with a trigger. The in-canvas trigger element represents the manual trigger (click "Run" to start the chain). For automated triggers, see [Chain Triggers](#chain-triggers) below.
+**Trigger** - Every chain must start with a trigger. The in-canvas trigger
+element represents manual execution from the Operations library. For automated
+triggers, see [Chain Triggers](#chain-triggers) below.
 
 **Operation** - Executes a semantic operation from your library. Pick an existing operation by name (picker opens when you add an Operation). The operation runs against the target agent and its output flows to the next element.
 
@@ -221,7 +218,7 @@ Chains support several element types:
 
 **Memory** - Stores or retrieves data by key (mode is store or retrieve). Store passes data through unchanged; retrieve loads a previously stored key.
 
-**Loop** - Controls iteration. Configure `max_iterations`. Port `r` (0) is the retry path back into earlier elements; port `x` (1) is the exit when iterations are exhausted.
+**Loop** - Controls iteration. Configure `max_iterations`. Port `r` (0) is the retry path back into earlier elements; port `x` (1) is intended as the exit when iterations are exhausted, but as of this writing the executor routes exhaustion to an internal sentinel value instead of port 1, so a `from_port: 1` connection never actually fires — treat this as a known issue rather than relied-upon behavior.
 
 **Tool** - Invokes a registered toolkit tool (picker lists known tools; params are JSON).
 
@@ -241,39 +238,36 @@ This enables branching workflows with error handling paths.
 
 ### Per-Block Configuration
 
-Operation, Transform, and GenericPrompt elements support per-block configuration overrides:
-- **Max Runtime** - Timeout in seconds for this specific element
+Operation, Transform, and GenericPrompt elements can carry per-block configuration overrides. Of these, only two currently take effect at execution time:
 - **YOLO Mode** - Enable auto-approve for this element's session
-- **Working Directory** - Override the working directory
 - **Require All Inputs** - When disabled, a merge-point element runs as soon as any upstream input arrives (instead of waiting for all branches). Useful in conditional chains where not all paths execute.
+
+Two more fields are exposed in the properties modal and stored with the block, but are not yet read by the executor:
+- **Max Runtime** - Intended as a timeout in seconds for this specific element
+- **Working Directory** - Intended to override the working directory
+
+Setting either of the last two currently has no effect on execution.
 
 ### Building a Chain
 
-1. **Start from the scaffold** - New chains open with a connected `Trigger → Termination` pair.
+New chains open with a connected `Trigger → Termination` scaffold. Add the
+processing elements required for the workflow, keep exactly one Termination,
+and configure the selected element from its properties. Operations can select
+an operation and optional model; transforms and generic prompts use a prompt;
+memory, loops, tools, and payloads each expose their relevant fields.
 
-2. **Add Processing Elements** - Use the palette or shortcuts (`o`/`t`/`g`/`m`/`p`/`k`/`y`). With a block selected, new elements place to the right and auto-wire into the graph. You can also drag ports to rewire freely.
-
-3. **Keep a Termination** - Exactly one Termination is required; its output is the chain result when the run reaches it.
-
-4. **Configure Elements** - Press `Enter` or double-click:
-   - Operations: pick the operation (and optional model)
-   - Transforms / GenericPrompts: multi-line prompt (+ model for transforms)
-   - Memory: store/retrieve mode and key
-   - Loops: max iterations
-   - Tools / Payloads: pick from lists when available
-   - Session group + block config overrides where supported
-
-5. **Assign Session Groups** - In the properties modal for Operations / Transforms / GenericPrompts, use the session group picker (none / new / existing). Elements in the same group share a color tick on the block.
+Use the session-group picker on Operations, Transforms, and GenericPrompts to
+create, reuse, or omit a group. Elements in the same group share a color tick
+and agent-session context. The [TUI chain-builder guide](tui.md#library-tab--chain-builder)
+contains the interaction details and complete shortcuts.
 
 ### Session Groups
 
 Session groups control how agent sessions are managed across chain elements. Elements that interact with agents (Operations, Transforms, GenericPrompts) can be assigned to session groups.
 
-**Assigning Session Groups:**
-1. Open the element properties modal (`Enter` / double-click)
-2. Under **Session group**, click the group picker
-3. Choose none, create a new group, or reuse an existing group id
-4. Elements in the same group share a color indicator on the canvas
+**Assigning Session Groups:** Open an element's properties, choose a session
+group, then select none, create a new group, or reuse an existing group id.
+Elements in the same group share a color indicator on the canvas.
 
 **Same Session Group** - Elements share an agent session:
 - The first element creates the session
@@ -306,11 +300,11 @@ When running a chain:
 
 1. The executor builds a dependency graph from connections
 2. Finds operations with no dependencies (starting points)
-3. Executes ready operations (possibly in parallel)
-4. Marks completed, finds newly ready operations
-5. Repeats until all complete or one fails
+3. Works through ready elements one at a time from a queue, fully awaiting each before starting the next
+4. As each element completes, marks it done and enqueues any newly-ready elements
+5. Repeats until all complete, or the chain ends via Termination
 
-Operations without dependencies on each other can run simultaneously. The executor identifies these and runs them in parallel.
+Elements without dependencies on each other become ready at the same time, but execution is currently sequential — the executor does not run them concurrently, so ordering among independently-ready elements depends on queue order rather than true parallelism. Whether a failed element halts downstream progress depends on how its outgoing connections are configured — see Conditional Connections below.
 
 ```diagram
     ┌─────┐
@@ -320,7 +314,7 @@ Operations without dependencies on each other can run simultaneously. The execut
    ┌───┴───┐
    │       │
 ┌──▼──┐ ┌──▼──┐
-│Op A │ │Op B │  ← These run in parallel
+│Op A │ │Op B │  ← Both become ready together; run one at a time, not concurrently
 └──┬──┘ └──┬──┘
    │       │
    └───┬───┘
@@ -332,11 +326,15 @@ Operations without dependencies on each other can run simultaneously. The execut
 
 ### Monitoring Chains
 
-Chain executions appear in the Runs tab alongside individual operations. Click a chain execution to see individual element status, output from each operation, and timing information.
+Chain executions appear in the **Executions** tab alongside individual
+operations. Select one and press `Enter` to see element status, output, and
+timing information.
 
 ### Chain Cancellation
 
-You can cancel a running chain from the Runs tab. Cancellation stops queuing new operations and lets running operations complete (or cancels them).
+You can cancel a running chain from the **Executions** tab with `Ctrl+C`.
+Cancellation stops queuing new operations and lets running operations complete
+(or cancels them).
 
 ### Use Cases
 
@@ -349,13 +347,16 @@ You can cancel a running chain from the Runs tab. Cancellation stops queuing new
 ### Chain Best Practices
 
 - Plan session groups carefully - shared sessions maintain context but accumulate state
-- Handle failures - if an operation fails, the chain stops
+- Handle failures - by default a connection fires regardless of success or failure (see Conditional Connections); use On Success/On Failure routing if you need the chain to stop or branch on failure
 - Test incrementally - run individual operations first, then combine
 - Keep chains focused - one chain, one goal
 
 ### Chain Triggers
 
-Chains can be executed automatically via triggers. While the in-canvas Trigger element represents manual execution, chain triggers are separate configurations that automate when and how a chain fires. Triggers are managed from the **Triggers** tab on the Operations page (not inside the chain canvas).
+Chains can be executed automatically via triggers. While the in-canvas Trigger
+element represents manual execution, chain triggers are separate
+configurations that automate when and how a chain fires. Manage them from
+**Operations** (`Ctrl+P`) → **Triggers**, not inside the chain canvas.
 
 #### Trigger Types
 
@@ -372,9 +373,9 @@ Scheduled triggers can be **recurring** (fire repeatedly) or **one-shot** (fire 
 
 #### Creating Triggers
 
-From the Operations **Triggers** tab:
+From **Operations** (`Ctrl+P`) → **Triggers**:
 
-1. Press `Ctrl+N` (or the new-trigger action) to open the trigger form
+1. Press `Ctrl+N` to open the trigger form
 2. Select the target chain, trigger type, and schedule/rule settings
 3. Configure the **Target Spec** (see [Flexible Targeting](#flexible-targeting) below)
 4. Save with `Ctrl+S`
@@ -383,12 +384,14 @@ The trigger is immediately active once saved. Each chain can have multiple trigg
 
 #### Managing Triggers
 
-The **Triggers** tab on the Operations page shows all configured triggers across all chains. From here you can:
+The **Triggers** tab shows all configured triggers across all chains. From
+there you can:
 
 - See the chain name, trigger type, configuration summary, and target spec for each trigger
-- Toggle triggers on/off with the **ON/OFF** button
+- Toggle the selected trigger with `Enter`
 - View when a trigger last fired and when it will next fire
-- Delete triggers
+- Edit or delete the selected trigger with the Operations controls documented in
+  [Terminal UI](./tui.md#operations-ctrlp)
 
 #### Trigger Engine
 
@@ -427,7 +430,8 @@ If no targets match, the trigger logs a warning and the chain does not execute.
 
 #### Target Spec Editor
 
-The target spec editor appears when creating triggers in the chain builder and when using advanced targeting in the run modal. It provides:
+The target-spec editor appears when creating triggers in the chain builder and
+when using advanced targeting in the run form. It provides:
 
 - **Node multi-select** - Pick specific nodes from the connected nodes list, or leave empty for all nodes
 - **OS filter** - Free text field for OS substring matching (e.g., "Windows", "Linux", "Ubuntu")
@@ -436,11 +440,15 @@ The target spec editor appears when creating triggers in the chain builder and w
 
 #### Fan-Out Execution
 
-When a chain targets multiple node/agent pairs, the executor performs a fan-out: it creates a separate chain execution for each resolved target. Each execution runs independently and appears as its own entry in the Runs tab.
+When a chain targets multiple node/agent pairs, the executor performs a
+fan-out: it creates a separate chain execution for each resolved target. Each
+execution runs independently and appears in the **Executions** tab.
 
-#### Advanced Targeting in Run Modal
+#### Advanced Targeting in Run Form
 
-The run modal for chains includes an **Advanced Targeting** toggle. When enabled, instead of selecting a single node and agent, you configure a full target spec. This allows manual one-off fan-out runs without needing to set up a trigger.
+The chain run form includes an **Advanced Targeting** toggle. When enabled,
+instead of selecting a single node and agent, you configure a full target spec.
+This allows manual one-off fan-out runs without needing to set up a trigger.
 
 ## Troubleshooting
 

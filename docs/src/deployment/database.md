@@ -105,10 +105,10 @@ PostgreSQL connections use these defaults:
 | Setting | Value | Description |
 |---------|-------|-------------|
 | Max connections | 10 | Maximum pool size |
-| Connect timeout | 30s | Time to establish connection |
-| Idle timeout | 600s | Close idle connections after |
+| Connect timeout | 10s | Time to establish connection |
+| Idle timeout | 600s | sqlx library default; Praxis does not override this |
 
-These are hardcoded but sufficient for most deployments. For high-traffic scenarios, tune PostgreSQL server settings (`max_connections`, `shared_buffers`) instead.
+Max connections and connect timeout are hardcoded by Praxis but sufficient for most deployments. For high-traffic scenarios, tune PostgreSQL server settings (`max_connections`, `shared_buffers`) instead.
 
 ## Schema
 
@@ -145,7 +145,7 @@ sqlite3 ~/.praxis/operations.db .dump > praxis_dump.sql
 ```
 
 2. Convert SQLite-specific syntax to PostgreSQL:
-   - `INTEGER PRIMARY KEY` → `SERIAL PRIMARY KEY`
+   - `INTEGER PRIMARY KEY` → `BIGSERIAL PRIMARY KEY`
    - `BLOB` → `BYTEA`
    - Remove `AUTOINCREMENT`
    - Adjust date functions if used
@@ -181,13 +181,17 @@ PostgreSQL handles:
 
 ### SQLite
 
+SQLite runs in WAL mode, so recent writes can live only in the `operations.db-wal`/`-shm` sidecar files. A plain `cp` of `operations.db` while the service is running risks an inconsistent backup. Use the SQLite online backup command instead, which is safe while the service is up:
+
 ```bash
-# Backup
-cp ~/.praxis/operations.db ~/.praxis/operations.db.backup
+# Backup (safe while the service is running)
+sqlite3 ~/.praxis/operations.db ".backup ~/.praxis/operations.db.backup"
 
 # Restore
 cp ~/.praxis/operations.db.backup ~/.praxis/operations.db
 ```
+
+If you copy files manually instead, stop the service first and copy all three files together (`operations.db`, `operations.db-wal`, `operations.db-shm`).
 
 ### PostgreSQL
 

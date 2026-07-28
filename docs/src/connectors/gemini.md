@@ -19,8 +19,9 @@ If found, fingerprinting succeeds and the agent appears in the node's agent list
 
 ## Interception
 
-Traffic is intercepted for the domain:
+Traffic is intercepted for the domains:
 - `generativelanguage.googleapis.com`
+- `cloudcode-pa.googleapis.com`
 
 When interception is enabled, you'll see:
 - Prompts sent to the Gemini API
@@ -35,6 +36,7 @@ Authentication is considered valid if any of the following are true:
 
 1. **Environment variables** - One of these is set:
    - `GEMINI_API_KEY`
+   - `GOOGLE_API_KEY`
    - `GOOGLE_GENAI_USE_VERTEXAI`
    - `GOOGLE_GENAI_USE_GCA`
 
@@ -55,10 +57,15 @@ Static reconnaissance discovers:
 - Google account info (`~/.gemini/google_accounts.json`)
 - OAuth credentials (`~/.gemini/oauth_creds.json`)
 - System defaults and settings (platform-specific paths)
+- Environment variable snapshot - when set, ~13 relevant variables (`GEMINI_API_KEY`, `GEMINI_MODEL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.) are captured into a synthetic config item
 
 **Context Files**
 - Global context (`~/.gemini/GEMINI.md`)
 - Project context files (configurable via `context.fileName` in settings)
+
+**Custom Commands (Skills)**
+- Custom commands under `.gemini/commands/**/*.toml`, discovered at both user scope (`~/.gemini/commands`) and project scope
+- Nested directories form namespaced command names (e.g. `git/commit.toml` becomes `/git/commit`)
 
 **Sessions**
 - Session files under `~/.gemini/tmp/<project_hash>/chats/`
@@ -130,7 +137,7 @@ The connector supports both static and semantic recon. Static recon parses confi
 | File | Path | Content |
 |------|------|---------|
 | Project settings | `.gemini/settings.json` | Project-specific settings |
-| Project context | `GEMINI.md` | Project instruction file (configurable) |
+| Project context | `.gemini/GEMINI.md` | Project instruction file (configurable) |
 
 ## Troubleshooting
 

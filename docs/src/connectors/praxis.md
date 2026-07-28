@@ -148,7 +148,7 @@ The session keeps a persistent message log across `transact()` calls, so multi-t
 
 ### Cancellation
 
-`session/cancel` sets the `NodeSession.cancel_flag`. The session adopts that flag at construction (via the trait's `set_cancel_flag` default override), so:
+`session/cancel` sets the `NodeSession.cancel_flag`. The session starts with a fresh, local cancel flag at construction, and adopts the caller-supplied flag at the start of each `transact_with_context` call (this connector implements `set_cancel_flag` itself rather than relying on the trait default), so:
 
 - The `chat_completion_stream` loop checks it per delta.
 - The tool-call branch checks it before launching `run_command`.

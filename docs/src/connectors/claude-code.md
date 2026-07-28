@@ -11,14 +11,19 @@ Claude Code is a command-line AI assistant that can read files, execute commands
 The connector looks for Claude Code by checking:
 
 1. **PATH search** - Finding the `claude` executable in PATH
-2. **Explicit paths** - Checking known installation locations (`~/.local/bin/claude` on Linux, `%USERPROFILE%\.local\bin\claude.exe` on Windows)
+2. **Explicit paths** - Checking known installation locations:
+   - `/usr/local/bin`, `/usr/bin` (all platforms)
+   - `~/.local/bin/claude` (Linux)
+   - `%USERPROFILE%\.local\bin\claude.exe` (Windows)
+   - `%APPDATA%\Claude\claude-code\<version>\claude.exe` (Windows, versioned installs)
 
 The binary is verified by running `claude --version` and checking the output contains "claude". If found and verified, fingerprinting succeeds and the agent appears in the node's agent list.
 
 ## Interception
 
-Traffic is intercepted for the domain:
+Traffic is intercepted for the domains:
 - `api.anthropic.com`
+- `a-api.anthropic.com`
 
 With URL pattern filter:
 - `messages` - Only capture requests to the messages endpoint (filters out telemetry)
@@ -60,7 +65,7 @@ Paths without valid authentication are filtered out during reconnaissance. This 
 Static reconnaissance discovers:
 
 **Configuration**
-- Main config file (`~/.claude.json` or `~/.config/claude/config.json`)
+- `~/.claude/settings.json` (global settings) and `~/.claude.json` (preferences)
 - Permission settings, model preferences, etc.
 
 **MCP Servers**
@@ -92,14 +97,14 @@ When semantic recon is enabled (requires Semantic Parser LLM), the connector als
 
 ## Session Management
 
-Sessions are created by spawning Claude Code in a PTY (pseudo-terminal):
+Sessions are created by spawning Claude Code as a non-interactive subprocess:
 
 ```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │
 │  ┌─────────────────────────────────┐                  │
-│  │          PTY Session            │                  │
+│  │          CLI Session            │                  │
 │  │                                 │                  │
 │  │  claude ────────────────────────┼──▶ Claude Process│
 │  │         │                       │                  │
@@ -186,5 +191,5 @@ The connector supports both static and semantic recon. Static recon parses confi
 ### "No MCP servers found"
 
 - MCP servers are optional-not all installations have them
-- Check `~/.claude/mcp.json` exists if you've configured servers
+- Check `~/.claude/settings.json`, `~/.claude.json`, or project `.mcp.json` for your MCP server config
 - Run semantic recon for deeper tool discovery

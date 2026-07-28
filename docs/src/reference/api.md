@@ -10,10 +10,12 @@ This reference documents the message types and RabbitMQ queues/exchanges used fo
 | `NodeBroadcast` | Service → All Nodes | Broadcast commands to all nodes (fanout exchange) |
 | `Node_{id}` | Service → Node | Commands for specific node |
 | `Node_{id}_semantic` | Service → Node | Semantic parser responses |
+| `Node_{id}_reset` | Service → Node | Reset/Shutdown lifecycle signals (dedicated queue, never blocked by command handlers) |
 | `ClientSignal` | Client → Service | Client requests |
 | `ClientBroadcast` | Service → All Clients | System state updates (fanout exchange) |
 | `Client_{id}` | Service → Client | Responses for specific client |
 | `NodeEventLog` | Node → Service | Application log entries |
+| `WebEventLog` | Legacy client → Service | Compatibility queue retained for legacy producers |
 | `ServiceEventLog` | Service → Service | Service log entries |
 
 Named classic queues above are declared durable. Fanout broadcast consumers use exclusive auto-delete server-named queues bound to `NodeBroadcast` / `ClientBroadcast`.
@@ -84,6 +86,16 @@ pub enum NodeDirectMessage {
     // Semantic parser response
     SemanticParserResponse(SemanticParserResponse),
 
+    // Reset the node: cancel all operations, tear down state, re-register.
+    // Delivered on the dedicated `Node_{id}_reset` queue so it is never
+    // blocked by in-flight command handlers.
+    Reset,
+
+    // Gracefully stop the node: cancel all operations, restore system
+    // state, and exit without reconnecting. Also delivered on
+    // `Node_{id}_reset`.
+    Shutdown,
+
     // Inbound ACP frame (request or notification destined for the node)
     Acp(AcpFrame),
 }
@@ -103,6 +115,18 @@ pub enum NodeBroadcastMessage {
 
     // Enable/disable centralized event logging
     EventLoggingSet { enabled: bool },
+
+    // Enable/disable the native Praxis agent connector, pushing the
+    // resolved per-session config (provider/api key/model/etc.) when enabled
+    PraxisAgentEnabled { enabled: bool, config: Option<PraxisAgentConfig> },
+
+    // Atomic agent registry update: rebuild the registry from native agents
+    // plus these Lua connector scripts
+    AgentRegistryUpdate { scripts: Vec<String> },
+
+    // Replace the node's current intercept target list (disabled targets
+    // are filtered out before broadcast)
+    InterceptTargetsUpdate { targets: Vec<InterceptTargetConfig> },
 }
 ```
 
@@ -123,6 +147,27 @@ pub enum ClientSignalMessage {
     // Remove a node from tracking
     RemoveNode { node_id: String },
 
+    // Reset a node (cancel operations, tear down state, re-register)
+    ResetNode { node_id: String },
+
+    // Remote (virtual) nodes - synthetic node entries backed by a bridge
+    // to an external agent server (e.g. a Codex app-server over WebSocket).
+    // `kind` selects the bridge implementation.
+    AddRemoteNode { kind: String, url: String, token: Option<String> },
+
+    // Documentation helper agent - a lightweight, doc-seeded conversational
+    // assistant, independent of the orchestrator. Each prompt carries its
+    // own `request_id` for correlation; responses stream back as the
+    // `DocHelper*` direct messages.
+    DocHelperPrompt {
+        client_id: String,
+        request_id: String,
+        prompt: String,
+        history: Vec<(String, String)>,
+        context: Option<String>,
+    },
+    DocHelperCancel { client_id: String, request_id: String },
+
     // Semantic Operations
     SemanticOpRun { client_id, node_id, agent_short_name, operation_name, request_id },
     SemanticOpCancel { operation_id },
@@ -138,6 +183,8 @@ pub enum ClientSignalMessage {
     OpDefAdd { client_id, content: String },
     OpDefList { client_id },
     OpDefDelete { client_id, full_name },
+    // Set the disabled flag on an operation definition
+    OpDefSetDisabled { client_id, full_name, disabled: bool },
     OpDefGet { client_id, full_name },
 
     // Chain Definitions
@@ -146,6 +193,8 @@ pub enum ClientSignalMessage {
     ChainCreate { client_id, definition: ChainDefinitionInput },
     ChainUpdate { client_id, chain_id, definition: ChainDefinitionInput },
     ChainDelete { client_id, chain_id },
+    // Set the disabled flag on a chain
+    ChainSetDisabled { client_id, chain_id, disabled: bool },
     ChainRun { client_id, chain_id, node_id, agent_short_name, working_dir, target_spec },
     ChainCancel { client_id, execution_id },
     ChainExecutionList { client_id },
@@ -179,6 +228,47 @@ pub enum ClientSignalMessage {
     // Recon
     ReconGet { client_id, node_id, agent_short_name },
 
+    // Toolkit
+    ToolkitList { client_id },
+    ToolkitRecon { client_id, tool_name, target_spec: TargetSpec },
+    ToolkitExecute { client_id, tool_name, target_spec: TargetSpec, params: serde_json::Value },
+    ToolkitApply { client_id, tool_name, execution_id, targets: Vec<ToolkitApplyItem> },
+
+    // Payloads (static content for Payload chain elements)
+    PayloadList { client_id },
+    PayloadUpsert { client_id, id: Option<String>, shortname, content },
+    PayloadDelete { client_id, id },
+
+    // Lua agent scripts (stored in the service database)
+    LuaAgentScriptAdd { client_id, name, script },
+    LuaAgentScriptDelete { client_id, script_id },
+    LuaAgentScriptList { client_id },
+    LuaAgentScriptUpdate { client_id, script_id, name, script },
+    LuaAgentScriptResetDefaults { client_id },
+    LuaAgentScriptToggleDisabled { client_id, script_id, disabled: bool },
+
+    // Intercept targets virtual file (TOML text stored in service_config,
+    // parsed into an InterceptTargetConfig list and pushed to nodes on change)
+    InterceptTargetsGet { client_id },
+    InterceptTargetsSet { client_id, text: String },
+    InterceptTargetsResetDefaults { client_id },
+
+    // LogQuery - KQL query interface over captured logs
+    LogQuery { client_id, query: String },
+
+    // Orchestrator - ACP JSON-RPC message from client to service
+    AcpMessage { client_id, json_rpc: String },
+
+    // AgentChat - IRC-style multi-agent chat
+    AgentChatStart { client_id, goal: Option<String>, yolo_mode: bool },
+    AgentChatStop { client_id, session_id },
+    AgentChatAddAgent { client_id, session_id, node_id, agent_short_name },
+    AgentChatRemoveAgent { client_id, session_id, agent_id },
+    AgentChatReorderAgents { client_id, session_id, agent_ids: Vec<String> },
+    AgentChatSendMessage { client_id, session_id, content, channel_id: Option<String>, recipient_nickname: Option<String> },
+    AgentChatJoinChannel { client_id, session_id, channel_name },
+    AgentChatGetHistory { client_id, session_id, channel_id: Option<String>, limit: u32 },
+    AgentChatGetState { client_id, session_id: Option<String> },
 }
 ```
 
@@ -193,6 +283,16 @@ pub enum ClientDirectMessage {
     CommandResponse(CommandResponse),
     StateUpdate(SystemState),
     TerminalOutput(TerminalOutput),
+
+    // Documentation helper agent streaming responses, correlated by
+    // request_id. Chunk carries an incremental text delta; FollowUp
+    // indicates the helper is consulting documentation before producing a
+    // detailed continuation; Complete signals the turn finished (naturally
+    // or via cancellation); Error reports a failure.
+    DocHelperChunk { request_id: String, delta: String },
+    DocHelperFollowUp { request_id: String },
+    DocHelperComplete { request_id: String },
+    DocHelperError { request_id: String, message: String },
 
     // Semantic Operations
     SemanticOpQueued { operation_id, queue_position, request_id },
@@ -261,6 +361,53 @@ pub enum ClientDirectMessage {
     // Recon
     ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic },
 
+    // Toolkit
+    ToolkitListResponse { tools: Vec<ToolkitToolInfo>, models: Vec<ToolkitModelOption> },
+    ToolkitReconResponse { tool_name, targets: Vec<ToolkitReconTarget> },
+    ToolkitExecutionResult { result: ToolkitExecuteResult },
+    ToolkitApplyResult { execution_id, results: Vec<ToolkitApplyOutcome> },
+    ToolkitExecutionProgress { execution_id, current: usize, total: usize },
+    ToolkitError { message },
+
+    // Payloads
+    PayloadListResponse { payloads: Vec<PayloadInfo> },
+    PayloadUpserted { payload: PayloadInfo },
+    PayloadDeleted { id, success },
+    PayloadError { message },
+
+    // Lua agent scripts
+    LuaAgentScriptAdded { id, name },
+    LuaAgentScriptDeleted { script_id, success },
+    LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
+    LuaAgentScriptUpdated { id, name },
+    LuaAgentScriptDefaultsReset { count: usize },
+    LuaAgentScriptDisabledToggled { script_id, disabled: bool },
+
+    // Intercept targets virtual file. `text` is the current raw file
+    // contents; `targets` is the parsed list (empty when `error` is set).
+    InterceptTargetsState { text: String, targets: Vec<InterceptTargetConfig>, error: Option<String> },
+
+    // LogQuery
+    LogQueryResponse { columns: Vec<String>, rows: Vec<Vec<serde_json::Value>>, total_count: usize },
+    LogQueryError { message },
+
+    // Orchestrator - ACP JSON-RPC message from service to client
+    AcpMessage { json_rpc: String },
+
+    // AgentChat responses
+    AgentChatSessionStarted { session_id, goal: Option<String> },
+    AgentChatSessionStopped { session_id },
+    AgentChatAgentAdded { session_id, agent: AgentChatAgentInfo },
+    AgentChatAgentRemoved { session_id, agent_id },
+    AgentChatAgentStatusChanged { session_id, agent_id, status: AgentChatAgentStatus },
+    AgentChatChannelCreated { session_id, channel: AgentChatChannelInfo },
+    AgentChatChannelUpdated { session_id, channel: AgentChatChannelInfo },
+    AgentChatAgentJoinedChannel { session_id, agent_id, channel_id },
+    AgentChatAgentLeftChannel { session_id, agent_id, channel_id },
+    AgentChatMessage { session_id, message: AgentChatMessageInfo },
+    AgentChatStateUpdate { session: AgentChatSessionState },
+    AgentChatHistoryResponse { session_id, channel_id: Option<String>, messages: Vec<AgentChatMessageInfo> },
+    AgentChatError { message },
 }
 ```
 
@@ -359,15 +506,20 @@ All extensions are advertised under `InitializeResponse._meta.extensions`.
   serialized `ReconResult`. Setting `is_semantic` to true asks the node
   to populate `tools.internal_tools` by interrogating the agent.
 - `_praxis/read_file` — read a file on the node. Params
-  `{ "agent_short_name": string, "path": string }`.
+  `{ "agent_short_name": string, "file_type": AgentFileType, "path": string,
+  "line_start"?: number, "line_end"?: number }`, where `AgentFileType` is
+  `"Config"` or `"Session"`.
 - `_praxis/write_file` — write a file on the node. Params
-  `{ "agent_short_name": string, "path": string, "contents": string }`.
+  `{ "file_type": AgentFileType, "path": string, "contents": string }`.
+  There is no `agent_short_name` field; writes are rejected for `Session`
+  file types.
 - `_praxis/grep_files` — regex search across one or more files. Params
-  `{ "agent_short_name": string, "path": string, "pattern": string }`.
+  `{ "agent_short_name": string, "file_type": AgentFileType,
+  "paths": string[], "pattern": string }`.
 - `_praxis/write_session_content` — write agent-session content through
   the connector's `write_session_content` hook (so agents with virtual
   session stores can intercept the write). Params
-  `{ "agent_short_name": string, "session_file": string, "contents": string }`.
+  `{ "agent_short_name": string, "path": string, "contents": string }`.
 
 ### NodeCommand (non-agent concerns)
 
@@ -402,6 +554,7 @@ pub enum TerminalCommand {
     Write { data: Vec<u8> },                   // Send keystrokes
     Resize { rows: u16, cols: u16 },           // Resize terminal
     Close,                                     // Close session
+    Replay,                                    // Request scrollback buffer replay
 }
 ```
 
@@ -415,6 +568,7 @@ pub struct NodeRegistration {
     pub node_type: String,
     pub machine_name: String,
     pub os_details: String,
+    pub capabilities: Vec<NodeCapability>,  // Session | Interception | Terminal | Recon
 }
 ```
 
@@ -427,6 +581,8 @@ pub struct SelectedAgent {
     pub process_name: Option<String>,
     pub yolo_mode: bool,
     pub working_dir: Option<String>,
+    pub active_transaction_id: Option<String>,  // Transaction ID of the in-flight prompt, if any
+    pub active_prompt_text: Option<String>,     // Text of the in-flight prompt, if any
 }
 ```
 
@@ -488,6 +644,7 @@ pub struct ChainDefinitionInput {
     pub connections: Vec<ChainConnection>,
     pub disabled: bool,
     pub timeout: Option<u64>,
+    pub positions: HashMap<String, ElementPosition>,  // Saved visual canvas layout, by element ID
 }
 ```
 
@@ -547,6 +704,7 @@ pub enum InterceptMethod {
     Proxy,    // System proxy settings
     Vpn,      // TUN adapter
     Hosts,    // Hosts file redirection
+    Tproxy,   // Linux iptables TPROXY transparent proxying; recommended default on Linux
 }
 ```
 

@@ -60,7 +60,7 @@ The script will:
 ### 3. Access Your Deployment
 
 After deployment completes, you'll receive URLs for:
-- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{hash}.{region}.azurecontainer.io:5672` — point your `praxis` TUI at this with `--rabbitmq` or `PRAXIS_RABBITMQ_URL`
+- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{hash}.{region}.azurecontainer.io:5672` — point your `praxis` TUI at this with `praxis set-rabbitmqurl <url>` or `PRAXIS_RABBITMQ_URL`
 - **RabbitMQ Management UI**: `http://praxis-rabbitmq-{hash}.{region}.azurecontainer.io:15672`
 
 ## Script Commands
@@ -104,7 +104,7 @@ Resource names are automatically made unique using a hash suffix derived from yo
 3. **PostgreSQL Flexible Server** - Database backend (Burstable B1ms tier)
 4. **Container App Environment** - Managed environment for Container Apps
 5. **RabbitMQ** - Azure Container Instance with persistent storage
-6. **Praxis** - Container App with external HTTPS ingress
+6. **Praxis** - Container App (no external ingress is configured by the script)
 
 ## Stopping and Starting
 
@@ -181,7 +181,7 @@ az postgres flexible-server show -n <server-name> -g praxis-rg --query state
 
 ### Other Security Recommendations
 
-1. **Change default passwords** - Set `PRAXIS_POSTGRES_PASS` and update RabbitMQ credentials
+1. **Change default passwords** - Set `PRAXIS_POSTGRES_PASS` for PostgreSQL. RabbitMQ credentials (`praxis`/`praxis`) are hardcoded in the deploy script with no environment-variable override, so changing them currently requires editing `scripts/azure-deploy.sh` directly
 2. **Use Azure Key Vault** - Store secrets securely rather than in environment variables
 3. **Enable diagnostic logging** - Send logs to Log Analytics for audit trails
 4. **Regular updates** - Keep base images current

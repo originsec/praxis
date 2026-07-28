@@ -45,7 +45,7 @@ node/src/
 └── runtime.rs           # Main event loop
 ```
 
-Lua-based agent scripts (Claude Code, Codex, Cursor, Gemini, M365 Copilot) live in `agents/` at the project root and are embedded into the binary at build time.
+Lua-based agent scripts (Agy/Antigravity, Claude Code, Claude Desktop, Codex, Cursor, Droid, Gemini, M365 Copilot, Pi) live in `agents/` at the project root and are embedded into the binary at build time.
 
 ### Service (`service/`)
 
@@ -127,7 +127,7 @@ See [Semantic Parser](semantic-parser.md) for details.
 
 See [Adding New Connectors](../connectors/adding-new.md). Prefer Lua-based connectors for CLI agents — they can be developed and tested at runtime via the TUI's Settings → Agents tab without recompiling.
 
-Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. Shared libraries are at `node/src/agent_connectors/lua/lib/` (`helpers.lua` for common utilities, `devtools.lua` for CDP/DevTools support).
+Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. Shared libraries are at `node/src/agent_connectors/lua/lib/` (`helpers.lua` for common utilities, `devtools.lua` for CDP/DevTools support, `uiautomation.lua` for Windows UI Automation).
 
 ### Adding Operations
 
@@ -165,7 +165,7 @@ Run the full stack and test manually. Automated integration tests are on the roa
 
 ### PR Process
 
-1. Open a PR against `main`
+1. Open a PR against `prerelease`
 2. Describe the change
 3. Wait for review
 4. Address feedback
@@ -188,6 +188,4 @@ Open an issue with:
 
 ## Contact
 
-- Issues: GitHub Issues
-- Email: david.kaplan@preludesecurity.com
-- Twitter: @depletionmode
+- Issues: [GitHub Issues](https://github.com/originsec/praxis/issues)

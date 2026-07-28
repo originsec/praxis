@@ -6,28 +6,31 @@ The Orchestrator is an interactive AI agent that can autonomously manage nodes, 
 
 Before using the Orchestrator, you need:
 
-1. **MCP Server enabled** — Go to **Settings** > **MCP Server** and enable it. The Orchestrator connects to the [MCP server](./mcp.md) as a client to access all Praxis tools.
+1. **MCP Server enabled** — Open **Settings** with `Ctrl+S`, select
+   **Service**, and enable **MCP Server**. The Orchestrator connects to the
+   [MCP server](./mcp.md) as a client to access all Praxis tools.
 
-2. **Orchestrator LLM configured** — Go to **Settings** > **LLM Providers** and configure a model definition, then assign it to the Orchestrator feature in the Feature Selection section.
+2. **Orchestrator LLM configured** — Open **Settings** with `Ctrl+S`, select
+   **LLM**, configure a model definition, then assign it to the Orchestrator
+   feature.
 
 If the MCP server is not enabled when you start a session, you'll see an error message directing you to the settings page.
 
 ## Starting a Session
 
-1. Click **Orchestrator** in the sidebar
+1. Open the **Orchestrator** window with `Ctrl+O`
 2. Type your goal or question — the session is opened on demand
-3. The Orchestrator connects to the MCP server and fetches available tools
+3. Press `Enter`; the Orchestrator connects to the MCP server and fetches available tools
 
 ## Sessions and State
 
-The service holds **no orchestrator state**. Each client (TUI or web) keeps a single in-flight session against the service; when the client disconnects or closes the session the conversation is dropped server-side.
+The service holds **no persistent orchestrator state**. The TUI keeps one in-flight session against the service; when the TUI disconnects or closes the session, the conversation is dropped server-side.
 
-- **Web** — One ephemeral session per page load. Closing the tab or navigating away ends the conversation; nothing is persisted.
-- **TUI (`praxis`)** — One session per CLI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
+- **TUI (`praxis`)** — One session per TUI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
   - `praxis --continue` resumes the most recent saved session.
   - `praxis --resume` lists saved sessions and prompts you to pick one.
 
-  When resuming, the saved transcript is shown immediately and the prior turns are sent as conversation history with `session/new` so the model has full context for the next prompt.
+  When resuming, the saved transcript is shown immediately and the prior turns are sent as conversation history with `session/new` so the model has recent context for the next prompt. History is trimmed to the most recent ~20 entries on every prompt (not just on resume), so very long conversations lose earlier turns rather than growing unbounded.
 
 ## What It Can Do
 
@@ -60,9 +63,7 @@ Plus two local tools:
 
 ## Thinking Mode
 
-When using a model that supports extended thinking (e.g. Claude Sonnet/Opus with thinking enabled), the Orchestrator surfaces the model's reasoning steps inline. Thinking blocks appear in a collapsed section before the final response, showing the chain of reasoning the model used to arrive at its answer.
-
-Thinking mode is enabled automatically when the configured Orchestrator model supports it and has thinking enabled in its API parameters. No separate configuration is needed in Praxis.
+If a model emits literal `<think>...</think>` tags in its plain-text output, the Orchestrator splits them out and renders them inline as a distinct segment before the rest of the response. This is plain-text parsing, not an API-level extended-thinking integration — there is no model-capability detection and no collapse/expand toggle; a thinking segment is always shown inline when present. Whether a model emits `<think>` tags at all depends entirely on the model/provider, not on any Praxis setting.
 
 ## Plan Tracking
 
@@ -80,8 +81,10 @@ Token usage is displayed after each LLM call, showing prompt tokens, completion 
 
 ## Session Controls
 
-- **Cancel** — Stops the current inference but keeps the session alive. Useful if the AI is going in the wrong direction.
-- **Stop** — Ends the session entirely. You'll need to start a new session to continue.
+`Ctrl+C` cancels an in-flight inference while keeping the conversation. Type
+`/clear` and press `Enter` to start a fresh conversation. See
+[Terminal UI](./tui.md#orchestrator-ctrlo) for the complete Orchestrator
+controls.
 
 ## Model Recommendations
 
@@ -110,7 +113,8 @@ The Orchestrator is best for exploration, debugging, and complex ad-hoc tasks. S
 
 ### "MCP server is not enabled"
 
-Go to **Settings** > **MCP Server** and enable it. The Orchestrator requires the MCP server to function.
+Open **Settings** with `Ctrl+S`, select **Service**, and enable **MCP Server**.
+The Orchestrator requires the MCP server to function.
 
 ### "Could not connect to the MCP server"
 
@@ -118,7 +122,7 @@ The Orchestrator connects to the MCP server when the session is created, so a
 connection problem is reported up front with the reason (rather than surfacing
 later as an opaque error on your first prompt). If you see this:
 
-- Verify the MCP server is running (check the Settings page for status)
+- Verify the MCP server is running in **Settings** (`Ctrl+S`) → **Service**
 - Check that the configured port is not in use by another process
 - Look at service logs for MCP server startup errors
 - If you just enabled the MCP server, give it a moment to bind, then start the

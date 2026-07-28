@@ -29,24 +29,6 @@ Centralized application log entries from service and nodes. Requires `applicatio
 | target | Log target/module (may be null) |
 | message | Log message text |
 
-### SemanticOperationChainLogs
-
-Chain execution history, including per-element state and final outputs. The `elements` and `outputs` columns contain JSON — use `contains()` to search within them.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When the chain execution was created |
-| execution_id | Chain execution identifier |
-| chain_id | Chain definition identifier |
-| chain_name | Chain display name |
-| node_id | Node that executed the chain |
-| agent_short_name | Agent that executed the chain |
-| status | Execution status: Queued, Running, Completed, Failed, Cancelled |
-| elements | Per-element execution state (JSON) |
-| outputs | Final outputs from termination elements (JSON) |
-| started_at | When execution started |
-| ended_at | When execution ended (null if still running) |
-
 ### NodeLogs
 
 Currently connected nodes (in-memory).
@@ -58,24 +40,6 @@ Currently connected nodes (in-memory).
 | machine_name | Machine hostname |
 | os_details | Operating system details |
 | intercept_active | Whether interception is active |
-
-### SemanticOperationLogs
-
-Semantic operation execution history, including results and summaries. The `operation_spec` column contains the full operation definition as JSON — use `contains()` to search within it.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When the operation was created |
-| operation_id | Operation identifier |
-| node_id | Node that executed the operation |
-| agent_short_name | Agent that executed the operation |
-| status | Operation status: Queued, Running, Completed, Failed, Cancelled |
-| operation_spec | Full operation specification (JSON) |
-| start_time | When the operation started |
-| end_time | When the operation ended (null if still running) |
-| summary | Brief summary of actions taken |
-| result | Actual findings/data/output |
-| chain_execution_id | Parent chain execution ID (null if standalone) |
 
 ### ReconLogs
 
@@ -122,6 +86,42 @@ Individual tools discovered during reconnaissance (MCP tools, skills, internal t
 | tool_name | Tool name |
 | tool_description | Tool description |
 | transport | MCP transport type (null for skills/internal) |
+
+### SemanticOperationChainLogs
+
+Chain execution history, including per-element state and final outputs. The `elements` and `outputs` columns contain JSON — use `contains()` to search within them.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the chain execution was created |
+| execution_id | Chain execution identifier |
+| chain_id | Chain definition identifier |
+| chain_name | Chain display name |
+| node_id | Node that executed the chain |
+| agent_short_name | Agent that executed the chain |
+| status | Execution status: Queued, Running, Completed, Failed, Cancelled |
+| elements | Per-element execution state (JSON) |
+| outputs | Final outputs from termination elements (JSON) |
+| started_at | When execution started |
+| ended_at | When execution ended (null if still running) |
+
+### SemanticOperationLogs
+
+Semantic operation execution history, including results and summaries. The `operation_spec` column contains the full operation definition as JSON — use `contains()` to search within it.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the operation was created |
+| operation_id | Operation identifier |
+| node_id | Node that executed the operation |
+| agent_short_name | Agent that executed the operation |
+| status | Operation status: Queued, Running, Completed, Failed, Cancelled |
+| operation_spec | Full operation specification (JSON) |
+| start_time | When the operation started |
+| end_time | When the operation ended (null if still running) |
+| summary | Brief summary of actions taken |
+| result | Actual findings/data/output |
+| chain_execution_id | Parent chain execution ID (null if standalone) |
 
 ### ToolkitActionsLog
 
@@ -187,7 +187,7 @@ Traffic that matched intercept rules, joined with traffic details.
 | `where` | Filter rows | `TrafficLogs \| where host contains "openai"` |
 | `project` | Select columns | `TrafficLogs \| project timestamp, url, host` |
 | `project-away` | Remove columns | `TrafficLogs \| project-away request_body, response_body` |
-| `sort` / `order` | Sort rows | `TrafficLogs \| sort timestamp` |
+| `sort` | Sort rows | `TrafficLogs \| sort timestamp` |
 | `take` / `limit` | Limit rows | `TrafficLogs \| take 50` |
 | `top` | Top N by column | `TrafficLogs \| top 10 by timestamp` |
 | `extend` | Add computed columns | `TrafficLogs \| extend url_length = strlen(url)` |
@@ -204,9 +204,9 @@ LeftTable | join (RightTable) on $left.col_a == $right.col_b
 ### Supported Expressions
 
 - **Comparisons:** `==`, `!=`, `<`, `>`, `<=`, `>=`
-- **Logical:** `and`, `or`, `not`
+- **Logical:** `and`, `or`
 - **String functions:** `contains`, `startswith`, `endswith`, `has`, `strlen`, `tolower`, `toupper`
-- **Null checks:** `isnotempty()`, `isnull()`, `isempty()`
+- **Null checks:** `isnotempty()`, `isnull()`, `isnotnull()`, `isempty()`
 - **Aggregations (in summarize):** `count()`, `sum()`, `avg()`, `min()`, `max()`, `dcount()`
 - **Type conversion:** `tostring()`, `toint()`, `tolong()`
 
@@ -288,7 +288,7 @@ In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (ReconLogs, Reco
 
 ### Result Limits
 
-Results are capped by the `log_query_row_limit` setting, which defaults to 10,000,000 rows. This limit can be configured in **Settings > Service > Event Logging**. The `total_count` field reflects the actual count before capping. Use `take` or `limit` to reduce result size for large tables.
+Results are capped by the `log_query_row_limit` setting, which defaults to 10,000,000 rows. This limit can be configured in **Settings > Service > Logging & Data**. For database-backed tables this cap is applied as a `LIMIT` in the pushed-down SQL query itself, so the `total_count` field is already bounded at fetch time rather than reflecting a true uncapped count. Use `take` or `limit` to reduce result size for large tables.
 
 ## KQL Parser
 

@@ -7,11 +7,11 @@ Sessions let you interact with AI agents in real-time. When you create a session
 From the **Nodes** window (`Ctrl+L`) in the praxis TUI, with an agent
 selected:
 
-1. Open a session chat
+1. Press `Enter` on the selected agent to open the session options
 2. Optionally enable **YOLO Mode** and pick a working directory
-3. Wait for the session to initialize
+3. Press `Enter` to confirm, then wait for the session to initialize
 
-The agent process starts on the target node with a PTY attached.
+The selected connector creates an isolated session on the target node.
 
 ## Session Interface
 
@@ -20,7 +20,7 @@ The chat view shows a conversation:
 - Your messages and agent responses interleave in the transcript
 - Responses are rendered as markdown with syntax highlighting
 
-Type in the input field and press Enter to send a prompt.
+Type in the input field and press `Enter` to send a prompt.
 
 ## YOLO Mode
 
@@ -55,9 +55,10 @@ returned `sessionId` are routed by the service proxy automatically.
 When you send a prompt:
 
 1. `session/prompt` is forwarded to the node that owns the session
-2. The node's per-session Lua VM handles the prompt — invoking the
-   connector's PTY (`claudecode`, `codex`, `m365-copilot`) or the
-   connector's embedded ACP subprocess (`cursor`, `gemini`)
+2. The node's per-session Lua VM handles the prompt — spawning a
+   one-shot non-interactive subprocess (`claudecode`, `codex`), driving
+   the connector via Chrome DevTools Protocol (`m365-copilot`), or
+   talking to the connector's embedded ACP subprocess (`cursor`, `gemini`)
 3. Streaming updates (`session/update` notifications) flow back as the
    agent generates text, calls tools, and builds plans
 4. The final `session/prompt` response carries a `stopReason`
@@ -99,22 +100,22 @@ The TUI tracks messages per session:
 
 - Messages persist while the session is active
 - Conversation history shows the full exchange
-- You can save a transcript with `Ctrl+Alt+W`
 
 ## Ending a Session
 
-Press Ctrl+C in a chat view (when idle) or `Ctrl+D` on the Active Sessions
-overlay to terminate. This sends `session/close` to the node, which
-drops the per-session Lua VM and any owned subprocess. Only the targeted
-session is affected — any other live sessions on the same connector keep
-running.
+From a chat, `Ctrl+C` cancels a running prompt or closes an idle session. The
+Active Sessions overlay also lets you discard a selected session. This sends
+`session/close` to the node, which drops the per-session Lua VM and any owned
+subprocess. Only the targeted session is affected — any other live sessions
+on the same connector keep running. See [Terminal UI](./tui.md#nodes-ctrll)
+for the complete session controls.
 
 ## Sessions and Operations
 
 Semantic operations always create their own dedicated session. When an
 operation runs it calls `session/new`, executes, and then closes. Because
 each ACP session owns its own Lua VM (and, where applicable, its own ACP
-subprocess or PTY), operations run concurrently with interactive sessions
+subprocess), operations run concurrently with interactive sessions
 on the same agent without interfering.
 
 ## Bridge Sessions
@@ -148,20 +149,12 @@ become resumable.
 
 ### In the TUI
 
-`Ctrl+W` in the Nodes window toggles the **Active Sessions** overlay. It
-lists every live session with node, agent, session id preview, status
-(`idle` / `working`), and how long ago it was created.
-
-- `Enter` resumes the selected session
-- `Ctrl+D` or `Del` discards (sends `session/cancel` if the session is
-  mid-prompt, then `session/close`)
-- `Esc` or `Ctrl+W` dismisses the overlay
-
-Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (hides the
-chat; the session stays alive on the node and can be resumed from the
-overlay). `Ctrl+C` cancels the in-flight prompt when the agent is
-working, and closes the session when the agent is idle. The status bar
-shows an `N sessions` counter when any concurrent sessions are live.
+`Ctrl+W` in the Nodes window opens the **Active Sessions** overlay, which
+lists every live session with node, agent, session ID preview, status, and
+creation time. From a chat, `Esc` or `Ctrl+W` pauses the session without
+closing it; resume it from the overlay. The status bar shows an `N sessions`
+counter when any concurrent sessions are live. The [Terminal UI](./tui.md#nodes-ctrll)
+page is the canonical reference for resume, discard, and chat shortcuts.
 
 ## Troubleshooting
 
