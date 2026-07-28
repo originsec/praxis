@@ -37,6 +37,14 @@ const LOOP_PORT_RETRY: u32 = 0;
 const LOOP_PORT_EXIT: u32 = 1;
 
 //
+// An element's output, semantic result, and (for port-gated elements) the
+// output port it activated. Keeping the port with the resolved result lets
+// readiness and input collection apply the same routing rule as fan-out.
+//
+
+type ResolvedElement = (String, Option<bool>, Option<u32>);
+
+//
 // Pick the output port a Loop element activates for a given visit.
 // `iteration` is 1-based: the first visit is iteration 1.
 //
@@ -489,7 +497,7 @@ impl ChainExecutor {
         use std::collections::VecDeque;
 
         let mut work_queue: VecDeque<String> = VecDeque::new();
-        let mut resolved: HashMap<String, (String, Option<bool>)> = HashMap::new();
+        let mut resolved: HashMap<String, ResolvedElement> = HashMap::new();
         let mut loop_counters: HashMap<String, u32> = HashMap::new();
         let mut hit_counts: HashMap<String, u32> = HashMap::new();
         let mut initial_inputs: HashMap<String, String> = HashMap::new();
@@ -633,8 +641,10 @@ impl ChainExecutor {
                     .incoming_connections(&element_id)
                     .iter()
                     .filter_map(|conn| {
-                        if let Some((output, success)) = resolved.get(&conn.from_element) {
-                            if connection_fires(conn, success) {
+                        if let Some((output, success, active_port)) =
+                            resolved.get(&conn.from_element)
+                        {
+                            if connection_fires(conn, success, *active_port) {
                                 Some(output.clone())
                             } else {
                                 None
@@ -988,7 +998,10 @@ impl ChainExecutor {
 
             let edge_success = semantic_success.map(Some).unwrap_or(success);
 
-            resolved.insert(element_id.clone(), (output.clone(), edge_success));
+            resolved.insert(
+                element_id.clone(),
+                (output.clone(), edge_success, active_port),
+            );
 
             if graph.outgoing_connections(&element_id).is_empty() {
                 if edge_success == Some(true) {
@@ -1000,19 +1013,14 @@ impl ChainExecutor {
             }
 
             for conn in graph.outgoing_connections(&element_id) {
-                if !connection_fires(conn, &edge_success) {
-                    continue;
-                }
                 //
                 // Port-gated elements (currently just Loop) fan out only
                 // along the port they activated. A Loop with no edge on
                 // that port simply ends the path, which is what happens
                 // when a chain is authored without an exit branch.
                 //
-                if let Some(port) = active_port {
-                    if conn.from_port != port {
-                        continue;
-                    }
+                if !connection_fires(conn, &edge_success, active_port) {
+                    continue;
                 }
                 if is_target_ready(&conn.to_element, &graph, &resolved) {
                     work_queue.push_back(conn.to_element.clone());
@@ -1329,16 +1337,22 @@ impl ChainExecutor {
 }
 
 //
-// Check if a connection fires based on its condition and the source
-// element's success.
+// Check whether a connection fires based on its condition, source element's
+// success, and (when the source is port-gated) the selected output port.
 //
 
-fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bool>) -> bool {
-    match &conn.condition {
+fn connection_fires(
+    conn: &crate::database::ChainConnection,
+    success: &Option<bool>,
+    active_port: Option<u32>,
+) -> bool {
+    let condition_fires = match &conn.condition {
         None => true,
         Some(crate::database::ConnectionCondition::OnSuccess) => matches!(success, Some(true)),
         Some(crate::database::ConnectionCondition::OnFailure) => matches!(success, Some(false)),
-    }
+    };
+
+    condition_fires && active_port.map_or(true, |port| conn.from_port == port)
 }
 
 //
@@ -1353,7 +1367,7 @@ fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bo
 fn is_target_ready(
     target_id: &str,
     graph: &ExecutionGraph,
-    resolved: &HashMap<String, (String, Option<bool>)>,
+    resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
     let first_execution = !resolved.contains_key(target_id);
     let incoming = graph.incoming_connections(&target_id.to_string());
@@ -1361,8 +1375,8 @@ fn is_target_ready(
     let mut any_fires = false;
 
     for conn in &incoming {
-        if let Some((_, success)) = resolved.get(&conn.from_element) {
-            if connection_fires(conn, success) {
+        if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success, *active_port) {
                 any_fires = true;
             }
         } else {
@@ -1384,12 +1398,12 @@ fn is_target_ready(
 fn has_any_fired_input(
     target_id: &str,
     graph: &ExecutionGraph,
-    resolved: &HashMap<String, (String, Option<bool>)>,
+    resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
     let incoming = graph.incoming_connections(&target_id.to_string());
     for conn in &incoming {
-        if let Some((_, success)) = resolved.get(&conn.from_element) {
-            if connection_fires(conn, success) {
+        if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success, *active_port) {
                 return true;
             }
         }
@@ -1400,6 +1414,30 @@ fn has_any_fired_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn port_connection(
+        from_element: &str,
+        to_element: &str,
+        from_port: u32,
+    ) -> crate::database::ChainConnection {
+        crate::database::ChainConnection {
+            id: format!("{from_element}-{to_element}-{from_port}"),
+            from_element: from_element.to_string(),
+            to_element: to_element.to_string(),
+            from_port,
+            to_port: 0,
+            condition: None,
+        }
+    }
+
+    fn graph_with_connection(connection: crate::database::ChainConnection) -> ExecutionGraph {
+        ExecutionGraph {
+            nodes: HashMap::new(),
+            trigger_id: "trigger".to_string(),
+            connections: vec![connection],
+            session_groups: HashMap::new(),
+        }
+    }
 
     #[test]
     fn loop_retries_until_max_iterations() {
@@ -1445,5 +1483,45 @@ mod tests {
                 "iteration {iteration} activated undrawable port {port}"
             );
         }
+    }
+
+    #[test]
+    fn inactive_loop_port_does_not_fire_or_ready_a_target() {
+        let connection = port_connection("loop", "exit", LOOP_PORT_EXIT);
+        let graph = graph_with_connection(connection.clone());
+        let resolved: HashMap<String, ResolvedElement> = HashMap::from([(
+            "loop".to_string(),
+            (
+                "retry output".to_string(),
+                Some(true),
+                Some(LOOP_PORT_RETRY),
+            ),
+        )]);
+
+        assert!(!connection_fires(
+            &connection,
+            &Some(true),
+            Some(LOOP_PORT_RETRY),
+        ));
+        assert!(!is_target_ready("exit", &graph, &resolved));
+        assert!(!has_any_fired_input("exit", &graph, &resolved));
+    }
+
+    #[test]
+    fn selected_loop_port_fires_and_readies_its_target() {
+        let connection = port_connection("loop", "exit", LOOP_PORT_EXIT);
+        let graph = graph_with_connection(connection.clone());
+        let resolved: HashMap<String, ResolvedElement> = HashMap::from([(
+            "loop".to_string(),
+            ("exit output".to_string(), Some(true), Some(LOOP_PORT_EXIT)),
+        )]);
+
+        assert!(connection_fires(
+            &connection,
+            &Some(true),
+            Some(LOOP_PORT_EXIT),
+        ));
+        assert!(is_target_ready("exit", &graph, &resolved));
+        assert!(has_any_fired_input("exit", &graph, &resolved));
     }
 }

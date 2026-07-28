@@ -218,7 +218,10 @@ triggers, see [Chain Triggers](#chain-triggers) below.
 
 **Memory** - Stores or retrieves data by key (mode is store or retrieve). Store passes data through unchanged; retrieve loads a previously stored key.
 
-**Loop** - Controls iteration. Configure `max_iterations`. Port `r` (0) is the retry path back into earlier elements; port `x` (1) is intended as the exit when iterations are exhausted, but as of this writing the executor routes exhaustion to an internal sentinel value instead of port 1, so a `from_port: 1` connection never actually fires — treat this as a known issue rather than relied-upon behavior.
+**Loop** - Controls retries. `max_iterations` is the number of times the
+retry path may run: port `r` (0) fires on each retry and port `x` (1) fires
+once the retries are exhausted. For example, with `max_iterations: 1`, the
+Loop takes `r` once and then takes `x` on its next visit.
 
 **Tool** - Invokes a registered toolkit tool (picker lists known tools; params are JSON).
 
