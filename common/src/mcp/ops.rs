@@ -943,7 +943,7 @@ pub async fn trigger_create(
     chain_name: &str,
     trigger_config: TriggerConfig,
     target_spec: TargetSpec,
-) -> Result<(String, Option<String>)> {
+) -> Result<(ChainTriggerInfo, Option<String>)> {
     //
     // Resolve chain by name or ID prefix.
     //
@@ -960,12 +960,12 @@ pub async fn trigger_create(
     let chain_id = chain.id.clone();
     let requested_agents = target_spec.agent_short_names.clone();
 
-    client
+    let trigger = client
         .create_chain_trigger(chain_id.clone(), trigger_config, target_spec)
         .await?;
 
     let warning = unmatched_agent_short_names_warning(client, &requested_agents).await;
-    Ok((chain_id, warning))
+    Ok((trigger, warning))
 }
 
 //
@@ -1019,8 +1019,7 @@ pub async fn trigger_delete(
         .find(|t| t.id.starts_with(trigger_id_prefix))
         .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
     let id = trigger.id.clone();
-    client.delete_chain_trigger(id.clone()).await?;
-    Ok(id)
+    client.delete_chain_trigger(id).await
 }
 
 pub async fn trigger_toggle(
@@ -1034,8 +1033,8 @@ pub async fn trigger_toggle(
         .find(|t| t.id.starts_with(trigger_id_prefix))
         .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
     let id = trigger.id.clone();
-    client.toggle_chain_trigger(id.clone(), enabled).await?;
-    Ok((id, enabled))
+    let trigger = client.toggle_chain_trigger(id, enabled).await?;
+    Ok((trigger.id, trigger.enabled))
 }
 
 #[cfg(test)]

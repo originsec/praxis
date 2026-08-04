@@ -128,19 +128,23 @@ pub trait McpClient: Send + Sync {
     /// Get cached chain triggers.
     async fn get_chain_triggers(&self) -> Vec<ChainTriggerInfo>;
 
-    /// Create a chain trigger.
+    /// Create a chain trigger and wait for the service response.
     async fn create_chain_trigger(
         &self,
         chain_id: String,
         trigger_config: TriggerConfig,
         target_spec: TargetSpec,
-    ) -> Result<()>;
+    ) -> Result<ChainTriggerInfo>;
 
-    /// Delete a chain trigger.
-    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()>;
+    /// Delete a chain trigger and wait for the service response.
+    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<String>;
 
-    /// Toggle a chain trigger's enabled state.
-    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()>;
+    /// Toggle a chain trigger's enabled state and wait for the service response.
+    async fn toggle_chain_trigger(
+        &self,
+        trigger_id: String,
+        enabled: bool,
+    ) -> Result<ChainTriggerInfo>;
 
     /// Create or update an operation definition.
     async fn create_op_def(
