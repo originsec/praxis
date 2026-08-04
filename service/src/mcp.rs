@@ -7,9 +7,9 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use common::{
     CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate, ClientBroadcastMessage,
-    ClientDirectMessage, ClientRegistration, ClientSignalMessage, InterceptedTrafficEntry,
-    OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate, SystemState,
-    TrafficSearchFilters, mcp::McpClient, publish_json,
+    ChainTriggerInfo, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
+    InterceptedTrafficEntry, OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate,
+    SystemState, TrafficSearchFilters, mcp::McpClient, publish_json,
 };
 use lapin::Channel;
 use serde_json::{Value, json};
@@ -31,6 +31,7 @@ pub struct ServiceMcpClient {
     client_id: String,
     timeout: Duration,
     state: Arc<Mutex<ClientState>>,
+    trigger_operation_lock: Arc<Mutex<()>>,
 }
 
 //
@@ -45,6 +46,19 @@ struct PendingAcp {
     session_id: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingChainTriggerKind {
+    Create,
+    Update,
+    Delete,
+}
+
+enum PendingChainTriggerResult {
+    Created(ChainTriggerInfo),
+    Updated(ChainTriggerInfo),
+    Deleted(String),
+}
+
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
@@ -56,6 +70,8 @@ struct ClientState {
     pending_op_def_add: Option<Result<String, String>>,
     pending_op_def_delete: Option<Result<String, String>>,
     pending_chain_create: Option<Result<ChainDefinitionInfo, String>>,
+    pending_chain_trigger: Option<Result<PendingChainTriggerResult, String>>,
+    pending_chain_trigger_kind: Option<PendingChainTriggerKind>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -93,6 +109,7 @@ impl ServiceMcpClient {
             client_id,
             timeout: Duration::from_secs(timeout_secs),
             state,
+            trigger_operation_lock: Arc::new(Mutex::new(())),
         };
 
         //
@@ -178,7 +195,11 @@ impl ServiceMcpClient {
                 state.pending_chain_create = Some(Ok(chain));
             }
             ClientDirectMessage::ChainError { message } => {
-                state.pending_chain_create = Some(Err(message));
+                if state.pending_chain_trigger_kind.is_some() {
+                    state.pending_chain_trigger = Some(Err(message));
+                } else {
+                    state.pending_chain_create = Some(Err(message));
+                }
             }
             ClientDirectMessage::ChainExecutionUpdate(execution) => {
                 if let Some(idx) = state
@@ -201,14 +222,30 @@ impl ServiceMcpClient {
                 state.chain_triggers = triggers;
             }
             ClientDirectMessage::ChainTriggerCreated { trigger } => {
+                if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Create) {
+                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Created(
+                        trigger.clone(),
+                    )));
+                }
+                state.chain_triggers.retain(|t| t.id != trigger.id);
                 state.chain_triggers.push(trigger);
             }
             ClientDirectMessage::ChainTriggerUpdated { trigger } => {
+                if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Update) {
+                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Updated(
+                        trigger.clone(),
+                    )));
+                }
                 if let Some(idx) = state.chain_triggers.iter().position(|t| t.id == trigger.id) {
                     state.chain_triggers[idx] = trigger;
                 }
             }
             ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
+                if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Delete) {
+                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Deleted(
+                        trigger_id.clone(),
+                    )));
+                }
                 state.chain_triggers.retain(|t| t.id != trigger_id);
             }
             ClientDirectMessage::OpDefAdded { full_name } => {
@@ -506,6 +543,29 @@ impl ServiceMcpClient {
         };
 
         Ok((result, text))
+    }
+
+    async fn begin_chain_trigger_request(&self, kind: PendingChainTriggerKind) {
+        let mut state = self.state.lock().await;
+        state.pending_chain_trigger = None;
+        state.pending_chain_trigger_kind = Some(kind);
+    }
+
+    async fn clear_chain_trigger_request(&self) {
+        let mut state = self.state.lock().await;
+        state.pending_chain_trigger = None;
+        state.pending_chain_trigger_kind = None;
+    }
+
+    async fn wait_for_chain_trigger_response(
+        &self,
+        label: &str,
+    ) -> Result<PendingChainTriggerResult> {
+        let response = self
+            .poll_pending(50, |s| s.pending_chain_trigger.take(), label)
+            .await;
+        self.clear_chain_trigger_request().await;
+        response?.map_err(anyhow::Error::msg)
     }
 }
 
@@ -811,25 +871,60 @@ impl McpClient for ServiceMcpClient {
         chain_id: String,
         trigger_config: common::TriggerConfig,
         target_spec: common::TargetSpec,
-    ) -> Result<()> {
+    ) -> Result<common::ChainTriggerInfo> {
+        let _operation_guard = self.trigger_operation_lock.lock().await;
+        self.begin_chain_trigger_request(PendingChainTriggerKind::Create)
+            .await;
         let message = ClientSignalMessage::ChainTriggerCreate {
             client_id: self.client_id.clone(),
             chain_id,
             trigger_config,
             target_spec,
         };
-        self.publish_signal(message).await
+        if let Err(e) = self.publish_signal(message).await {
+            self.clear_chain_trigger_request().await;
+            return Err(e);
+        }
+
+        match self
+            .wait_for_chain_trigger_response("chain trigger to be created")
+            .await?
+        {
+            PendingChainTriggerResult::Created(trigger) => Ok(trigger),
+            _ => Err(anyhow!("Received an unexpected chain trigger response")),
+        }
     }
 
-    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
+    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<String> {
+        let _operation_guard = self.trigger_operation_lock.lock().await;
+        self.begin_chain_trigger_request(PendingChainTriggerKind::Delete)
+            .await;
         let message = ClientSignalMessage::ChainTriggerDelete {
             client_id: self.client_id.clone(),
             trigger_id,
         };
-        self.publish_signal(message).await
+        if let Err(e) = self.publish_signal(message).await {
+            self.clear_chain_trigger_request().await;
+            return Err(e);
+        }
+
+        match self
+            .wait_for_chain_trigger_response("chain trigger to be deleted")
+            .await?
+        {
+            PendingChainTriggerResult::Deleted(trigger_id) => Ok(trigger_id),
+            _ => Err(anyhow!("Received an unexpected chain trigger response")),
+        }
     }
 
-    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
+    async fn toggle_chain_trigger(
+        &self,
+        trigger_id: String,
+        enabled: bool,
+    ) -> Result<common::ChainTriggerInfo> {
+        let _operation_guard = self.trigger_operation_lock.lock().await;
+        self.begin_chain_trigger_request(PendingChainTriggerKind::Update)
+            .await;
         let message = ClientSignalMessage::ChainTriggerUpdate {
             client_id: self.client_id.clone(),
             trigger_id,
@@ -837,7 +932,18 @@ impl McpClient for ServiceMcpClient {
             trigger_config: None,
             target_spec: None,
         };
-        self.publish_signal(message).await
+        if let Err(e) = self.publish_signal(message).await {
+            self.clear_chain_trigger_request().await;
+            return Err(e);
+        }
+
+        match self
+            .wait_for_chain_trigger_response("chain trigger to be updated")
+            .await?
+        {
+            PendingChainTriggerResult::Updated(trigger) => Ok(trigger),
+            _ => Err(anyhow!("Received an unexpected chain trigger response")),
+        }
     }
 
     async fn create_op_def(
@@ -1082,6 +1188,23 @@ mod tests {
     use super::*;
     use rmcp::ServerHandler;
 
+    fn test_trigger(id: &str) -> ChainTriggerInfo {
+        ChainTriggerInfo {
+            id: id.to_string(),
+            chain_id: "chain-1".to_string(),
+            trigger_config: common::TriggerConfig::NewNode,
+            target_spec: common::TargetSpec {
+                node_ids: Vec::new(),
+                os_filter: None,
+                agent_short_names: Vec::new(),
+                include_triggering_node: false,
+            },
+            enabled: true,
+            last_fired_at: None,
+            next_fire_at: None,
+        }
+    }
+
     #[test]
     fn advertises_chain_and_trigger_tools() {
         let server = PraxisServer::<ServiceMcpClient>::new(|| async {
@@ -1097,5 +1220,54 @@ mod tests {
         ] {
             assert!(server.get_tool(name).is_some(), "missing MCP tool {name}");
         }
+    }
+
+    #[tokio::test]
+    async fn trigger_created_response_completes_pending_request() {
+        let state = Arc::new(Mutex::new(ClientState {
+            pending_chain_trigger_kind: Some(PendingChainTriggerKind::Create),
+            ..ClientState::default()
+        }));
+        let trigger = test_trigger("trigger-1");
+        let message = ClientDirectMessage::ChainTriggerCreated {
+            trigger: trigger.clone(),
+        };
+
+        ServiceMcpClient::handle_direct_message(
+            &state,
+            &serde_json::to_vec(&message).expect("message should serialize"),
+        )
+        .await;
+
+        let mut state = state.lock().await;
+        assert!(matches!(
+            state.pending_chain_trigger.take(),
+            Some(Ok(PendingChainTriggerResult::Created(received)))
+                if received.id == trigger.id
+        ));
+        assert_eq!(state.chain_triggers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn chain_error_completes_pending_trigger_request_as_error() {
+        let state = Arc::new(Mutex::new(ClientState {
+            pending_chain_trigger_kind: Some(PendingChainTriggerKind::Delete),
+            ..ClientState::default()
+        }));
+        let message = ClientDirectMessage::ChainError {
+            message: "trigger not found".to_string(),
+        };
+
+        ServiceMcpClient::handle_direct_message(
+            &state,
+            &serde_json::to_vec(&message).expect("message should serialize"),
+        )
+        .await;
+
+        let mut state = state.lock().await;
+        assert!(matches!(
+            state.pending_chain_trigger.take(),
+            Some(Err(message)) if message == "trigger not found"
+        ));
     }
 }

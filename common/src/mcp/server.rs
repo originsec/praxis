@@ -1321,7 +1321,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let trigger_config = crate::TriggerConfig::try_from(params.trigger).map_err(mcp_err)?;
 
-        let (chain_id, warning) = super::ops::trigger_create(
+        let (trigger, warning) = super::ops::trigger_create(
             client,
             &params.chain,
             trigger_config,
@@ -1330,10 +1330,17 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         .await
         .map_err(mcp_err)?;
 
+        let trigger_id = trigger.id.clone();
+        let chain_id = trigger.chain_id.clone();
+        let trigger_id_short = crate::short_id(&trigger_id);
+        let chain_id_short = crate::short_id(&chain_id);
         let mut result = json!({
             "status": "success",
+            "id": trigger_id,
+            "id_short": trigger_id_short,
             "chain_id": chain_id,
-            "chain_id_short": crate::short_id(&chain_id),
+            "chain_id_short": chain_id_short,
+            "enabled": trigger.enabled,
             "message": "Chain trigger created and enabled"
         });
         if let Some(warning) = warning {

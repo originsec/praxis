@@ -154,6 +154,12 @@ includes a `warning` field when a requested short name doesn't currently
 match any connected agent; confirm the real short name with `node_list`/
 `agent_list` rather than guessing.
 
+Trigger mutations wait for the service to confirm the database operation before
+returning success. `trigger_create` returns the created trigger's full ID as
+`id` (and its short form as `id_short`), while `trigger_delete` and
+`trigger_toggle` return only after the requested trigger is deleted or updated.
+Service-side validation and database errors are returned as MCP tool errors.
+
 ### Traffic
 
 - `traffic_search` — Search intercepted traffic
