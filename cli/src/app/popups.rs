@@ -468,6 +468,13 @@ impl App {
     }
 
     pub(crate) async fn select_model(&mut self, model_name: &str) {
+        if self.orchestrator.create_in_flight {
+            self.orchestrator.pending_model_selection = Some(model_name.to_string());
+            return;
+        }
+
+        self.discard_empty_orchestrator_placeholder();
+
         //
         // Standard ACP: close current session if any, then session/new
         // with the selected model. Shared MCP keeps this fast.
@@ -483,9 +490,7 @@ impl App {
         self.orchestrator.pending_history = None;
         self.orchestrator.pending_seed_messages = None;
         self.orchestrator.pending_prompt = None;
-        if self.orchestrator.create_in_flight {
-            return;
-        }
+        self.orchestrator.pending_model_selection = None;
         self.orchestrator.create_in_flight = true;
         if let Err(e) = self
             .acp

@@ -11,14 +11,19 @@ Claude Code is a command-line AI assistant that can read files, execute commands
 The connector looks for Claude Code by checking:
 
 1. **PATH search** - Finding the `claude` executable in PATH
-2. **Explicit paths** - Checking known installation locations (`~/.local/bin/claude` on Linux, `%USERPROFILE%\.local\bin\claude.exe` on Windows)
+2. **Explicit paths** - Checking known installation locations:
+   - `/usr/local/bin`, `/usr/bin` (all platforms)
+   - `~/.local/bin/claude` (Linux)
+   - `%USERPROFILE%\.local\bin\claude.exe` (Windows)
+   - `%APPDATA%\Claude\claude-code\<version>\claude.exe` (Windows, versioned installs)
 
 The binary is verified by running `claude --version` and checking the output contains "claude". If found and verified, fingerprinting succeeds and the agent appears in the node's agent list.
 
 ## Interception
 
-Traffic is intercepted for the domain:
+Traffic is intercepted for the domains:
 - `api.anthropic.com`
+- `a-api.anthropic.com`
 
 With URL pattern filter:
 - `messages` - Only capture requests to the messages endpoint (filters out telemetry)
@@ -45,6 +50,12 @@ Authentication is considered valid if any of the following are true:
    - `primaryApiKey` - Direct API key
    - `apiKeyHelper` - External key provider
 
+3. **Credential file** - `~/.claude/.credentials.json` contains a
+   `claudeAiOauth` credential. This is the normal OAuth location on Linux and
+   Windows.
+
+4. **OAuth environment token** - `CLAUDE_CODE_OAUTH_TOKEN` is set.
+
 Paths without valid authentication are filtered out during reconnaissance. This prevents the UI from showing user homes or projects that cannot actually be used with Claude Code.
 
 ## Reconnaissance
@@ -54,18 +65,28 @@ Paths without valid authentication are filtered out during reconnaissance. This 
 Static reconnaissance discovers:
 
 **Configuration**
-- Main config file (`~/.claude.json` or `~/.config/claude/config.json`)
+- `~/.claude/settings.json` (global settings) and `~/.claude.json` (preferences)
 - Permission settings, model preferences, etc.
 
 **MCP Servers**
-- From `~/.claude/mcp.json`
-- Server names, commands, environment variables
-- Enabled state
+- From user and project MCP configuration (`~/.claude.json`,
+  `~/.claude/mcp.json`, and `.mcp.json`)
+- From `.mcp.json` files and inline `mcpServers` definitions in enabled Claude
+  Code plugins
+- Server names, commands, and endpoints
+
+**Plugins**
+- Active plugins are read from `~/.claude/plugins/installed_plugins.json` and
+  the scope-specific `enabledPlugins` setting.
+- Plugin commands and skills are discovered from the active plugin's cached
+  installation path and shown with Claude Code's `/plugin:component` name.
 
 **Sessions**
 - Project directories under `~/.claude/projects/`
 - Session files with conversation history
 - Recent project paths
+- Working directories recorded in session transcripts populate the session
+  working-directory picker, including projects without `.claude/` files.
 
 ### Semantic Recon
 
@@ -76,14 +97,14 @@ When semantic recon is enabled (requires Semantic Parser LLM), the connector als
 
 ## Session Management
 
-Sessions are created by spawning Claude Code in a PTY (pseudo-terminal):
+Sessions are created by spawning Claude Code as a non-interactive subprocess:
 
 ```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │
 │  ┌─────────────────────────────────┐                  │
-│  │          PTY Session            │                  │
+│  │          CLI Session            │                  │
 │  │                                 │                  │
 │  │  claude ────────────────────────┼──▶ Claude Process│
 │  │         │                       │                  │
@@ -138,6 +159,9 @@ The connector supports both static and semantic recon. Static recon parses confi
 |------|------|---------|
 | Global settings | `~/.claude/settings.json` | Global settings |
 | Preferences | `~/.claude.json` | User preferences |
+| OAuth credentials | `~/.claude/.credentials.json` | Claude Code login credentials (Linux/Windows) |
+| Plugin installations | `~/.claude/plugins/installed_plugins.json` | Installed plugin paths and scopes |
+| Plugin cache | `~/.claude/plugins/cache/` | Commands, skills, and plugin MCP definitions |
 | Global instructions | `~/.claude/CLAUDE.md` | Global instruction file |
 | Projects | `~/.claude/projects/` | Session history by project |
 
@@ -167,5 +191,5 @@ The connector supports both static and semantic recon. Static recon parses confi
 ### "No MCP servers found"
 
 - MCP servers are optional-not all installations have them
-- Check `~/.claude/mcp.json` exists if you've configured servers
+- Check `~/.claude/settings.json`, `~/.claude.json`, or project `.mcp.json` for your MCP server config
 - Run semantic recon for deeper tool discovery

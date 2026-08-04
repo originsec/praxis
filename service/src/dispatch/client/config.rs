@@ -87,6 +87,16 @@ pub(super) async fn handle_config_set(
         }
         if let Some(e) = save_error {
             common::log_error!("Failed to save config: {}", e);
+            let message = ClientDirectMessage::ServiceConfigSaveFailed {
+                message: e.to_string(),
+            };
+            if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
+                common::log_error!(
+                    "Failed to send config save failure to client {}: {}",
+                    client_id,
+                    e
+                );
+            }
         } else {
             common::log_info!("Service config saved to database");
             let message = ClientDirectMessage::ServiceConfigSaved;

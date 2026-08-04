@@ -7,7 +7,7 @@ The Agy connector integrates [Antigravity CLI](https://antigravity.google/docs/c
 The connector looks for the `agy` executable in `PATH` and in the installation locations documented by Antigravity:
 
 - macOS and Linux: `~/.local/bin/agy`
-- Windows: `%LOCALAPPDATA%\agy\bin\agy.exe` or `agy.cmd`
+- Windows: `%LOCALAPPDATA%\agy\bin\agy.cmd` or `agy.exe`
 
 It verifies the executable with `agy --help` and reports the installed version from `agy --version`.
 
@@ -22,6 +22,7 @@ Static reconnaissance discovers the documented Agy configuration surface:
 - Global settings and keybindings under `~/.gemini/antigravity-cli/`
 - Global MCP and hook definitions under `~/.gemini/config/`
 - Existing workspace roots from Agy's `trustedWorkspaces` setting and conversation cache (stale paths are ignored)
+- Additional workspace roots found by walking each home directory (up to 7 levels deep) for `.agents/mcp_config.json` or `.agents/hooks.json` marker files
 - Workspace MCP and hook definitions under `.agents/`
 - Global `~/.gemini/GEMINI.md` plus `GEMINI.md` and `AGENTS.md` instruction files at those workspace roots
 - Global skills from `~/.gemini/antigravity-cli/skills/` and workspace skills from `.agents/skills/`
@@ -52,8 +53,10 @@ When Praxis enables YOLO mode, the connector also passes Agy's documented `--mod
 |---|---|---|
 | Global | `~/.gemini/antigravity-cli/settings.json` | CLI preferences |
 | Global | `~/.gemini/antigravity-cli/keybindings.json` | Custom keybindings |
+| Global | `~/.gemini/antigravity-cli/cache/last_conversations.json` | Conversation cache (workspace to conversation ID) |
 | Global | `~/.gemini/config/mcp_config.json` | MCP servers |
 | Global | `~/.gemini/config/hooks.json` | Hook configuration |
+| Global | `~/.gemini/GEMINI.md` | Global instructions |
 | Global | `~/.gemini/antigravity-cli/skills/` | Shared skills |
 | Workspace | `.agents/mcp_config.json` | Workspace MCP servers |
 | Workspace | `.agents/hooks.json` | Workspace hooks |

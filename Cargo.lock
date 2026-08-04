@@ -3464,7 +3464,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3474,6 +3474,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures-util",
+ "indexmap 2.14.0",
  "lapin",
  "praxis_common",
  "ratatui",
@@ -3490,7 +3491,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_common"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3516,7 +3517,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_node"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3584,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_service"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",

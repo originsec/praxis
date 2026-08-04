@@ -106,7 +106,11 @@ impl TriggerEngine {
 
             let targets = resolve_targets(&trigger.target_spec, &self.node_registry, None).await;
             if targets.is_empty() {
-                common::log_warn!("No targets matched for trigger {}", trigger.id);
+                common::log_warn!(
+                    "Trigger {} fired but resolved 0 targets (spec={:?})",
+                    trigger.id,
+                    trigger.target_spec
+                );
             } else {
                 let _results = self
                     .chain_executor
@@ -194,7 +198,13 @@ impl TriggerEngine {
             let targets =
                 resolve_targets(&trigger.target_spec, &self.node_registry, Some(node_id)).await;
 
-            if !targets.is_empty() {
+            if targets.is_empty() {
+                common::log_warn!(
+                    "Trigger {} fired but resolved 0 targets (spec={:?})",
+                    trigger.id,
+                    trigger.target_spec
+                );
+            } else {
                 let _results = self
                     .chain_executor
                     .execute_fan_out(
@@ -242,7 +252,13 @@ impl TriggerEngine {
             let targets =
                 resolve_targets(&trigger.target_spec, &self.node_registry, Some(node_id)).await;
 
-            if !targets.is_empty() {
+            if targets.is_empty() {
+                common::log_warn!(
+                    "Trigger {} fired but resolved 0 targets (spec={:?})",
+                    trigger.id,
+                    trigger.target_spec
+                );
+            } else {
                 let _results = self
                     .chain_executor
                     .execute_fan_out(

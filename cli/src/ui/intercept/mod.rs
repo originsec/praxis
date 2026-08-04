@@ -100,6 +100,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let content = chunks[2];
 
     let form_open = app.intercept.rule_form.is_some();
+    if !form_open {
+        let split_percent = match app.intercept.tab {
+            InterceptTab::Traffic => app.intercept.log_split_percent,
+            InterceptTab::Rules => app.intercept.rule_split_percent,
+            InterceptTab::Matches => app.intercept.match_split_percent,
+        };
+        let panes = filter_split(content, split_percent);
+        app.text_selection_region_register(panes.left);
+        app.text_selection_region_register(panes.right);
+    }
 
     match app.intercept.tab {
         InterceptTab::Traffic => {
@@ -307,6 +317,7 @@ fn render_action_hints(f: &mut Frame, area: Rect, app: &App) {
         InterceptTab::Matches => vec![
             HintItem::new(action::ENTER, "detail"),
             HintItem::new("f", "rule filter"),
+            HintItem::new("n/p", "jump hits"),
             HintItem::new(action::REFRESH, "refresh"),
             HintItem::new("y", "copy"),
             HintItem::new("b", "body"),

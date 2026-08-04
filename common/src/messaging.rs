@@ -2267,6 +2267,9 @@ pub enum ClientDirectMessage {
         values: HashMap<String, String>,
     },
     ServiceConfigSaved,
+    ServiceConfigSaveFailed {
+        message: String,
+    },
 
     //
     // Operation definition responses.

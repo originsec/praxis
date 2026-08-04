@@ -5,23 +5,44 @@ Praxis has a distributed architecture designed for monitoring and controlling AI
 ## The Big Picture
 
 ```diagram
-                              ┌─────────────────┐
-                              │   praxis TUI    │
-                              │  (terminal UI)  │
-                              └────────┬────────┘
-                                       │ RabbitMQ (AMQP)
-                              ┌────────▼────────┐
-                              │    Service      │
-                              │  (Backend)      │
-                              └────────┬────────┘
-                                       │ RabbitMQ (AMQP)
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-       ┌──────▼──────┐          ┌──────▼──────┐          ┌──────▼──────┐
-       │    Node     │          │    Node     │          │    Node     │
-       │ (Target A)  │          │ (Target B)  │          │ (Target C)  │
-       └─────────────┘          └─────────────┘          └─────────────┘
+OPERATORS & AI CLIENTS
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│    MCP clients   │  │ Praxis TUI / CLI │  │  LLM providers   │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+         │                     │                     │
+         │                     ▼                     │
+         │            ┌──────────────────┐           │
+         │            │     RabbitMQ     │           │
+         │            └──────────────────┘           │
+         │ HTTP · /mcp         │ AMQP                │ LLM API
+         ▼                     ▼                     ▼
+┌──────────────────────────────────────────────────────────────┐   ┌──────────────────┐
+│                        Praxis Service                        │◄─►│ Persistent state │
+├────────────────────┬────────────────────┬────────────────────┤   └──────────────────┘
+│    ACP gateway     │    Control plane   │     Automation     │
+└────────────────────┴────────────────────┴────────────────────┘
+                               │   AMQP
+         ┌─────────────────────┼─────────────────────┐
+         ▼                     ▼                     ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  Node · Target A │  │  Node · Target B │  │  Node · Target N │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+                  DISTRIBUTED TARGET ENDPOINTS
 ```
+
+Three paths reach the service, and only one of them is AMQP:
+
+- **Praxis TUI / CLI** — over RabbitMQ. This is the operator path.
+- **MCP-compatible clients** — straight to the service over streamable
+  HTTP at `/mcp`, no broker involved. See [MCP Server](../usage/mcp.md).
+- **LLM providers** — outbound calls made *by* the service, never by a node.
+
+Everything below the service is AMQP: node commands, ACP frames, and
+telemetry all ride RabbitMQ queues. Nodes never talk to clients directly.
+
+The boxes are deliberately shallow. What sits inside each one is covered
+by [Service Architecture](./service.md), [Node Architecture](./node.md),
+and [Agent Connectors](../connectors/overview.md).
 
 ## Components
 
@@ -161,15 +182,20 @@ praxis TUI ─▶ Service ─▶ LLM (planning)
 
 The service stores everything in a relational database:
 
-- **config** - key-value settings (LLM configs, etc.)
+- **service_config** - key-value settings (LLM configs, etc.)
 - **operation_definitions** - saved operation templates
-- **semantic_operations** - operation execution history
-- **chain_definitions** - workflow definitions
+- **operations** - operation execution history
+- **operation_chains** - workflow definitions
 - **chain_executions** - workflow execution history
-- **traffic_log** - intercepted HTTP traffic
+- **intercepted_traffic** - intercepted HTTP traffic
 - **intercept_rules** - traffic matching rules
 - **recon_results** - cached reconnaissance data
-- **application_logs** - centralized logging (controlled by `application_logs_enabled`)
+- **event_log** - centralized logging (controlled by `application_logs_enabled`)
+
+This list is illustrative, not exhaustive - roughly 10 more tables exist (e.g.
+`session_transactions`, `chain_triggers`, `chain_memories`, `chain_payloads`,
+`lua_agent_scripts`, `toolkit_actions`, `remote_nodes`,
+`agent_chat_sessions`/`agents`/`channels`/`messages`).
 
 ## Deployment Patterns
 

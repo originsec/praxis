@@ -89,6 +89,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         let (conv_area, plan_area) = if has_plan {
             let panes =
                 crate::ui::list_detail::layout(chunks[1], state.plan_split_percent);
+            app.text_selection_region_register(panes.list);
+            app.text_selection_region_register(panes.detail);
             app.hits_register(
                 panes.border,
                 crate::ui::hits::MouseAction::OrchestratorPlanSplitDragStart,

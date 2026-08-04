@@ -19,8 +19,8 @@
 - [Orchestrator](./usage/orchestrator.md)
 - [Help Assistant](./usage/help-assistant.md)
 - [Semantic Operations](./usage/semantic-operations.md)
-- [Toolkit](./usage/toolkit.md)
 - [MCP Server](./usage/mcp.md)
+- [TUI](./usage/tui.md)
 - [CLI](./usage/cli.md)
 
 # Agent Connectors
@@ -33,6 +33,7 @@
 - [Claude Desktop](./connectors/claude-desktop.md)
 - [Codex CLI](./connectors/codex.md)
 - [Cursor Agent](./connectors/cursor.md)
+- [Droid CLI](./connectors/droid.md)
 - [Gemini CLI](./connectors/gemini.md)
 - [M365 Copilot](./connectors/m365-copilot.md)
 - [Pi Coding Agent](./connectors/pi.md)

@@ -44,7 +44,7 @@ domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
 [cursor]
-domains = ["api.cursor.sh", "agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
+domains = ["agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 ```
 
 Fields per target:
@@ -214,9 +214,9 @@ default TUI flow uses the OS-appropriate privileged method.
 The same operations are available without the TUI:
 
 ```bash
-praxis_cli intercept status
-praxis_cli intercept enable <node-prefix> --method tproxy
-praxis_cli intercept disable <node-prefix>
+praxis intercept status
+praxis intercept enable <node-prefix> --method tproxy
+praxis intercept disable <node-prefix>
 ```
 
 The node will:
@@ -225,7 +225,9 @@ The node will:
 - Start the proxy server
 - Configure system based on chosen method
 
-View captured traffic in the **Intercept** window (`Ctrl+T`).
+View captured traffic in the **Intercept** window (`Ctrl+T`). See
+[Terminal UI](./tui.md#intercept-ctrlt) for its filters, detail pane, rules,
+and match controls.
 
 ## Viewing Traffic
 
@@ -260,7 +262,7 @@ collapse).
 
 ### Request Details
 
-Click a row to see details:
+Select a row and press `Enter` or `→` to open its details:
 
 **Request:**
 - Headers (name→single value; duplicate names collapse)
@@ -438,8 +440,8 @@ Rules let you match and process specific traffic.
 
 ### Creating Rules
 
-1. Go to **Intercept** → **Rules**
-2. Create a rule (`Ctrl+N` in the TUI)
+1. Open **Intercept** with `Ctrl+T` and switch to **Rules**
+2. Press `Ctrl+N` to create a rule
 3. Configure:
    - **Name** - identifier for the rule
    - **Pattern** - regex (must compile; invalid patterns are rejected)
@@ -466,6 +468,13 @@ When traffic matches a rule:
 
 Rules can include a summarization prompt for semantic analysis. When a rule matches and has a summarization prompt configured, the Traffic Parser LLM processes the matched traffic - extracting prompts, summarizing responses, detecting tool calls, and highlighting key information.
 
+Text bodies up to the configured **Traffic Body Limit** are passed to the
+Traffic Parser in full (60 KiB by default). For larger bodies, the analyzer
+receives the beginning and end with an explicit middle-truncation marker so
+recent messages and tool results at the end of an LLM request remain visible.
+Binary bodies are represented by their byte size. Change the limit under
+**Settings** (`Ctrl+S`) → **LLM**.
+
 Use rules to:
 - Flag specific API calls
 - Track sensitive operations
@@ -474,7 +483,8 @@ Use rules to:
 
 ## Disabling Interception
 
-Click **Disable** to stop interception. This:
+In **Nodes** (`Ctrl+L`), select the node, press `i`, and confirm to disable
+interception. This:
 - Removes the installed certificate
 - Restores proxy settings (if modified)
 - Cleans hosts file entries (if modified)

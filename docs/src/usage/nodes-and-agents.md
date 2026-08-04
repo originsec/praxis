@@ -25,13 +25,18 @@ The node also reports:
 
 When the node runs as root, it can operate as different users based on the selected working directory. Selecting a working directory owned by another user will cause agent sessions to run as that user (with the appropriate `HOME` environment variable set).
 
+This is a Linux/macOS mechanism only (it switches the process's Unix user based on file ownership). It has no equivalent on Windows: an admin-elevated Windows node always runs agent sessions as its own Windows user, regardless of working directory ownership.
+
 **Note**: Full superuser support is still under development. Users may notice unexpected behaviour when running sessions as different users from a root node. If you encounter issues, try running the node as the target user directly instead.
 
 ### Privileged Status
 
 Each node reports whether it is running with elevated privileges. On Linux/macOS this means running as root (UID 0); on Windows this means running as an elevated administrator.
 
-Privileged nodes display a **ROOT** badge in the praxis TUI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The TUI disables the intercept Enable button on non-privileged nodes.
+Privileged nodes display a **priv** badge in the praxis TUI. Some features —
+particularly interception methods that modify system-level configuration (VPN,
+Hosts, TPROXY) — require elevated privileges. The TUI rejects an interception
+enable request for a non-privileged node.
 
 ### Node List
 
@@ -64,40 +69,47 @@ You can reset a node to cancel all in-flight operations and return it to a clean
 - Disable interception and restore system settings
 - Re-register the node with the service
 
-Use the reset button (↻) in the node card header, the CLI command `node reset <id>`, or the MCP tool `node_reset`. The node briefly goes offline during reset and comes back with fresh state. Clients drop their local entries for the reset node immediately and re-pull `session/list` after a short grace period so the Active Sessions overlay reflects reality.
+In the TUI, open **Nodes** with `Ctrl+L`, select the node, and press
+`Ctrl+R` to request a reset. The same action is available through the CLI
+command `node reset <id>` or the MCP tool `node_reset`. The node briefly goes
+offline during reset and comes back with fresh state. Clients drop their local
+entries for the reset node immediately and re-pull `session/list` after a
+short grace period so the Active Sessions overlay reflects reality.
 
 ## Agents
 
 Agents are the AI assistants detected on each node. When a node fingerprints successfully, you'll see agents like:
 
-- **Antigravity (Agy) CLI** - Google's terminal AI-agent interface (macOS, Linux, Windows)
+- **[Antigravity CLI](../connectors/agy.md)** - Google's terminal AI-agent interface (`agy`)
 - **Claude Code** - Anthropic's CLI assistant
 - **Claude Desktop** - Anthropic's desktop app (Windows only)
 - **Codex CLI** - OpenAI's CLI assistant
 - **Cursor Agent** - Cursor's background agent CLI (Linux only)
+- **[Droid CLI](../connectors/droid.md)** - Factory's CLI coding agent
 - **Gemini CLI** - Google's CLI assistant
 - **M365 Copilot** - Microsoft 365 Copilot (Windows only)
+- **[Pi Coding Agent](../connectors/pi.md)** - minimal terminal coding harness (`pi`)
 
 See [Agent Connectors](../connectors/overview.md) for the full connector list and platform notes.
 
 ### Agent Selection
 
-Click an agent to focus operations on it — recon targets that agent,
-actions in the agent's card (config read/write, session create) route to
-that agent. A node can host concurrent sessions across any combination
-of its agents; the focus is purely a UI convenience, not a routing
-constraint. Recon is agent-scoped (`_praxis/recon` is called with the
-agent's `short_name`), and each session explicitly names its connector
-via `_meta.praxis.connector` on `session/new`.
+In **Nodes** (`Ctrl+L`), press `Enter` or `→` to focus the agent pane,
+then use `↑`/`↓` to select an agent. Recon and new sessions target that
+selection. A node can host concurrent sessions across any combination of
+agents; selection is a TUI convenience, not a routing constraint. Recon is
+agent-scoped (`_praxis/recon` is called with the agent's `short_name`), and
+each session explicitly names its connector via `_meta.praxis.connector` on
+`session/new`.
 
 ### Agent States
 
 **Fingerprinted** — the agent was detected but no session is open.
 
-**Session Active** — one or more live sessions exist. The card shows a
-`LIVE` indicator and, when applicable, a `YOLO` tag for auto-approve
-sessions. The Sessions panel lists each live session with resume /
-discard controls.
+**Session Active** — one or more live sessions exist. The TUI shows a
+`LIVE` indicator and, when applicable, a `YOLO` tag. Open the Active
+Sessions overlay with `Ctrl+W` to resume or discard a session; see
+[Terminal UI](./tui.md#nodes-ctrll) for its controls.
 
 ## Working with Nodes and Agents
 
@@ -106,36 +118,36 @@ discard controls.
 1. **Deploy node** to target system
 2. **Select node** in the praxis TUI's Nodes window (`Ctrl+L`)
 3. **Check agents** that were fingerprinted
-4. **Select an agent** to work with
+4. **Focus the agent pane** (`Enter` or `→`) and select an agent
 5. **Run recon** to see what the agent knows
 6. **Create session** for interactive use
 
 ### Multiple Nodes
 
-When you have multiple nodes:
-- Each node appears in the sidebar
-- Select one to work with it
-- Operations target the selected node/agent
-- Traffic interception is per-node
+When you have multiple nodes, select one in the **Nodes** list with
+`↑`/`↓`. Operations target the selected node/agent, and traffic
+interception is per-node.
 
 ### Refreshing
 
-The service periodically requests updates from nodes. You can also:
-- Click refresh to update a specific node
-- Trigger re-fingerprinting if agents changed
+The service periodically requests updates from nodes. If the installed agents
+change, restart the node or use its reset action so it fingerprints again.
 
 ## Agent Capabilities
 
 Different agents support different features:
 
-| Feature | Claude Code | Claude Bridge | Claude Desktop | Codex | Cursor | Gemini | M365 Copilot |
-|---------|-------------|---------------|----------------|-------|--------|--------|--------------|
-| Static Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Semantic Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ (ACP) | ✓ (ACP) | ✓ |
-| Config Editing | ✓ | - | ✓ | ✓ | ✓ | ✓ | - |
-| MCP Discovery | ✓ | - | ✓ | ✓ | - | ✓ | - |
-| Traffic Intercept | ✓ | - | ✓ | - | ✓ | ✓ | ✓ |
+| Feature | Claude Code | Claude Bridge | Claude Desktop | Antigravity | Codex | Cursor | Droid | Gemini | M365 Copilot | Pi |
+|---------|-------------|---------------|----------------|-------------|-------|--------|-------|--------|--------------|----|
+| Static Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Semantic Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (ACP) | ✓ | ✓ (ACP) | ✓ | ✓ |
+| Config Editing | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | ✓ |
+| MCP Discovery | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | - |
+| Traffic Intercept | ✓ | - | ✓ | - | - | ✓ | ✓ | ✓ | ✓ | - |
+
+Codex traffic interception is not yet supported; implementation is tracked in
+[issue #259](https://github.com/originsec/praxis/issues/259).
 
 ## Troubleshooting
 

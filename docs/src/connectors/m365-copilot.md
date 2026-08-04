@@ -21,7 +21,7 @@ The M365 connector is a Lua agent (`agents/m365copilot.lua`) that uses the share
 ## Fingerprinting
 
 The connector checks for Copilot availability:
-1. Searches for `M365Copilot.exe` in running processes
+1. Searches PATH for `M365Copilot.exe`
 2. Checks the Windows package install location (`Microsoft.MicrosoftOfficeHub`)
 
 ## Interception
@@ -38,7 +38,7 @@ When you create a session:
 1. All running `M365Copilot.exe` processes are killed by name
 2. All existing CDP connections are drained and their process trees terminated
 3. App is launched with a random debugging port via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
-4. On Windows, the process is spawned on a **hidden desktop** so the window is invisible (release builds by default; debug builds default to visible). Override with `PRAXIS_NOT_HIDDEN=1` to show the window, or `PRAXIS_NOT_HIDDEN=0` to hide it in debug builds. If the hidden desktop cannot be created, the window is **minimized** after DevTools connects.
+4. On Windows, the process is spawned on a **hidden desktop** so the window is invisible (release builds by default; debug builds default to visible). Override with `PRAXIS_NOT_HIDDEN=1` to show the window, or `PRAXIS_NOT_HIDDEN=0` to hide it in debug builds. Independent of the hidden-desktop outcome, the window is also **minimized** after DevTools connects, unconditionally whenever a process id is available.
 5. CDP connection is established via chromiumoxide (5 attempts, 2s interval)
 6. Post-initialization: waits for input element, clicks Work/Web toggle, opens new private chat
 
@@ -78,15 +78,13 @@ M365 Copilot supports two working directories that map to toggle buttons:
 
 ### Static Recon
 
-Discovers user identity and available toggles by executing JavaScript in a temporary DevTools session:
-- User identity via `nestedAppAuthService` profile object (UPN and display name)
-- Available toggles (Work/Web) by checking for toggle button elements
+Discovers available Work/Web toggles by checking for toggle button elements, via JavaScript executed in a temporary DevTools session.
 
 Recon requires a valid `process_path` from a prior fingerprint. If fingerprint hasn't run, recon returns empty results.
 
 ### Semantic Recon
 
-Creates a temporary session and asks Copilot to list its tools, then parses the response with the semantic parser. Uses a dual-prompt fallback: tries a JSON-format prompt first, and if zero tools are parsed, retries with a high-level overview prompt.
+Not implemented for this connector. Recon always returns an empty tools result, regardless of whether semantic recon is enabled.
 
 ## Requirements
 

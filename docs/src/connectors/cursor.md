@@ -20,7 +20,6 @@ If found, fingerprinting succeeds and the agent appears in the node's agent list
 ## Interception
 
 Traffic is intercepted for the following domains:
-- `api.cursor.sh`
 - `agent.api5.cursor.sh`
 - `api2.cursor.sh`
 - `cursor.sh`
@@ -42,6 +41,31 @@ Cursor uses HTTP/2 with gRPC for its streaming API (e.g., `/agent.v1.AgentServic
 - **Bidirectional**: Both request and response frames are captured
 
 In the praxis TUI's Intercept window, HTTP/2 traffic appears grouped by URL (similar to WebSocket), with individual frames expandable to view payloads.
+
+## Authentication
+
+Cursor Agent requires authentication to function. During reconnaissance, Praxis validates that valid authentication is configured before including paths in the project list.
+
+Authentication is considered valid if either of the following is true:
+
+1. **Environment variable** - `CURSOR_API_KEY` is set
+2. **Login status** - Running `cursor-agent status` reports "Logged in" in its output
+
+Paths without valid authentication are filtered out during reconnaissance. This prevents the UI from showing user homes or projects that cannot actually be used with Cursor Agent.
+
+## Reconnaissance
+
+Reconnaissance discovers:
+
+**Configuration**
+- Global settings and MCP servers from `.cursor/cli-config.json`
+- Project settings and MCP servers from `.cursor/cli.json` and `.cursor/mcp.json`
+
+**Trusted Workspaces**
+- Project paths are discovered via `.workspace-trusted` files under `~/.cursor/projects/<hash>/`
+
+**Command Skills**
+- Discovered from `.cursor/commands/*.md` at both user (global) and project scope
 
 ## Session Management
 
@@ -120,7 +144,7 @@ When a session is closed, Praxis sends `CloseSessionRequest` via ACP, then termi
 
 ### "Session creation failed"
 
-- Verify `cursor-agent create-chat` works from terminal
+- Verify `cursor-agent acp` starts and completes the ACP handshake from terminal
 - Check that Cursor is authenticated
 - Look at node logs for detailed errors
 

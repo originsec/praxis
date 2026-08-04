@@ -19,7 +19,8 @@ praxis
 ```
 
 Open the **Nodes** window with `Ctrl+L`. You should see your node in the
-node list. Use the arrow keys (or click) to select it. The detail pane
+node list. Use `↑`/`↓` to select it, then press `Enter` or `→` to focus the
+agent pane. The detail pane
 shows:
 
 - **Machine name** and OS details
@@ -30,8 +31,8 @@ If no agents show up, make sure the target system actually has Claude Code, Code
 
 ## Step 2: Select an Agent
 
-In the Nodes window, focus the agent list and select one. This focuses
-all subsequent operations on that specific agent.
+In the agent pane, use `↑`/`↓` to select an agent. This focuses all subsequent
+recon and session actions on that agent.
 
 ## Step 3: Run Reconnaissance
 
@@ -70,8 +71,11 @@ plugins are available to the agent.
 
 ## Step 5: Create a Session
 
-In the Nodes window, with an agent selected, start a session chat. You
-can specify a working directory and toggle YOLO mode.
+In the Nodes window, with an agent selected, press `Enter` to open the
+session options. You can specify a working directory and toggle YOLO mode;
+press `Enter` again to start the chat. See [Sessions](../usage/sessions.md)
+for the session lifecycle and [Terminal UI](../usage/tui.md#nodes-ctrll) for
+the complete chat controls.
 
 **Working Directory** — where the agent should operate. Affects what
 files it can see and work with.
@@ -84,29 +88,31 @@ Once the session is created, send prompts directly from the chat view.
 
 ## Step 6: Run an Operation
 
-Operations are predefined tasks you can execute through agents. The library starts empty, so let's create a simple one first.
+Operations are predefined tasks you can execute through agents. The **Operations** window (`Ctrl+P`) has a third tab, **Triggers**, for automating when chains fire (see [Semantic Operations](../usage/semantic-operations.md#chain-triggers)); this walkthrough only uses Library and Executions. The library starts empty, so let's create a simple one first.
 
 ### Create Your First Operation
 
 1. Open the **Operations** window (`Ctrl+P`) and switch to the **Library** tab
-2. Create a new operation
+2. Press `Ctrl+N` to create a new operation
 3. Fill in:
    - **Name**: `hello-world`
+   - **Short Name**: `hello-world` — this (not Name) is what builds the `category::short_name` reference used to run the operation later, and saving is blocked until it's set
    - **Category**: `test`
    - **Description**: `A simple test operation`
    - **Prompt**: `Say hello and tell me what directory you're currently in.`
    - **Mode**: `one-shot`
    - **Timeout**: `60`
-4. Save
+   - **YOLO**: leave off (toggle on later to auto-approve tool calls for this operation)
+4. Save the form with `Ctrl+S`
 
 ### Run It
 
-1. Switch to the **Executions** tab
-2. Run the operation, selecting your node and agent
-3. Choose `test::hello-world`
+1. In **Library**, select `test::hello-world` and press `Ctrl+R`
+2. Choose your node and agent
+3. Confirm the operation reference `test::hello-world`
 
 The operation executes through your agent. Watch the output in
-real-time in the Executions tab — you'll see the agent's response
+real-time in the **Executions** tab — you'll see the agent's response
 appear as it completes.
 
 ### Operation Modes
@@ -118,22 +124,31 @@ For more complex workflows, you can chain multiple operations together. See [Sem
 
 ## Step 7: Enable Interception (Optional)
 
-To see the traffic between the agent and its LLM backend, open the
-**Intercept** window (`Ctrl+T`):
+To see the traffic between the agent and its LLM backend:
 
-1. Select your node
-2. Choose a method:
-   - **Proxy** - configures system proxy settings
-   - **VPN** - uses a TUN adapter for packet-level routing
-   - **Hosts** - modifies the hosts file
-3. Enable interception
+> **Privilege required:** The node must run as root on Linux or as an elevated administrator on Windows before interception can be enabled.
 
-Captured traffic streams into the **Log** tab. You can see:
+1. In the **Nodes** window (`Ctrl+L`), select your node
+2. Press **`i`** and confirm — the TUI auto-picks the method by node
+   OS (**TPROXY** on Linux, **VPN** on Windows); macOS and other
+   platforms aren't supported
+
+Praxis supports four interception methods in total — **Proxy** (system
+proxy settings), **VPN** (TUN adapter for packet-level routing),
+**Hosts** (hosts file), and **TPROXY** (kernel-level redirection, the
+default/recommended method on Linux) — but the TUI's auto-pick only
+ever chooses TPROXY or VPN. To set a method explicitly (e.g. Proxy or
+Hosts), use the non-interactive CLI instead:
+`praxis intercept enable <node-prefix> --method <proxy|vpn|hosts|tproxy>`.
+
+Open the **Intercept** window (`Ctrl+T`) to watch captured traffic in the
+**Traffic** tab. You can see:
 - Full request/response bodies
 - Prompts and completions
 - Tool calls and results
 
-See [Interception](../usage/interception.md) for details on each method.
+See [Interception](../usage/interception.md) for setup and scope, and
+[Terminal UI](../usage/tui.md#intercept-ctrlt) for traffic-view controls.
 
 ## What's Next?
 

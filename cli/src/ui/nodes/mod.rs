@@ -51,6 +51,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     if let Some(session) = state.active_session() {
         let input_lines = session.input.split('\n').count();
+        app.text_selection_region_register(area);
         session::render_session_chat(f, area, session);
         crate::ui::overlay_hits::register_session_chat_hits(app, area, input_lines);
     } else {
@@ -60,6 +61,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         // Same percentage list/detail split as Ops/Intercept (default 55).
         //
         let panes = crate::ui::list_detail::layout(outer[0], state.split_percent);
+        app.text_selection_region_register(panes.list);
+        app.text_selection_region_register(panes.detail);
         list::render_node_list(f, panes.list, state);
         detail::render_node_detail(f, panes.detail, state, ops, chains);
 

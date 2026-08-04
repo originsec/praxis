@@ -12,12 +12,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::app::App;
-use crate::app::intercept::{InterceptState, SummaryStatus};
+use crate::app::intercept::SummaryStatus;
+use crate::app::intercept::match_detail;
 use crate::ui::common::focused_titled_panel;
-use crate::ui::intercept::{body_lines, search_bar};
-use crate::ui::theme::{
-    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
-};
+use crate::ui::intercept::search_bar;
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_RUNNING, TEXT_BRIGHT};
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
@@ -160,21 +159,12 @@ fn summary_glyph(status: SummaryStatus) -> Span<'static> {
 
 fn render_detail(f: &mut Frame, area: Rect, app: &App) {
     let filtered_len = app.intercept.filtered_matches_len();
-    let title = if filtered_len == 0 {
-        " Match detail ".to_string()
-    } else {
-        format!(
-            " Match {} / {} ",
-            app.intercept.match_selected + 1,
-            filtered_len
-        )
-    };
-    let block = focused_titled_panel(&title, app.intercept.match_detail_focus);
 
     let Some(m) = app
         .intercept
         .filtered_match_at(app.intercept.match_selected)
     else {
+        let block = focused_titled_panel(" Match detail ", app.intercept.match_detail_focus);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "No match selected.",
@@ -186,129 +176,40 @@ fn render_detail(f: &mut Frame, area: Rect, app: &App) {
         return;
     };
 
-    let lines = detail_lines(&app.intercept, m);
-    let inner_h = block.inner(area).height as usize;
-    let max_scroll = lines.len().saturating_sub(inner_h) as u16;
+    let detail = match_detail::build(&app.intercept, m, app.intercept.match_highlight_index);
+    let title = if detail.occurrence_count > 0 {
+        format!(
+            " Match {} / {}  \u{b7}  hit {} / {} ",
+            app.intercept.match_selected + 1,
+            filtered_len,
+            app.intercept.match_highlight_index + 1,
+            detail.occurrence_count
+        )
+    } else {
+        format!(
+            " Match {} / {} ",
+            app.intercept.match_selected + 1,
+            filtered_len
+        )
+    };
+    let block = focused_titled_panel(&title, app.intercept.match_detail_focus);
+
+    let inner = block.inner(area);
+    //
+    // line_count runs ratatui's own word-wrap so this matches the actual
+    // render (a plain `.lines.len()` undercounts once any line wraps —
+    // see match_detail::rendered_row_offset for why that matters here).
+    // Queried before `.block(..)` is attached, so it doesn't double with
+    // `inner.height` (which already excludes the block's border rows).
+    //
+    let para = Paragraph::new(detail.lines).wrap(Wrap { trim: false });
+    let total_rows = para.line_count(inner.width) as u16;
+    let max_scroll = total_rows.saturating_sub(inner.height);
     app.intercept.match_detail_max_scroll.set(max_scroll);
+    app.intercept.match_detail_width.set(inner.width);
     let effective = app.intercept.match_detail_scroll.min(max_scroll);
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((effective, 0))
-        .block(block);
+    let para = para.scroll((effective, 0)).block(block);
     f.render_widget(para, area);
-}
-
-fn detail_lines(state: &InterceptState, m: &common::TrafficMatchWithDetails) -> Vec<Line<'static>> {
-    let mut out: Vec<Line<'static>> = Vec::new();
-    out.push(Line::from(vec![
-        Span::styled("rule: ", Style::default().fg(MUTED)),
-        Span::styled(
-            m.match_info.rule_name.clone(),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    out.push(Line::from(vec![
-        Span::styled("url:  ", Style::default().fg(MUTED)),
-        Span::styled(m.traffic.url.clone(), Style::default().fg(TEXT_BRIGHT)),
-    ]));
-    out.push(Line::from(vec![
-        Span::styled("agent:", Style::default().fg(MUTED)),
-        Span::styled(
-            format!(" {} ", m.traffic.agent_short_name),
-            Style::default().fg(TEXT_BRIGHT),
-        ),
-        Span::styled("dir:", Style::default().fg(MUTED)),
-        Span::styled(
-            format!(" {:?} ", m.traffic.direction).to_lowercase(),
-            Style::default().fg(DIM),
-        ),
-    ]));
-    if let Some(s) = m.traffic.response_status {
-        out.push(Line::from(vec![
-            Span::styled("stat: ", Style::default().fg(MUTED)),
-            Span::styled(s.to_string(), Style::default().fg(TEXT_BRIGHT)),
-        ]));
-    }
-    out.push(Line::from(Span::styled(
-        "  (o) open in Traffic tab",
-        Style::default().fg(DIM),
-    )));
-    out.push(Line::raw(""));
-
-    match state.summary_status(m) {
-        SummaryStatus::Ready => {
-            if let Some(ref summary) = m.match_info.summary {
-                out.push(Line::from(Span::styled(
-                    "AI SUMMARY",
-                    Style::default()
-                        .fg(TEXT_BRIGHT)
-                        .add_modifier(Modifier::BOLD),
-                )));
-                for line in summary.lines() {
-                    out.push(Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default().fg(TEXT),
-                    )));
-                }
-                out.push(Line::raw(""));
-            }
-        }
-        SummaryStatus::Pending => {
-            out.push(Line::from(Span::styled(
-                "AI SUMMARY (generating…)",
-                Style::default().fg(STATUS_RUNNING),
-            )));
-            out.push(Line::raw(""));
-        }
-        SummaryStatus::NotConfigured => {
-            out.push(Line::from(Span::styled(
-                "(no summarization configured for this rule)",
-                Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-            )));
-            out.push(Line::raw(""));
-        }
-    }
-
-    if let Some(body) = state.request_body_for(&m.traffic) {
-        out.push(Line::from(Span::styled(
-            format!(
-                "REQUEST BODY ({} bytes, {})",
-                body.len(),
-                state.body_mode.label()
-            ),
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        )));
-        out.extend(body_lines(body, state.body_mode));
-        out.push(Line::raw(""));
-    } else if m.traffic.id.is_some() && state.body_needs_fetch(&m.traffic) {
-        out.push(Line::from(Span::styled(
-            "REQUEST BODY (fetching…)",
-            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
-        )));
-        out.push(Line::raw(""));
-    }
-
-    if let Some(body) = state.response_body_for(&m.traffic) {
-        out.push(Line::from(Span::styled(
-            format!(
-                "RESPONSE BODY ({} bytes, {})",
-                body.len(),
-                state.body_mode.label()
-            ),
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        )));
-        out.extend(body_lines(body, state.body_mode));
-    } else if m.traffic.id.is_some() && state.body_needs_fetch(&m.traffic) {
-        out.push(Line::from(Span::styled(
-            "RESPONSE BODY (fetching…)",
-            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
-        )));
-    }
-    out
 }
 
 fn truncate(s: &str, max: usize) -> String {

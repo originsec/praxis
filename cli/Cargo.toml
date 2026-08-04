@@ -31,3 +31,4 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 vt100 = "0.16"
 tempfile = "3"
 regex = "1.10"
+indexmap = { version = "2.0", features = ["serde"] }

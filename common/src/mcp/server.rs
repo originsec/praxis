@@ -1021,6 +1021,38 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(response)
     }
 
+    #[tool(
+        description = "Create and persist a reusable linear chain from one or more existing operations. Operations execute in the supplied order between a manual start element and termination. Use trigger_create after this to automate the chain on schedules, intercept matches, or new-node connections."
+    )]
+    async fn chain_create(
+        &self,
+        Parameters(params): Parameters<ChainCreateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let chain = super::ops::chain_create(
+            client,
+            &params.name,
+            &params.description,
+            &params.category,
+            &params.operations,
+            params.timeout,
+        )
+        .await
+        .map_err(mcp_err)?;
+
+        json_result(json!({
+            "status": "success",
+            "id": chain.id,
+            "id_short": crate::short_id(&chain.id),
+            "name": chain.name,
+            "category": chain.category,
+            "operation_count": chain.operation_count,
+            "message": "Chain created. Use trigger_create to automate it or op_run to run it manually."
+        }))
+    }
+
     #[tool(description = "Run a semantic operation or chain")]
     async fn op_run(
         &self,
@@ -1237,6 +1269,126 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({
             "operations": ops, "chains": chains,
             "operation_count": ops.len(), "chain_count": chains.len()
+        }))
+    }
+
+    // ── Chain Triggers ───────────────────────────────────────────────────
+
+    #[tool(
+        description = "List chain triggers and their enabled state, trigger configuration, targeting, and firing timestamps. Omit chain_id to list triggers for every chain."
+    )]
+    async fn trigger_list(
+        &self,
+        Parameters(params): Parameters<TriggerListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let triggers = super::ops::trigger_list(client, params.chain_id)
+            .await
+            .map_err(mcp_err)?;
+        let trigger_values: Vec<_> = triggers
+            .iter()
+            .map(|trigger| {
+                json!({
+                    "id": trigger.id,
+                    "id_short": crate::short_id(&trigger.id),
+                    "chain_id": trigger.chain_id,
+                    "chain_id_short": crate::short_id(&trigger.chain_id),
+                    "trigger": trigger.trigger_config,
+                    "target": trigger.target_spec,
+                    "enabled": trigger.enabled,
+                    "last_fired_at": trigger.last_fired_at.map(|value| value.to_rfc3339()),
+                    "next_fire_at": trigger.next_fire_at.map(|value| value.to_rfc3339()),
+                })
+            })
+            .collect();
+
+        json_result(json!({
+            "triggers": trigger_values,
+            "count": trigger_values.len()
+        }))
+    }
+
+    #[tool(
+        description = "Create and immediately enable an automatic trigger for an existing chain. Supports scheduled, intercept_match, and new_node triggers. New-node triggers fire 10 seconds after node registration so agent discovery can complete. Use target.include_triggering_node=true when an event's node must be included despite an explicit node_ids filter."
+    )]
+    async fn trigger_create(
+        &self,
+        Parameters(params): Parameters<TriggerCreateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let trigger_config = crate::TriggerConfig::try_from(params.trigger).map_err(mcp_err)?;
+
+        let (trigger, warning) = super::ops::trigger_create(
+            client,
+            &params.chain,
+            trigger_config,
+            params.target.into(),
+        )
+        .await
+        .map_err(mcp_err)?;
+
+        let trigger_id = trigger.id.clone();
+        let chain_id = trigger.chain_id.clone();
+        let trigger_id_short = crate::short_id(&trigger_id);
+        let chain_id_short = crate::short_id(&chain_id);
+        let mut result = json!({
+            "status": "success",
+            "id": trigger_id,
+            "id_short": trigger_id_short,
+            "chain_id": chain_id,
+            "chain_id_short": chain_id_short,
+            "enabled": trigger.enabled,
+            "message": "Chain trigger created and enabled"
+        });
+        if let Some(warning) = warning {
+            result["warning"] = json!(warning);
+        }
+        json_result(result)
+    }
+
+    #[tool(
+        description = "Permanently delete a chain trigger by the ID prefix returned from trigger_list."
+    )]
+    async fn trigger_delete(
+        &self,
+        Parameters(params): Parameters<TriggerIdParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let id = super::ops::trigger_delete(client, &params.trigger_id)
+            .await
+            .map_err(mcp_err)?;
+
+        json_result(json!({
+            "status": "success",
+            "id": id,
+            "message": "Chain trigger deleted"
+        }))
+    }
+
+    #[tool(
+        description = "Enable or disable a chain trigger by the ID prefix returned from trigger_list."
+    )]
+    async fn trigger_toggle(
+        &self,
+        Parameters(params): Parameters<TriggerToggleParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let (id, enabled) = super::ops::trigger_toggle(client, &params.trigger_id, params.enabled)
+            .await
+            .map_err(mcp_err)?;
+
+        json_result(json!({
+            "status": "success",
+            "id": id,
+            "enabled": enabled,
+            "message": if enabled { "Chain trigger enabled" } else { "Chain trigger disabled" }
         }))
     }
 }

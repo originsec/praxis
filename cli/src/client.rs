@@ -83,6 +83,7 @@ struct ClientState {
     acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
     pending_config: Option<oneshot::Sender<HashMap<String, String>>>,
+    pending_config_save: Option<oneshot::Sender<Result<(), String>>>,
     pending_acp: HashMap<String, PendingAcp>,
     pending_terminal_creates: HashMap<String, oneshot::Sender<Result<String, String>>>,
     cached_project_paths: Vec<String>,
@@ -640,7 +641,16 @@ impl Client {
                     let _ = tx.send(values);
                 }
             }
-            ClientDirectMessage::ServiceConfigSaved => {}
+            ClientDirectMessage::ServiceConfigSaved => {
+                if let Some(tx) = state.pending_config_save.take() {
+                    let _ = tx.send(Ok(()));
+                }
+            }
+            ClientDirectMessage::ServiceConfigSaveFailed { message } => {
+                if let Some(tx) = state.pending_config_save.take() {
+                    let _ = tx.send(Err(message));
+                }
+            }
 
             //
             // Operation and chain responses.
@@ -1330,7 +1340,9 @@ impl Client {
             client_id: self.client_id.clone(),
             values,
         };
-        self.publish_signal(message).await
+        self.request("config save", |s| &mut s.pending_config_save, message)
+            .await?
+            .map_err(|message| anyhow!(message))
     }
 
     //

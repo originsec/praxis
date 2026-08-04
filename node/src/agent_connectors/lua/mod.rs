@@ -309,6 +309,71 @@ pub fn create_agent_from_script(
 
 include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 
+#[cfg(test)]
+mod tests {
+    use super::{EMBEDDED_LUA_SCRIPTS, runtime};
+    use std::fs;
+    use uuid::Uuid;
+
+    #[test]
+    fn embedded_connectors_load() {
+        for script in EMBEDDED_LUA_SCRIPTS {
+            let lua = runtime::create_vm(script).expect("embedded connector should load");
+            runtime::vm_parse_manifest(&lua).expect("embedded connector should have a manifest");
+        }
+    }
+
+    #[test]
+    fn claudecode_recon_uses_historical_session_cwds() {
+        let script = EMBEDDED_LUA_SCRIPTS
+            .iter()
+            .find(|script| script.contains("AGENT_SHORT_NAME = \"claudecode\""))
+            .expect("Claude Code connector should be embedded");
+        let root = std::env::temp_dir().join(format!("praxis-lua-test-{}", Uuid::new_v4()));
+        let home = root.join("home");
+        let project = home.join("historical-project");
+        let claude_dir = home.join(".claude");
+        let session_dir = claude_dir.join("projects").join("historical-project");
+        fs::create_dir_all(&project).expect("project directory should be created");
+        fs::create_dir_all(&session_dir).expect("session directory should be created");
+        fs::write(claude_dir.join("settings.json"), "{}").expect("settings should be written");
+        fs::write(
+            claude_dir.join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"test-token"}}"#,
+        )
+        .expect("credentials should be written");
+
+        let project_path = project.to_string_lossy().replace('\\', "/");
+        fs::write(
+            session_dir.join("session.jsonl"),
+            format!(r#"{{"type":"user","cwd":"{}"}}"#, project_path),
+        )
+        .expect("session should be written");
+
+        let lua = runtime::create_vm(script).expect("Claude Code connector should load");
+        let home_path = home.to_string_lossy().replace('\\', "/");
+        let home_json = serde_json::to_string(&home_path).expect("home path should serialize");
+        lua.load(format!(
+            "praxis.user_homes = function() return {{ {} }} end",
+            home_json
+        ))
+        .exec()
+        .expect("test home override should load");
+
+        let recon = runtime::vm_recon(&lua, false, None).expect("recon should complete");
+        assert!(
+            recon
+                .config
+                .project_paths
+                .iter()
+                .any(|path| path.replace('\\', "/") == project_path),
+            "historical session cwd should be available as a working directory"
+        );
+
+        fs::remove_dir_all(root).expect("test files should be removed");
+    }
+}
+
 pub fn load_embedded_agents() -> Vec<(Arc<dyn Agent>, LuaRegisteredAgentInfo)> {
     let mut agents = Vec::new();
     for script in EMBEDDED_LUA_SCRIPTS {

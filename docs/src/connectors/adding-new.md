@@ -136,6 +136,25 @@ Key points:
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 - **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
 
+### Reading Session Content (`read_session_content`)
+
+A connector can optionally define a top-level `read_session_content(session_file)` function. The loader checks whether it exists and, if so, calls it instead of reading `session_file` from disk directly — use this when a discovered session's history isn't a plain text/JSONL file. The Cursor connector (`agents/cursor.lua`) uses it to decode its SQLite-backed chat store: `session_file` arrives as a virtual `"<db_path>::<session_id>"` path, and the hook queries the database, walks the content-addressed blob chain, and returns the reconstructed transcript as JSONL.
+
+```lua
+read_session_content = function(session_file)
+  local db_path = string.match(session_file, "^(.+)::.+$")
+  if not db_path then
+    return nil
+  end
+
+  -- Query the SQLite store at db_path, resolve the blob chain, and
+  -- return the reconstructed transcript. See agents/cursor.lua for
+  -- the full implementation.
+end,
+```
+
+If the function is not defined, Praxis falls back to reading `session_file` directly from disk.
+
 ### `helpers.find_executable` Config
 
 The `find_executable` helper searches for an agent binary in 4 phases:
@@ -160,17 +179,20 @@ OS resolution: `tbl[os_name] or tbl.default or {}` where `os_name` is `"linux"`,
 
 The `praxis` global provides:
 
-- **Filesystem**: `path_exists`, `path_join`, `read_file`, `walk_files`, `glob_files`
+- **Filesystem**: `path_exists`, `path_join`, `path_is_dir`, `path_parent`, `read_file`, `read_dir`, `write_file`, `remove_dir`, `walk_files`, `glob_files`, `count_file_lines`, `extract_user_home`
 - **Commands**: `command_run`, `command_run_handle`, `command_abort_handle`
-- **ACP**: `acp_start`, `acp_create_session`, `acp_prompt`, `acp_close`
+- **ACP**: `acp_start`, `acp_create_session`, `acp_prompt`, `acp_cancel`, `acp_is_alive`, `acp_close`
 - **Environment**: `os_name`, `user_homes`, `env_get`, `expand_path`
 - **Process**: `find_executables`, `kill_processes_by_name`
 - **CDP**: `cdp_spawn_and_connect`, `cdp_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`
-- **Utilities**: `json_decode`, `toml_decode`, `uuid_v4`, `now_unix`, `sleep_ms`, `log_info`, `log_warn`
+- **UIA**: `uia_root`, `uia_find_window`, `uia_find`, `uia_find_bfs`, `uia_find_all`, `uia_name`, `uia_classname`, `uia_invoke`, `uia_expand`, `uia_focus`, `uia_send_keys`, `uia_window_close`, `uia_toggle`, `uia_toggle_state`, `uia_bounding_rect`, `uia_set_foreground`, `uia_click_at`, `uia_release` — see [Windows UI Automation](#windows-ui-automation) below
+- **Utilities**: `json_decode`, `json_encode`, `toml_decode`, `uuid_v4`, `now_unix`, `sleep_ms`, `sha256_hex`, `hex_decode`, `sqlite_query`, `format_unix_timestamp`, `is_cancelled`, `register_cancel`, `unregister_cancel`, `semantic_discover_internal_tools`, `log_info`, `log_warn`, `log_debug`
 
-The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`.
+This list is not exhaustive — see `node/src/agent_connectors/lua/runtime.rs` for every registered function.
 
-The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
+
+The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol, plus a `renderer_ops` backend for Electron apps whose renderer DOM isn't reachable from the main-process CDP connection. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
 ### Deploying
 
@@ -242,14 +264,16 @@ During `acp_prompt`, streaming updates (text, tool calls, tool results) are auto
 
 ## DevTools-Based Agents (Browser Automation)
 
-For agents that run in a browser or WebView (e.g. M365 Copilot), Praxis provides a CDP (Chrome DevTools Protocol) stack. The architecture has three layers:
+For agents that run in a browser or WebView (e.g. M365 Copilot), Praxis provides a CDP (Chrome DevTools Protocol) stack. The architecture has three layers, with a choice of DOM backend at the middle layer:
 
 ```
-your_agent.lua               ← Agent-specific: CSS selectors, response parsing
+your_agent.lua                    ← Agent-specific: CSS selectors, response parsing
     ↓ uses
-require("praxis.devtools")   ← Generic transact loop, connect/close lifecycle
+require("praxis.devtools")        ← Generic transact loop, connect/close lifecycle
+    ↓ uses one of two DOM backends
+cdp_ops (direct) / renderer_ops (Electron proxy)
     ↓ uses
-praxis.cdp_*                 ← Native Rust: CDP connection, JS eval, DOM ops
+praxis.cdp_*                      ← Native Rust: CDP connection, JS eval, DOM ops
 ```
 
 ### The `devtools` Module
@@ -258,7 +282,7 @@ praxis.cdp_*                 ← Native Rust: CDP connection, JS eval, DOM ops
 
 | Function | Description |
 |----------|-------------|
-| `devtools.connect(config)` | Spawn a process with a debug port, connect via CDP, return a handle string |
+| `devtools.connect(config)` | Spawn a process with a debug port, connect via CDP, return `handle, desktop` — the CDP handle string and a hidden-desktop handle (nil if none was used) |
 | `devtools.transact(handle, adapter, prompt)` | Send a prompt and poll for response using the adapter's selectors |
 | `devtools.close(handle)` | Close the CDP connection and terminate the process tree |
 
@@ -273,6 +297,17 @@ The `connect` config table:
 | `port_range` | number | Range for random port selection (default 778) |
 | `kill_existing` | bool | Kill existing processes first (default true) |
 | `use_hidden_desktop` | bool | Spawn on hidden desktop on Windows (default true). In debug builds, `PRAXIS_NOT_HIDDEN` defaults to `1` (visible); in release builds it defaults to `0` (hidden). |
+
+### DOM Operation Backends
+
+`devtools.transact(handle, adapter, prompt, ops)` takes an optional 4th argument selecting which backend performs DOM operations. It defaults to `devtools.cdp_ops(handle)`.
+
+- **`devtools.cdp_ops(handle)`** (default) — direct chromiumoxide `Page` calls. Use this when the CDP connection can already see the page DOM: WebView2 apps and direct Chrome/Chromium connections.
+- **`devtools.renderer_ops(handle)`** — tunnels DOM operations through a CDP proxy injected into an Electron **main process** connection. Use this when the debugger is only attached to the main process (e.g. port 9229) and the renderer's DOM isn't reachable from that connection directly. Call `devtools.setup_electron_proxy(handle, url_match)` once, after connecting and before the first `transact`, to attach `webContents.debugger` to the renderer webContents matching `url_match` and install a `globalThis.cdp()` bridge. Then either pass `devtools.renderer_ops(handle)` as the 4th argument to `devtools.transact`, or use the `devtools.electron_transact(handle, adapter, prompt)` convenience wrapper, which does both.
+
+`renderer_ops` is built from lower-level functions that are rarely called directly: `renderer_evaluate`, `renderer_wait_for_element`, `renderer_find_elements`, `renderer_click`, `renderer_type_text`, `renderer_press_key`.
+
+The Claude Desktop connector (`agents/claudedesktop.lua`) is the worked example: it uses UI Automation (see [Windows UI Automation](#windows-ui-automation) below) to enable Electron's main-process debugger, connects CDP to that port, then calls `setup_electron_proxy` and drives the UI with `electron_transact`.
 
 ### The Adapter Table
 
@@ -396,7 +431,7 @@ local function run_create_session(ctx)
   praxis.kill_processes_by_name(PROCESS_NAME)
   praxis.sleep_ms(500)
 
-  local cdp_handle = devtools.connect({
+  local cdp_handle, desktop_handle = devtools.connect({
     process_path = ctx.process_path,
     debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
     debug_port_format = "--remote-debugging-port={}",
@@ -409,6 +444,7 @@ local function run_create_session(ctx)
   return {
     handle = cdp_handle,
     cdp_handle = cdp_handle,
+    desktop_handle = desktop_handle,
     working_dir = ctx.working_dir,
     process_id = praxis.cdp_process_id(cdp_handle),
   }
@@ -422,6 +458,9 @@ end
 local function run_session_close(state)
   if state and state.cdp_handle then
     devtools.close(state.cdp_handle)
+  end
+  if state and state.desktop_handle then
+    praxis.release_desktop(state.desktop_handle)
   end
 end
 
@@ -489,6 +528,7 @@ For CDP sessions to support abort and cleanup, the session state returned by `cr
 
 - `handle` — used by the Rust session layer for command abort lookup
 - `cdp_handle` — the CDP connection handle string (cleaned up by Rust on drop)
+- `desktop_handle` — the hidden-desktop handle returned alongside the CDP handle by `devtools.connect` (nil if `use_hidden_desktop` was off or no hidden desktop was created). Since `use_hidden_desktop` defaults to `true` on Windows, this is normally set — release it in `session_close` via `praxis.release_desktop(state.desktop_handle)`, or the hidden desktop leaks
 - `process_id` — the spawned process PID (killed by Rust on abort or drop)
 
 ### CDP API Reference
@@ -497,7 +537,7 @@ Low-level functions available on the `praxis` global:
 
 | Function | Arguments | Returns | Description |
 |----------|-----------|---------|-------------|
-| `cdp_spawn_and_connect` | config table | handle string | Spawn process, connect via CDP |
+| `cdp_spawn_and_connect` | config table | table with `handle` and `desktop` fields | Spawn process, connect via CDP. `desktop` is a hidden-desktop handle (nil if none was used) — see [DOM Operation Backends](#dom-operation-backends) and [Session State Keys](#session-state-keys) above |
 | `cdp_connect` | port (number) | handle string | Connect to existing DevTools endpoint |
 | `cdp_evaluate` | handle, js (string) | value | Execute JavaScript, return result |
 | `cdp_find_elements` | handle, selector | count (number) | Count matching DOM elements |
@@ -510,9 +550,100 @@ Low-level functions available on the `praxis` global:
 
 ---
 
+## Windows UI Automation
+
+Some Windows agents need to drive native window chrome — menus, dialogs, toggle switches — rather than, or in addition to, a browser/WebView DOM. Praxis provides a UI Automation (UIA) stack for this, structured the same way as the DevTools stack:
+
+```
+your_agent.lua                     ← Agent-specific: element names, menu paths
+    ↓ uses
+require("praxis.uiautomation")     ← Higher-level find/invoke/toggle helpers
+    ↓ uses
+praxis.uia_*                       ← Native Rust: UI Automation tree walking, patterns
+```
+
+The Claude Desktop connector (`agents/claudedesktop.lua`) is the worked example. It uses UIA to open **Menu → Developer → Enable Main Process Debugger** and dismiss the "Inspector" popup dialogs that follow, before it ever connects CDP:
+
+```lua
+local uia = require("praxis.uiautomation")
+
+local debugger_item = uia.open_app_menu(
+  window_id,
+  "Menu",
+  { "Developer", "Enable Main Process Debugger" }
+)
+
+if uia.toggle_state(debugger_item) == "off" then
+  uia.toggle(debugger_item)
+end
+uia.release(debugger_item)
+```
+
+### UIA API Reference
+
+Low-level functions available on the `praxis` global, wrapped by `require("praxis.uiautomation")`:
+
+| Function | Description |
+|----------|-------------|
+| `uia_root` | Get the desktop root element |
+| `uia_find_window` | Find a top-level window by name and/or PID |
+| `uia_find` | Find the first child/descendant matching criteria (name, control type, class name, or scope) |
+| `uia_find_bfs` | Breadth-first find — avoids the hang `uia_find`'s Descendants scope causes on large Electron UIA trees |
+| `uia_find_all` | Find all matching children/descendants |
+| `uia_name` | Get an element's name |
+| `uia_classname` | Get an element's class name |
+| `uia_invoke` | Invoke an element via the UIA InvokePattern (click/activate) |
+| `uia_expand` | Expand an element via the UIA ExpandCollapsePattern (e.g. open a menu) |
+| `uia_focus` | Set keyboard focus to an element |
+| `uia_send_keys` | Send keystrokes to an element (focuses it first) |
+| `uia_window_close` | Close a window via the UIA WindowPattern |
+| `uia_toggle` | Toggle a checkbox/toggle element via the UIA TogglePattern |
+| `uia_toggle_state` | Get an element's toggle state: `"on"`, `"off"`, or `"indeterminate"` |
+| `uia_bounding_rect` | Get an element's bounding rectangle (`{ x, y, width, height }`) |
+| `uia_set_foreground` | Bring a window to the foreground |
+| `uia_click_at` | Click at screen coordinates |
+| `uia_release` | Release an element handle to free memory |
+
+`require("praxis.uiautomation")` also provides higher-level helpers built on these — `find_window`/`wait_for_window`, `wait_for`, `click_element`, `release_all`, `dismiss_dialogs`, and `open_app_menu`. See `node/src/agent_connectors/lua/lib/uiautomation.lua` for the full wrapper API.
+
+---
+
 ## Rust Connector (for native/OS-level agents)
 
 Use this approach only when Lua cannot access the required OS capabilities.
+Native connectors implement the `Agent`, `AgentSession`, and optional
+`AgentRecon` Rust traits directly. Lua scripts do not implement these
+traits themselves; the shared `LuaAgent` and `LuaAgentSession` adapters
+translate their callbacks into the same runtime interfaces.
+
+The abbreviated trait shapes are:
+
+```rust
+#[async_trait]
+trait Agent {
+    fn name(&self) -> &str;
+    fn short_name(&self) -> &str;
+    fn as_recon(&self) -> Option<&dyn AgentRecon>;
+    async fn do_fingerprint(&self) -> bool;
+    fn version(&self) -> Option<String>;
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>>;
+    fn drop_session(&self, session_id: Uuid);
+}
+
+trait AgentSession {
+    fn transact(&self, prompt: &str) -> Result<String>;
+    fn close(&self);
+}
+
+#[async_trait]
+trait AgentRecon {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
+}
+```
 
 ### Step 1: Create the Directory Structure
 
@@ -523,15 +654,13 @@ node/src/agent_connectors/
 ├── exampleai/
 │   ├── mod.rs          # Main agent implementation
 │   ├── fingerprint.rs  # Fingerprinting logic
-│   ├── intercept.rs    # Interception domains
-│   ├── recon.rs        # Reconnaissance
 │   └── session.rs      # Session management
 ├── factory.rs
 ├── mod.rs
 └── traits.rs
 ```
 
-## Step 2: Implement the Agent Trait
+### Step 2: Implement the Agent Trait
 
 In `mod.rs`:
 
@@ -625,7 +754,7 @@ The `Agent` trait has two session-related hooks:
 - `drop_session(session_id)` — called on `session/close` (and on node
   reset). Release per-session resources keyed by that id.
 
-## Step 3: Implement Fingerprinting
+### Step 3: Implement Fingerprinting
 
 In `fingerprint.rs`:
 
@@ -679,7 +808,7 @@ fn is_process_running(name: &str) -> bool {
 }
 ```
 
-## Step 4: Configure Interception
+### Step 4: Configure Interception
 
 Traffic interception is no longer declared on the connector itself.
 Domains and URL filters live as **intercept targets** in a TOML virtual
@@ -706,7 +835,7 @@ built-in defaults** action to discard local edits and start over. To
 disable a target without deleting it, comment out the entire section
 with `#`.
 
-## Step 5: Implement Reconnaissance
+### Step 5: Implement Reconnaissance
 
 In `recon.rs`:
 
@@ -757,12 +886,12 @@ fn discover_sessions() -> Vec<common::SessionItem> {
 }
 ```
 
-## Step 6: Implement Session Management
+### Step 6: Implement Session Management
 
 In `session.rs`:
 
 ```rust
-use crate::agent_connectors::traits::{AgentMode, AgentSession};
+use crate::agent_connectors::traits::AgentSession;
 use anyhow::Result;
 use common::SessionContext;
 use uuid::Uuid;
@@ -806,22 +935,6 @@ impl ExampleAISession {
 }
 
 impl AgentSession for ExampleAISession {
-    fn session_id(&self) -> &Uuid {
-        &self.session_id
-    }
-
-    fn process_path(&self) -> Option<String> {
-        self.process_path.clone()
-    }
-
-    fn working_dir(&self) -> Option<String> {
-        self.working_dir.clone()
-    }
-
-    fn mode(&self) -> AgentMode {
-        AgentMode::Cli
-    }
-
     fn transact(&self, prompt: &str) -> Result<String> {
         // Send prompt to PTY stdin
         // Wait for and parse response
@@ -841,14 +954,21 @@ impl AgentSession for ExampleAISession {
             pty.close();
         }
     }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 ```
 
-## Step 7: Register in Factory
+`AgentSession` only requires `transact` and `close`. Override these when needed:
+
+- `acp_handle(&self) -> Option<String>` — return a non-empty handle for streaming sessions so the update/permission channels can be registered against it before `transact` runs. Non-streaming sessions should leave the default (`None`).
+- `abort_transaction(&self) -> bool` — kill the underlying process on abort; return whether one was actually killed.
+- `set_cancel_flag(&self, flag: Arc<AtomicBool>)` — adopt the shared cancellation flag the handler hands in before calling `transact`, so `session/cancel` and in-loop polling share one flag.
+- `transact_with_context(&self, prompt: &str, ctx: SessionTransactContext) -> Result<String>` — the default implementation wires `set_cancel_flag` and registers `acp_handle`'s update/permission channels, then calls `transact`. Override only if a session needs different wiring.
+
+### Step 7: Register in Factory
+
+**Lua connectors need no factory changes at all.** Dropping the `.lua` file into `agents/` (see [Deploying](#deploying) above) is enough: `AgentRegistry::rebuild()` calls `lua::load_embedded_agents()` to load every embedded script and register it directly, without `AgentFactory` ever being involved. Claude Code, Gemini, M365 Copilot, and every other shipped connector except Praxis itself work this way.
+
+`AgentFactory::create_all_agents()` only needs to know about connectors that are genuinely native Rust — currently just `PraxisAgent` (constructed conditionally from config) and `DummyAgent` (native, but only used in tests). Register a new native connector like `ExampleAIAgent` the same way:
 
 Update `node/src/agent_connectors/factory.rs`:
 
@@ -858,15 +978,14 @@ use super::exampleai::ExampleAIAgent;  // Add import
 impl AgentFactory {
     pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
         let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
+        let config = self.config();
 
-        agents.push(Arc::new(ClaudeCodeAgent::new()));
-        agents.push(Arc::new(GeminiAgent::new()));
+        if let Some(praxis_config) = config.praxis_agent_config {
+            agents.push(Arc::new(PraxisAgent::new(praxis_config)));
+        }
 
-        // Add your new agent
+        // Add your new native connector.
         agents.push(Arc::new(ExampleAIAgent::new()));
-
-        #[cfg(windows)]
-        agents.push(Arc::new(M365CopilotAgent::new()));
 
         agents
     }
@@ -879,7 +998,7 @@ Update `node/src/agent_connectors/mod.rs`:
 pub mod exampleai;  // Add this line
 ```
 
-## Step 8: Test
+### Step 8: Test
 
 1. Build the node: `cargo build -p praxis_node`
 2. Run with the target agent installed

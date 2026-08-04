@@ -154,6 +154,12 @@ pub struct OrchestratorState {
     //
     pub create_in_flight: bool,
     //
+    // A model selection made while session/new is outstanding. This occurs
+    // during first setup when the startup create fails for lack of a model
+    // while Settings is saving the first model definition and assignment.
+    //
+    pub pending_model_selection: Option<String>,
+    //
     // When a plan is showing, conversation | plan horizontal split.
     // Percentage is the conversation (left) share.
     //
@@ -207,6 +213,7 @@ impl Default for OrchestratorState {
             recovery_prompt: None,
             recovery_history: None,
             create_in_flight: false,
+            pending_model_selection: None,
             plan_split_percent: 67,
             plan_dragging: false,
         }
@@ -304,6 +311,7 @@ impl App {
         self.orchestrator.recovery_prompt = None;
         self.orchestrator.recovery_history = None;
         self.orchestrator.create_in_flight = false;
+        self.orchestrator.pending_model_selection = None;
 
         let active_sid = self
             .orchestrator
@@ -371,6 +379,15 @@ impl App {
         self.orchestrator.sessions.clear();
         self.orchestrator.sessions.push(session);
         self.orchestrator.active_session_index = Some(0);
+    }
+
+    //
+    // An empty session id is the local placeholder used to show a failed
+    // session/new error. A later explicit model choice replaces that failed
+    // attempt, so its stale errors must not be copied into the new session.
+    //
+    pub(crate) fn discard_empty_orchestrator_placeholder(&mut self) {
+        discard_empty_active_orchestrator_session(&mut self.orchestrator);
     }
 
     //
@@ -714,6 +731,7 @@ impl App {
                 //
 
                 self.orchestrator.create_in_flight = false;
+                self.orchestrator.pending_model_selection = None;
 
                 let label = "Session".to_string();
                 let mut session = OrchestratorSessionState::new(session_id.clone(), label);
@@ -1050,6 +1068,11 @@ impl App {
                 //
                 self.orchestrator.create_in_flight = false;
 
+                if let Some(model) = self.orchestrator.pending_model_selection.take() {
+                    self.select_model(&model).await;
+                    return;
+                }
+
                 //
                 // While recovering, an error means the recreate attempt
                 // failed (the service is still coming up). Retry with
@@ -1210,6 +1233,18 @@ fn has_pending_orchestrator_tool(messages: &[ConversationEntry]) -> bool {
     })
 }
 
+fn discard_empty_active_orchestrator_session(orchestrator: &mut OrchestratorState) {
+    let has_empty_active_session = orchestrator
+        .active_session()
+        .map(|session| session.session_id.is_empty())
+        .unwrap_or(false);
+
+    if has_empty_active_session {
+        orchestrator.sessions.clear();
+        orchestrator.active_session_index = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1300,6 +1335,38 @@ mod tests {
         ));
         assert_eq!(messages.len(), 1);
         assert!(has_pending_orchestrator_tool(&messages));
+    }
+
+    #[test]
+    fn discarding_empty_placeholder_removes_prior_create_error() {
+        let mut state = OrchestratorState::default();
+        let mut session = OrchestratorSessionState::new(String::new(), "Session".to_string());
+        session.messages.push(ConversationEntry::Error(
+            "No model selected for Orchestrator".to_string(),
+        ));
+        state.sessions.push(session);
+        state.active_session_index = Some(0);
+
+        discard_empty_active_orchestrator_session(&mut state);
+
+        assert!(state.sessions.is_empty());
+        assert_eq!(state.active_session_index, None);
+    }
+
+    #[test]
+    fn discarding_placeholder_keeps_live_session() {
+        let mut state = OrchestratorState::default();
+        state.sessions.push(OrchestratorSessionState::new(
+            "live-session".to_string(),
+            "Session".to_string(),
+        ));
+        state.active_session_index = Some(0);
+
+        discard_empty_active_orchestrator_session(&mut state);
+
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.sessions[0].session_id, "live-session");
+        assert_eq!(state.active_session_index, Some(0));
     }
 
     fn other_debug(entry: &ConversationEntry) -> String {

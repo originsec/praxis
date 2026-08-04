@@ -64,9 +64,10 @@ Static reconnaissance discovers:
 - Server names, commands, arguments, URLs
 
 **Sessions**
-- Session history from `~/.codex/history.jsonl`
+- Structured session data from `~/.codex/sessions/` and `~/.codex/archived_sessions/` (per-conversation JSONL files)
 - Sessions grouped by `session_id` field
 - Message counts and timestamps
+- Separate, unstructured history log at `~/.codex/history.jsonl`
 
 **Project Paths**
 - Extracted from `[projects."<path>"]` sections in config.toml
@@ -157,7 +158,9 @@ sandbox = "workspace-write"
 |------|------|---------|
 | Global settings | `~/.codex/config.toml` | Global configuration |
 | Authentication | `~/.codex/auth.json` | API credentials |
-| Session history | `~/.codex/history.jsonl` | JSONL session log |
+| Sessions | `~/.codex/sessions/` | Per-conversation JSONL files, grouped by session_id |
+| Archived sessions | `~/.codex/archived_sessions/` | Archived per-conversation JSONL files |
+| Session history | `~/.codex/history.jsonl` | Unstructured JSONL session log |
 
 **Project (Working Directory)**
 

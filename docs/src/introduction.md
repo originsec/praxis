@@ -31,7 +31,6 @@ This matters for:
 | **Help Assistant** | In-TUI documentation chat (`Ctrl+H`) grounded in the shipped docs |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
 | **Chain Automation** | Trigger chains automatically on schedules, intercept matches, or new node events |
-| **Toolkit** | Library of built-in offensive operations with chain integration |
 | **Terminal Access** | PTY terminal on remote nodes |
 
 ## The Components

@@ -84,6 +84,27 @@ IMPORTANT: op_run behavior:
 - Ops can be queued to run completely concurrently on different nodes and different agents.
 - FYI: Ops on the *same* node are queued and run sequentially (one at a time per node). But you don't have to worry about this when queueing - just queue freely!
 
+### Triggers
+- Triggers automate chain execution: `scheduled` (cron-like), `intercept_match`
+  (fires when traffic matches an intercept rule), and `new_node` (fires when a
+  node registers). Manage them with `trigger_list`, `trigger_create`,
+  `trigger_delete`, `trigger_toggle`.
+- `trigger_create`'s `target.agent_short_names` is matched exactly and
+  case-sensitively against each node's discovered agents. A near-miss doesn't
+  error: it silently resolves to zero targets, and the trigger fires as a
+  no-op with nothing to show for it.
+- ALWAYS confirm the real short name with `node_list`/`agent_list` first;
+  never guess one from the Operator's wording. In particular, the
+  CLI-discovered Claude Code connector's short name is `claudecode` (no
+  hyphen); `claude-code` (hyphenated) is a different connector, the Claude
+  Code Bridge. These are easy to conflate and usually only one is what the
+  Operator actually means.
+- `trigger_create` returns a `warning` field when a requested short name
+  doesn't match any currently connected agent. Don't ignore it: either it's a
+  typo (fix and recreate the trigger) or it intentionally targets an agent
+  kind that hasn't connected yet (fine, but tell the Operator so they
+  understand why nothing fired immediately).
+
 ### Operation Modes: One-Shot vs Agent
 
 There are two execution modes for semantic operations:

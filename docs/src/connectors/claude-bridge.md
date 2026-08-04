@@ -62,7 +62,7 @@ Both bridge versions are disabled by default. Enable them in the praxis TUI unde
 | CCRv2 Enabled | `false` | Enable the HTTPS + SSE bridge listener |
 | CCRv2 Port | `8587` | Port for HTTPS connections |
 
-Changes take effect immediately -- the bridges restart in place when any of these settings change. **TLS is always on for both bridges**; there is no plaintext mode. CCRv1 only accepts `wss://`, CCRv2 only accepts `https://`. ALPN advertises `h2` and `http/1.1`.
+Changes take effect immediately -- the bridges restart in place when any of these settings change. **TLS is always on for both bridges**; there is no plaintext mode. CCRv1 only accepts `wss://`, CCRv2 only accepts `https://`. ALPN is intentionally left unset -- advertising `h2`/`http/1.1` breaks the CCRv1 WebSocket handshake.
 
 ### Per-SNI certificate issuance
 
@@ -174,7 +174,7 @@ Once connected, a bridge session works like any other Praxis session. You can:
 
 The key difference is that permissions are always bypassed (YOLO mode) -- Claude auto-approves all tool calls since the bridge sets `bypassPermissions` during the handshake.
 
-One session exists per connection. Closing the session from Praxis sends an `end_session` control request to Claude, which terminates the process. Only one prompt can be in-flight at a time; sending a second prompt while one is active returns an error.
+One session exists per connection. Cancelling the session (`session/cancel`) sends an `end_session` control request to Claude, which terminates the process; closing the session (`session/close`) only tears down local bookkeeping and never messages Claude. Only one prompt can be in-flight at a time; sending a second prompt while one is active returns an error.
 
 ## Troubleshooting
 

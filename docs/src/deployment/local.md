@@ -12,8 +12,17 @@ See [Installation](../getting-started/installation.md) for all install options.
 
 ### Prerequisites
 
-- Rust 1.70+ with cargo
+- Rust 1.70+ with cargo, via [rustup](https://rustup.rs):
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
 - RabbitMQ running locally
+- Linux build dependencies (Debian/Ubuntu):
+  ```bash
+  sudo apt-get install -y build-essential pkg-config libssl-dev
+  ```
+  - `build-essential` provides `cc`/`make`/libc headers — without it the build fails with ``linker `cc` not found``.
+  - `pkg-config` + `libssl-dev` let `openssl-sys` (pulled in via `native-tls`) find the system OpenSSL install.
 
 ### Build Steps
 
@@ -28,8 +37,23 @@ cd praxis
 cargo build --release
 ```
 
-This builds the service, node, and CLI components. The web component is
-not part of the default build; use the TUI (`praxis`) as the client.
+This builds the service, node, and TUI (`praxis`) components.
+
+### Cross-Compiling the Node for Windows
+
+To build `praxis_node.exe` for Windows targets from a Linux host:
+
+```bash
+sudo apt-get install -y mingw-w64
+rustup target add x86_64-pc-windows-gnu
+cargo build --release --target x86_64-pc-windows-gnu -p praxis_node
+```
+
+`mingw-w64` provides the `x86_64-w64-mingw32-gcc` cross-linker that cargo
+uses for this target. The resulting binary is at
+`target/x86_64-pc-windows-gnu/release/praxis_node.exe`. This is the same
+toolchain the installer uses for `--with-win-node --src` (see
+[Installation](../getting-started/installation.md)).
 
 ## Running Locally
 

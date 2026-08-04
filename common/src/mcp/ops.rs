@@ -1,13 +1,16 @@
 use anyhow::{Result, anyhow};
 use serde_json::json;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
+use uuid::Uuid;
 
 use crate::acp_ext::{EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE};
 use crate::mcp::McpClient;
 use crate::{
-    AgentFileType, AgentTool, ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
-    ChainTriggerInfo, ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo,
-    SemanticOpUpdate, SemanticOperationSpec, SessionItem, SystemState, TargetSpec, TriggerConfig,
+    AgentFileType, AgentTool, ChainConnection, ChainDefinitionFull, ChainDefinitionInfo,
+    ChainDefinitionInput, ChainElement, ChainExecutionUpdate, ChainTriggerInfo, ChainTriggerType,
+    ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo, SemanticOpUpdate,
+    SemanticOperationSpec, SessionItem, SystemState, TargetSpec, TriggerConfig,
 };
 
 //
@@ -182,6 +185,166 @@ pub async fn op_delete(client: &(impl McpClient + Sync), name: &str) -> Result<S
 
     client.delete_op_def(&full_name).await?;
     Ok(full_name)
+}
+
+//
+// Create a valid linear chain from existing operation definitions. The graph
+// always has a manual trigger and explicit termination so it can be run
+// manually or attached to an automated chain trigger.
+//
+
+pub async fn chain_create(
+    client: &(impl McpClient + Sync),
+    name: &str,
+    description: &str,
+    category: &str,
+    operation_names: &[String],
+    timeout: Option<u64>,
+) -> Result<ChainDefinitionInfo> {
+    let name = name.trim();
+    let category = category.trim();
+    if name.is_empty() {
+        return Err(anyhow!("Chain name cannot be empty"));
+    }
+    if category.is_empty() {
+        return Err(anyhow!("Chain category cannot be empty"));
+    }
+    if operation_names.is_empty() {
+        return Err(anyhow!("A chain must contain at least one operation"));
+    }
+
+    client.request_op_def_list().await?;
+    client.request_chain_list().await?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let chains = client.get_chain_definitions().await;
+    if chains
+        .iter()
+        .any(|chain| chain.name.eq_ignore_ascii_case(name))
+    {
+        return Err(anyhow!(
+            "A chain named '{}' already exists. Use op_available to inspect it.",
+            name
+        ));
+    }
+
+    let operation_definitions = client.get_operation_definitions().await;
+    let mut resolved_operations = Vec::with_capacity(operation_names.len());
+    for requested_name in operation_names {
+        let requested_name = requested_name.trim();
+        if requested_name.is_empty() {
+            return Err(anyhow!("Operation names cannot be empty"));
+        }
+
+        let exact = operation_definitions
+            .iter()
+            .find(|operation| operation.full_name.eq_ignore_ascii_case(requested_name));
+        let operation = match exact {
+            Some(operation) => operation.clone(),
+            None => {
+                let matches: Vec<_> = operation_definitions
+                    .iter()
+                    .filter(|operation| {
+                        operation.short_name.eq_ignore_ascii_case(requested_name)
+                            || operation.name.eq_ignore_ascii_case(requested_name)
+                    })
+                    .collect();
+                match matches.as_slice() {
+                    [operation] => (*operation).clone(),
+                    [] => {
+                        return Err(anyhow!(
+                            "No operation definition found matching '{}'. Use op_available to list definitions.",
+                            requested_name
+                        ));
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "Operation name '{}' is ambiguous. Use its full category::short_name.",
+                            requested_name
+                        ));
+                    }
+                }
+            }
+        };
+
+        if operation.disabled {
+            return Err(anyhow!(
+                "Operation '{}' is disabled and cannot be added to a new chain",
+                operation.full_name
+            ));
+        }
+        resolved_operations.push(operation.full_name.clone());
+    }
+
+    let definition = build_linear_chain_definition(
+        name,
+        description.trim(),
+        category,
+        &resolved_operations,
+        timeout,
+    );
+    client.create_chain_definition(definition).await
+}
+
+fn build_linear_chain_definition(
+    name: &str,
+    description: &str,
+    category: &str,
+    operation_names: &[String],
+    timeout: Option<u64>,
+) -> ChainDefinitionInput {
+    let trigger_id = Uuid::new_v4().to_string();
+    let operation_ids: Vec<_> = operation_names
+        .iter()
+        .map(|_| Uuid::new_v4().to_string())
+        .collect();
+    let termination_id = Uuid::new_v4().to_string();
+
+    let mut elements = Vec::with_capacity(operation_names.len() + 2);
+    elements.push(ChainElement::Trigger {
+        id: trigger_id.clone(),
+        trigger_type: ChainTriggerType::Manual,
+    });
+    for (operation_name, id) in operation_names.iter().zip(&operation_ids) {
+        elements.push(ChainElement::Operation {
+            id: id.clone(),
+            operation_name: operation_name.clone(),
+            model_ref: None,
+            session_group: None,
+            block_config: None,
+        });
+    }
+    elements.push(ChainElement::Termination {
+        id: termination_id.clone(),
+        block_config: None,
+    });
+
+    let mut element_ids = Vec::with_capacity(elements.len());
+    element_ids.push(trigger_id);
+    element_ids.extend(operation_ids);
+    element_ids.push(termination_id);
+    let connections = element_ids
+        .windows(2)
+        .map(|pair| ChainConnection {
+            id: Uuid::new_v4().to_string(),
+            from_element: pair[0].clone(),
+            to_element: pair[1].clone(),
+            from_port: 0,
+            to_port: 0,
+            condition: None,
+        })
+        .collect();
+
+    ChainDefinitionInput {
+        name: name.to_string(),
+        description: description.to_string(),
+        category: category.to_string(),
+        elements,
+        connections,
+        disabled: false,
+        timeout,
+        positions: HashMap::new(),
+    }
 }
 
 //
@@ -780,7 +943,7 @@ pub async fn trigger_create(
     chain_name: &str,
     trigger_config: TriggerConfig,
     target_spec: TargetSpec,
-) -> Result<String> {
+) -> Result<(ChainTriggerInfo, Option<String>)> {
     //
     // Resolve chain by name or ID prefix.
     //
@@ -795,11 +958,55 @@ pub async fn trigger_create(
         })
         .ok_or_else(|| anyhow!("No chain found matching '{}'", chain_name))?;
     let chain_id = chain.id.clone();
+    let requested_agents = target_spec.agent_short_names.clone();
 
-    client
+    let trigger = client
         .create_chain_trigger(chain_id.clone(), trigger_config, target_spec)
         .await?;
-    Ok(chain_id)
+
+    let warning = unmatched_agent_short_names_warning(client, &requested_agents).await;
+    Ok((trigger, warning))
+}
+
+//
+// Trigger target specs match agent short names by exact, case-sensitive
+// string equality (see resolve_targets), and distinct connectors can
+// register visually similar short names for genuinely different things
+// (e.g. the CLI-discovered "claudecode" vs the "claude-code" Claude Code
+// Bridge connector). Getting it wrong doesn't error -- it silently resolves
+// zero targets forever, so warn eagerly when a requested name doesn't match
+// any currently discovered agent. This is advisory only, not a hard
+// failure: new_node triggers legitimately target agent kinds that haven't
+// connected yet.
+//
+async fn unmatched_agent_short_names_warning(
+    client: &(impl McpClient + Sync),
+    requested: &[String],
+) -> Option<String> {
+    if requested.is_empty() {
+        return None;
+    }
+    let state = client.get_state().await?;
+    let known: BTreeSet<&str> = state
+        .nodes
+        .iter()
+        .flat_map(|n| n.discovered_agents.iter())
+        .map(|a| a.short_name.as_str())
+        .collect();
+    let unknown: Vec<&String> = requested
+        .iter()
+        .filter(|name| !known.contains(name.as_str()))
+        .collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "agent_short_names {:?} do not match any agent short name currently seen on a \
+         connected node (currently known: {:?}). If this trigger targets an agent kind \
+         that hasn't connected yet this may be expected -- otherwise call \
+         node_list/agent_list to confirm the real short name before trusting it.",
+        unknown, known
+    ))
 }
 
 pub async fn trigger_delete(
@@ -812,8 +1019,7 @@ pub async fn trigger_delete(
         .find(|t| t.id.starts_with(trigger_id_prefix))
         .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
     let id = trigger.id.clone();
-    client.delete_chain_trigger(id.clone()).await?;
-    Ok(id)
+    client.delete_chain_trigger(id).await
 }
 
 pub async fn trigger_toggle(
@@ -827,6 +1033,58 @@ pub async fn trigger_toggle(
         .find(|t| t.id.starts_with(trigger_id_prefix))
         .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
     let id = trigger.id.clone();
-    client.toggle_chain_trigger(id.clone(), enabled).await?;
-    Ok((id, enabled))
+    let trigger = client.toggle_chain_trigger(id, enabled).await?;
+    Ok((trigger.id, trigger.enabled))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_valid_linear_operation_chain() {
+        let operations = vec![
+            "custom::cicd".to_string(),
+            "recon::system_info".to_string(),
+        ];
+        let chain = build_linear_chain_definition(
+            "CI/CD on connect",
+            "Run CI/CD discovery on new nodes",
+            "custom",
+            &operations,
+            Some(600),
+        );
+
+        assert_eq!(chain.elements.len(), 4);
+        assert_eq!(chain.connections.len(), 3);
+        assert!(matches!(chain.elements[0], ChainElement::Trigger { .. }));
+        assert!(matches!(
+            &chain.elements[1],
+            ChainElement::Operation { operation_name, .. } if operation_name == "custom::cicd"
+        ));
+        assert!(matches!(
+            &chain.elements[2],
+            ChainElement::Operation { operation_name, .. } if operation_name == "recon::system_info"
+        ));
+        assert!(matches!(chain.elements[3], ChainElement::Termination { .. }));
+
+        for (connection, elements) in chain.connections.iter().zip(chain.elements.windows(2)) {
+            assert_eq!(connection.from_element, element_id(&elements[0]));
+            assert_eq!(connection.to_element, element_id(&elements[1]));
+        }
+    }
+
+    fn element_id(element: &ChainElement) -> &str {
+        match element {
+            ChainElement::Trigger { id, .. }
+            | ChainElement::Operation { id, .. }
+            | ChainElement::Transform { id, .. }
+            | ChainElement::GenericPrompt { id, .. }
+            | ChainElement::Memory { id, .. }
+            | ChainElement::Loop { id, .. }
+            | ChainElement::Tool { id, .. }
+            | ChainElement::Payload { id, .. }
+            | ChainElement::Termination { id, .. } => id,
+        }
+    }
 }

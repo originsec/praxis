@@ -31,6 +31,7 @@ pub use theme::BG;
 
 pub fn render(f: &mut Frame, app: &App) {
     app.hits_clear();
+    app.text_selection_regions_clear();
 
     f.render_widget(Block::default().style(Style::default().bg(BG)), f.area());
 
@@ -108,6 +109,12 @@ pub fn render(f: &mut Frame, app: &App) {
     //
     if app.help.open {
         help::render(f, &app.help);
+    }
+
+    let buffer = f.buffer_mut();
+    *app.rendered_buffer.borrow_mut() = buffer.clone();
+    if let Some(selection) = app.text_selection {
+        selection.render(buffer);
     }
 }
 

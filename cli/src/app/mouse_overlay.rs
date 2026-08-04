@@ -662,7 +662,7 @@ impl App {
                     Some(rel_row - 2)
                 } else if rel_row == 2 + mc {
                     Some(mc)
-                } else if rel_row >= 6 + mc && rel_row < 6 + mc + 5 {
+                } else if rel_row >= 6 + mc && rel_row < 6 + mc + 7 {
                     Some(mc + 1 + (rel_row - 6 - mc))
                 } else {
                     None

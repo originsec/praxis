@@ -4,20 +4,11 @@ Reconnaissance discovers what an AI agent can do-its tools, configuration, and h
 
 ## Running Recon
 
-With an agent selected:
-
-1. Click **Recon** in the agent panel
-2. Static recon runs immediately
-3. Results appear organized by category
-
-For deeper discovery, click **Semantic Recon** (requires Semantic Parser LLM configured).
-
-## TUI
-
-The CLI (`praxis_cli`) provides the same reconnaissance capabilities in
-the terminal. From the **Nodes** window (`Ctrl+L`), navigate into the
-detail pane (`→`), select an agent (`↑`/`↓`), and press **`r`** to open
-the recon overlay.
+From the **Nodes** window (`Ctrl+L`), navigate into the detail pane
+with `→`, select an agent with `↑`/`↓`, and press `r` to open the recon
+overlay. Static recon runs automatically when no cached result is
+available; press `r` to refresh it. Press `Ctrl+U` for deeper semantic
+recon, which requires a Semantic Parser LLM.
 
 The overlay is a hierarchical browser (similar to a connectors/MCP
 picker): group headers expand and collapse, leaf items open a detail
@@ -29,28 +20,13 @@ Three tabs:
 2. **Tools** — MCP servers (with nested tools), skills, and internal tools
 3. **Sessions** — conversation history grouped by project path
 
-| Key | Action |
-|-----|--------|
-| `Tab` / `1` `2` `3` | Switch tab |
-| `↑` / `↓` | Move among visible tree rows |
-| `←` / `→` | Collapse / expand (or focus detail) |
-| `Space` / `Enter` | Toggle expand on branches; open leaf detail |
-| `/` | Focus filter bar (type to filter; `Esc` blurs) |
-| `PgUp` / `PgDn` | Scroll detail pane |
-| `r` | Refresh (static recon) |
-| `Ctrl+U` | Discover (semantic recon) |
-| `Ctrl+E` | Edit selected Config file in `$EDITOR` |
-| `Esc` | Unfocus filter → clear filter → leave detail → close |
-| `Ctrl+Q` | Close overlay |
-
-**Mouse:** click chevrons to expand/collapse; click a row to select (second
-click on a branch toggles expand); hover highlights rows; drag the pane
-split; click the filter bar to type.
+See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
+keybindings and mouse controls.
 
 On first open, the TUI checks the service cache. If no recon data is
 stored, it triggers an ACP `_praxis/recon` request on the node and polls
-every second until data arrives (60-second timeout). Cached data is
-displayed instantly on re-open.
+about every 1.5 seconds until data arrives (~90-second timeout). Cached
+data is displayed instantly on re-open.
 
 ### Tree layout
 
@@ -92,7 +68,8 @@ Best for: Quick overview, checking configuration
 
 ### Semantic Recon
 
-Click the **Discover** button to run semantic recon. This performs deeper analysis using an LLM:
+In the recon overlay, press `Ctrl+U` to run semantic recon. This performs
+deeper analysis using an LLM:
 - Parses complex configurations
 - Extracts tool definitions from text
 - Identifies capabilities from session transcripts
@@ -122,19 +99,19 @@ These are useful for quick lookups and for AI agents that need to browse specifi
 
 ### View Config Files
 
-Click any config file to see its contents. The viewer shows:
+Select a config leaf in the TUI tree to view its contents. The detail pane
+shows:
 - File path
 - Full contents
 - Syntax highlighting (JSON, YAML)
 
 ### Edit Configurations
 
-Some configurations can be edited directly (like Claude's config.json or MCP server definitions):
-
-1. Click on a config file
-2. Make changes in the editor
-3. Click **Save**
-4. Changes are written to disk on the target
+Some configurations can be edited directly (like Claude's config.json or MCP
+server definitions). Select the config leaf and press `Ctrl+E` to open it in
+`$VISUAL` or `$EDITOR`; save and exit the editor to write changes to the
+target. See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
+controls.
 
 This is useful for exploring the offensive impact of configuration changes - adding MCP servers, modifying permissions, changing model settings, or injecting tool configurations.
 
@@ -142,7 +119,7 @@ This is useful for exploring the offensive impact of configuration changes - add
 
 ### View Session History
 
-Click on a session to see the conversation:
+Select a session leaf to view the conversation:
 - Full transcript with prompts and responses
 - Tool calls and results
 - Timestamps

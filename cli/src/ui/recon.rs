@@ -83,6 +83,8 @@ fn register_tab_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
 
 fn register_content_hits(app: &App, content: Rect, overlay: &ReconOverlay) {
     let (left, right) = common_two_pane_layout(content, overlay.recon_split_percent);
+    app.text_selection_region_register(left);
+    app.text_selection_region_register(right);
     app.hits_register(right, MouseAction::ReconRightPane);
     //
     // Per-row hits are registered by each tab's left-pane renderer.

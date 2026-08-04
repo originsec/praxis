@@ -18,6 +18,10 @@ pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 pub const LLM_FEATURE_DOC_HELPER: &str = "llm_feature_doc_helper";
 
+/// Maximum text-body data sent to the Traffic Parser, in KiB.
+pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
+pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
+
 /// Praxis agent configuration keys.
 pub const PRAXIS_AGENT_SETTINGS: &str = "praxis_agent_settings";
 pub const PRAXIS_AGENT_SYSTEM_PROMPT: &str = "praxis_agent_system_prompt";
@@ -58,6 +62,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
     LLM_FEATURE_DOC_HELPER,
+    TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
     APPLICATION_LOGS_ENABLED,
@@ -174,6 +179,15 @@ impl ServiceConfig {
     pub fn get_traffic_parser_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_TRAFFIC_PARSER)
             .and_then(|model_ref| self.find_model_definition(model_ref))
+    }
+
+    /// Get the maximum text-body data sent to the Traffic Parser.
+    pub fn get_traffic_parser_body_limit_bytes(&self) -> usize {
+        self.get(TRAFFIC_PARSER_BODY_LIMIT_KB)
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT)
+            .saturating_mul(1024)
+            .min(common::MAX_INTERCEPT_CAPTURE_BODY_SIZE)
     }
 
     /// Get the model definition assigned to semantic ops feature

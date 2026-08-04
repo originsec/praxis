@@ -332,14 +332,23 @@ impl App {
         // platforms. The capability gate above already excludes
         // unprivileged nodes; this just picks the right method.
         //
-        let method = if os_lower.contains("linux") {
-            common::InterceptMethod::Tproxy
-        } else if os_lower.contains("windows") {
+        // Match "windows" and "darwin" explicitly rather than requiring
+        // "linux" in the string. sysinfo reports a Linux distro's
+        // /etc/os-release NAME field verbatim, and plenty of real distros
+        // (Ubuntu, CentOS Stream, openSUSE...) never spell out "Linux"
+        // there — Ubuntu's NAME is literally just "Ubuntu". praxis only
+        // ships Windows/Linux/macOS builds, so anything that isn't
+        // Windows or Darwin (macOS's kernel name, which is what sysinfo
+        // reports there) is Linux.
+        //
+        let method = if os_lower.contains("windows") {
             common::InterceptMethod::Vpn
-        } else {
+        } else if os_lower.contains("darwin") {
             self.intercept
                 .set_error(format!("Interception not supported on {}", node.os_details));
             return;
+        } else {
+            common::InterceptMethod::Tproxy
         };
 
         let method_label = match method {

@@ -481,7 +481,34 @@ impl App {
 
         match serde_json::to_string(&self.settings.model_definitions) {
             Ok(json) => {
-                self.save_setting("llm_model_definitions", &json).await;
+                if self.save_setting("llm_model_definitions", &json).await {
+                    let mut model = self.settings.orchestrator_model.clone();
+                    if model.is_empty() && self.settings.model_definitions.len() == 1 {
+                        let first_model = self.settings.model_definitions[0].name.clone();
+                        if self
+                            .save_setting("llm_feature_orchestrator", &first_model)
+                            .await
+                        {
+                            self.settings.orchestrator_model = first_model.clone();
+                            model = first_model;
+                        }
+                    }
+                    let model_is_available = self
+                        .settings
+                        .model_definitions
+                        .iter()
+                        .any(|definition| definition.name == model);
+                    let needs_session = self
+                        .orchestrator
+                        .active_session()
+                        .map(|session| session.session_id.is_empty())
+                        .unwrap_or(true);
+
+                    if model_is_available && needs_session {
+                        self.orchestrator.configured_model = model.clone();
+                        self.select_model(&model).await;
+                    }
+                }
             }
             Err(e) => {
                 self.settings.status_message = Some(format!("Failed to serialize models: {}", e));

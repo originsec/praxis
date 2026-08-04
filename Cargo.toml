@@ -4,7 +4,7 @@ members = ["cli", "common", "node", "semantic_parser", "service"]
 exclude = ["web"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/originsec/praxis"

@@ -84,7 +84,8 @@ pub async fn summarize_traffic(
     //
     // Build traffic content string.
     //
-    let traffic_content = format_traffic_for_llm(entry);
+    let body_limit_bytes = config.get_traffic_parser_body_limit_bytes();
+    let traffic_content = format_traffic_for_llm(entry, body_limit_bytes);
 
     //
     // Build the user prompt.
@@ -131,7 +132,7 @@ pub async fn summarize_traffic(
 }
 
 /// Format traffic entry for LLM consumption
-fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
+fn format_traffic_for_llm(entry: &InterceptedTrafficEntry, body_limit_bytes: usize) -> String {
     let mut parts = Vec::new();
 
     //
@@ -160,23 +161,10 @@ fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
     // Request body.
     //
     if let Some(ref body) = entry.request_body {
-        if let Ok(body_str) = std::str::from_utf8(body) {
-            let truncated = if body_str.len() > 4000 {
-                format!(
-                    "{}... [truncated, {} bytes total]",
-                    &body_str[..4000],
-                    body_str.len()
-                )
-            } else {
-                body_str.to_string()
-            };
-            parts.push(format!("\nRequest Body:\n{}", truncated));
-        } else {
-            parts.push(format!(
-                "\nRequest Body: [Binary data, {} bytes]",
-                body.len()
-            ));
-        }
+        parts.push(format!(
+            "\nRequest Body:\n{}",
+            format_body_for_llm(body, body_limit_bytes)
+        ));
     }
 
     //
@@ -200,24 +188,101 @@ fn format_traffic_for_llm(entry: &InterceptedTrafficEntry) -> String {
     // Response body.
     //
     if let Some(ref body) = entry.response_body {
-        if let Ok(body_str) = std::str::from_utf8(body) {
-            let truncated = if body_str.len() > 4000 {
-                format!(
-                    "{}... [truncated, {} bytes total]",
-                    &body_str[..4000],
-                    body_str.len()
-                )
-            } else {
-                body_str.to_string()
-            };
-            parts.push(format!("\nResponse Body:\n{}", truncated));
-        } else {
-            parts.push(format!(
-                "\nResponse Body: [Binary data, {} bytes]",
-                body.len()
-            ));
-        }
+        parts.push(format!(
+            "\nResponse Body:\n{}",
+            format_body_for_llm(body, body_limit_bytes)
+        ));
     }
 
     parts.join("\n")
+}
+
+fn format_body_for_llm(body: &[u8], limit_bytes: usize) -> String {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return format!("[Binary data, {} bytes]", body.len());
+    };
+    if text.len() <= limit_bytes {
+        return text.to_string();
+    }
+
+    //
+    // Keep both ends because LLM conversation requests commonly put the
+    // newest messages and tool results at the end of the JSON document.
+    //
+    let head_limit = limit_bytes / 2;
+    let head_end = common::truncate_str(text, head_limit).len();
+    let mut tail_start = text.len() - (limit_bytes - head_end);
+    while !text.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+
+    format!(
+        "{}\n... [middle truncated: showing first {} and last {} of {} bytes] ...\n{}",
+        &text[..head_end],
+        head_end,
+        text.len() - tail_start,
+        text.len(),
+        &text[tail_start..]
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::service_config::TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT;
+
+    const DEFAULT_LIMIT_BYTES: usize = TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT * 1024;
+
+    #[test]
+    fn body_under_configured_limit_is_not_truncated() {
+        let body = format!(
+            "{}{}",
+            "a".repeat(50_000),
+            r#"{"type":"tool_use","name":"Bash"}"#
+        );
+
+        let formatted = format_body_for_llm(body.as_bytes(), DEFAULT_LIMIT_BYTES);
+
+        assert_eq!(formatted, body);
+        assert!(formatted.contains(r#""type":"tool_use""#));
+        assert!(!formatted.contains("truncated"));
+    }
+
+    #[test]
+    fn oversized_body_preserves_both_ends() {
+        let body = format!("START{}END_TOOL_RESULT", "x".repeat(DEFAULT_LIMIT_BYTES));
+
+        let formatted = format_body_for_llm(body.as_bytes(), DEFAULT_LIMIT_BYTES);
+
+        assert!(formatted.starts_with("START"));
+        assert!(formatted.ends_with("END_TOOL_RESULT"));
+        assert!(formatted.contains("middle truncated"));
+        assert!(formatted.contains(&format!("of {} bytes", body.len())));
+    }
+
+    #[test]
+    fn truncation_respects_utf8_boundaries() {
+        let body = format!("{}TAIL", "é".repeat((DEFAULT_LIMIT_BYTES / 2) + 10));
+
+        let formatted = format_body_for_llm(body.as_bytes(), DEFAULT_LIMIT_BYTES);
+
+        assert!(formatted.ends_with("TAIL"));
+        assert!(formatted.contains("middle truncated"));
+    }
+
+    #[test]
+    fn binary_body_reports_its_size() {
+        assert_eq!(
+            format_body_for_llm(&[0xff, 0xfe, 0xfd], DEFAULT_LIMIT_BYTES),
+            "[Binary data, 3 bytes]"
+        );
+    }
+
+    #[test]
+    fn configured_limit_controls_truncation() {
+        let body = b"0123456789";
+
+        assert_eq!(format_body_for_llm(body, 10), "0123456789");
+        assert!(format_body_for_llm(body, 9).contains("middle truncated"));
+    }
 }

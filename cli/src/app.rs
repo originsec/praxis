@@ -31,6 +31,7 @@ use common::{
     ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, REMOTE_NODE_KINDS, SystemState,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -69,6 +70,11 @@ pub struct App {
     pub add_remote_node_form: Option<AddRemoteNodeForm>,
     pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
+    pub text_selection: Option<crate::text_selection::TextSelection>,
+    pub text_selection_anchor: Option<ratatui::layout::Position>,
+    pub text_selection_bounds: Option<Rect>,
+    pub text_selection_regions: RefCell<Vec<Rect>>,
+    pub rendered_buffer: RefCell<Buffer>,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
     pub needs_full_redraw: bool,
     pub terminal_paused: Arc<std::sync::atomic::AtomicBool>,
@@ -446,6 +452,11 @@ impl App {
             add_remote_node_form: None,
             confirm: None,
             terminal_width: 0,
+            text_selection: None,
+            text_selection_anchor: None,
+            text_selection_bounds: None,
+            text_selection_regions: RefCell::new(Vec::new()),
+            rendered_buffer: RefCell::new(Buffer::default()),
             event_tx: Some(event_tx),
             needs_full_redraw: false,
             terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1147,6 +1158,20 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        if self.text_selection.is_some() {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                let text = self
+                    .text_selection
+                    .map(|selection| selection.selected_text(&self.rendered_buffer.borrow()))
+                    .unwrap_or_default();
+                if !text.is_empty() {
+                    crate::clipboard::copy(&text);
+                }
+                return;
+            }
+            self.text_selection = None;
+        }
+
         //
         // Documentation-helper overlay: Ctrl+H summons it from any window and
         // while it is open it captures all keys. Handled before every other
@@ -2146,6 +2171,10 @@ impl App {
     }
 
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if self.handle_text_selection_mouse(mouse) {
+            return;
+        }
+
         //
         // The Help overlay is modal. Do not let clicks or scrolling leak
         // through to the screen underneath; the wheel scrolls its transcript.
@@ -2389,6 +2418,91 @@ impl App {
 
         self.handle_hit_layer_mouse(mouse, content_area, terminal_area)
             .await;
+    }
+
+    fn handle_text_selection_mouse(&mut self, mouse: MouseEvent) -> bool {
+        use crossterm::event::MouseButton;
+        use ratatui::layout::Position;
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.text_selection = None;
+                let anchor = Position::new(mouse.column, mouse.row);
+                self.text_selection_anchor = Some(anchor);
+                self.text_selection_bounds = Some(self.text_selection_bounds_at(anchor));
+                false
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(anchor) = self.text_selection_anchor else {
+                    return false;
+                };
+                if self.has_active_ui_drag() {
+                    return false;
+                }
+                let head = Position::new(mouse.column, mouse.row);
+                if head != anchor {
+                    let bounds = self
+                        .text_selection_bounds
+                        .unwrap_or(self.rendered_buffer.borrow().area);
+                    self.text_selection = Some(crate::text_selection::TextSelection::new(
+                        anchor, head, bounds,
+                    ));
+                }
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.text_selection_anchor = None;
+                self.text_selection_bounds = None;
+                self.text_selection.is_some()
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                self.text_selection = None;
+                self.text_selection_anchor = None;
+                self.text_selection_bounds = None;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn text_selection_bounds_at(&self, position: ratatui::layout::Position) -> Rect {
+        self.text_selection_regions
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|area| area.contains(position))
+            .min_by_key(|area| area.area())
+            .unwrap_or(self.rendered_buffer.borrow().area)
+    }
+
+    pub fn text_selection_regions_clear(&self) {
+        self.text_selection_regions.borrow_mut().clear();
+    }
+
+    pub fn text_selection_region_register(&self, area: Rect) {
+        if !area.is_empty() {
+            self.text_selection_regions.borrow_mut().push(area);
+        }
+    }
+
+    fn has_active_ui_drag(&self) -> bool {
+        self.intercept.log_dragging
+            || self.intercept.match_dragging
+            || self.intercept.rule_dragging
+            || self.nodes.dragging
+            || self.operations.dragging
+            || self.log_query.editor_dragging
+            || self.log_query.results_dragging
+            || self.orchestrator.plan_dragging
+            || self
+                .nodes
+                .recon
+                .as_ref()
+                .is_some_and(|recon| recon.recon_dragging)
+            || self
+                .chain_form
+                .as_ref()
+                .is_some_and(|form| !matches!(form.drag, Drag::None))
     }
 
     fn handle_state_update(&mut self, state: SystemState) {

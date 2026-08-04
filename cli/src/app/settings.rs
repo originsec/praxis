@@ -32,6 +32,7 @@ pub struct SettingsState {
     pub semantic_ops_model: String,
     pub semantic_parser_model: String,
     pub traffic_parser_model: String,
+    pub traffic_parser_body_limit_kb: String,
     pub doc_helper_model: String,
     pub praxis_agent_model_ref: String,
     pub praxis_agent_thinking_effort: String,
@@ -62,7 +63,7 @@ pub struct SettingsState {
     //
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
-    pub dropdown_field: usize, // which model assignment field (1-6) the dropdown is for
+    pub dropdown_field: usize, // which model assignment field (1-7) the dropdown is for
 
     //
     // Agent scripts.
@@ -125,6 +126,7 @@ impl Default for SettingsState {
             semantic_ops_model: String::new(),
             semantic_parser_model: String::new(),
             traffic_parser_model: String::new(),
+            traffic_parser_body_limit_kb: "60".to_string(),
             doc_helper_model: String::new(),
             praxis_agent_model_ref: String::new(),
             praxis_agent_thinking_effort: String::new(),
@@ -165,6 +167,7 @@ impl App {
             "llm_feature_semantic_ops".to_string(),
             "llm_feature_semantic_parser".to_string(),
             "llm_feature_traffic_parser".to_string(),
+            "llm_traffic_parser_body_limit_kb".to_string(),
             "llm_feature_doc_helper".to_string(),
             "mcp_server_enabled".to_string(),
             "mcp_server_port".to_string(),
@@ -211,6 +214,10 @@ impl App {
                     .get("llm_feature_traffic_parser")
                     .cloned()
                     .unwrap_or_default();
+                s.traffic_parser_body_limit_kb = config
+                    .get("llm_traffic_parser_body_limit_kb")
+                    .cloned()
+                    .unwrap_or("60".to_string());
                 s.doc_helper_model = config
                     .get("llm_feature_doc_helper")
                     .cloned()
@@ -291,15 +298,18 @@ impl App {
         }
     }
 
-    pub(crate) async fn save_setting(&mut self, key: &str, value: &str) {
+    pub(crate) async fn save_setting(&mut self, key: &str, value: &str) -> bool {
         let mut values = HashMap::new();
         values.insert(key.to_string(), value.to_string());
-        if let Err(e) = self.client.set_config(values).await {
+        let saved = if let Err(e) = self.client.set_config(values).await {
             self.settings.status_message = Some(format!("Save failed: {}", e));
+            false
         } else {
             self.settings.status_message = Some("Saved".to_string());
-        }
+            true
+        };
         self.settings.status_message_at = Some(std::time::Instant::now());
+        saved
     }
 
     pub(crate) async fn save_praxis_agent_settings(&mut self) {
@@ -417,7 +427,7 @@ impl App {
                 // and max tokens.
                 // Layout: [models...] + add_model + feature assignments.
                 //
-                self.settings.model_definitions.len() + 7
+                self.settings.model_definitions.len() + 8
             }
             SettingsTab::Agents => {
                 // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
@@ -440,8 +450,8 @@ impl App {
         match self.settings.tab {
             SettingsTab::Llm => {
                 let mc = self.settings.model_definitions.len();
-                // mc+2 = Orchestrator Max Tokens.
-                sel == mc + 2
+                // mc+2 = Orchestrator Max Tokens, mc+6 = Traffic Parser Body Limit.
+                sel == mc + 2 || sel == mc + 6
             }
             SettingsTab::Agents => {
                 // 1 = Praxis thinking effort.
@@ -472,7 +482,10 @@ impl App {
                 }
                 1 => {
                     self.settings.orchestrator_model = name.clone();
-                    self.save_setting("llm_feature_orchestrator", &name).await;
+                    if self.save_setting("llm_feature_orchestrator", &name).await {
+                        self.orchestrator.configured_model = name.clone();
+                        self.select_model(&name).await;
+                    }
                 }
                 3 => {
                     self.settings.semantic_ops_model = name.clone();
@@ -487,7 +500,7 @@ impl App {
                     self.settings.traffic_parser_model = name.clone();
                     self.save_setting("llm_feature_traffic_parser", &name).await;
                 }
-                6 => {
+                7 => {
                     self.settings.doc_helper_model = name.clone();
                     self.save_setting("llm_feature_doc_helper", &name).await;
                 }
@@ -534,6 +547,8 @@ impl App {
                 let mc = self.settings.model_definitions.len();
                 if sel == mc + 2 {
                     self.settings.orchestrator_max_tokens.clone()
+                } else if sel == mc + 6 {
+                    self.settings.traffic_parser_body_limit_kb.clone()
                 } else {
                     String::new()
                 }
@@ -770,7 +785,7 @@ impl App {
                         0 => {
                             self.open_model_form(None);
                         }
-                        1 | 3 | 4 | 5 | 6 => {
+                        1 | 3 | 4 | 5 | 7 => {
                             //
                             // Model assignment fields — open dropdown.
                             //
@@ -779,7 +794,7 @@ impl App {
                                 3 => &self.settings.semantic_ops_model,
                                 4 => &self.settings.semantic_parser_model,
                                 5 => &self.settings.traffic_parser_model,
-                                6 => &self.settings.doc_helper_model,
+                                7 => &self.settings.doc_helper_model,
                                 _ => unreachable!(),
                             };
                             let pos = self
@@ -797,6 +812,12 @@ impl App {
                             self.settings.editing = true;
                             self.settings.edit_buffer =
                                 self.settings.orchestrator_max_tokens.clone();
+                        }
+                        6 => {
+                            // Traffic parser body limit — free text edit.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.traffic_parser_body_limit_kb.clone();
                         }
                         _ => {}
                     }
@@ -964,6 +985,11 @@ impl App {
                         2 => {
                             self.settings.orchestrator_max_tokens = val.clone();
                             self.save_setting("llm_orchestrator_max_tokens", &val).await;
+                        }
+                        6 => {
+                            self.settings.traffic_parser_body_limit_kb = val.clone();
+                            self.save_setting("llm_traffic_parser_body_limit_kb", &val)
+                                .await;
                         }
                         _ => {}
                     }

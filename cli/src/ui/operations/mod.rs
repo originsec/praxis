@@ -271,6 +271,8 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
 
 fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
     let panes = crate::ui::list_detail::layout(main_area, state.split_percent);
+    app.text_selection_region_register(panes.list);
+    app.text_selection_region_register(panes.detail);
     let list_area = panes.list;
     let detail_area = panes.detail;
     let detail_inner = Rect::new(

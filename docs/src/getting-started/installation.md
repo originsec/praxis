@@ -39,7 +39,7 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --service native 
 curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --cli --src
 ```
 
-`--src` has no effect on `--service docker`, which always builds from source inside the container. The flag is also auto-enabled on non-x86_64 architectures, since prebuilt binaries are only published for `x86_64`.
+`--src` has no effect on `--service docker`, which always builds from source inside the container. Prebuilt binaries exist for Linux/x86_64, macOS/arm64 (Apple Silicon), and Windows/x86_64. The Linux/macOS installer falls back to `--src` automatically on unsupported architectures, including Intel Macs; the Windows installer downloads the Windows binary unless `-Src` is passed.
 
 #### Cross-compiling the Windows node binary (optional)
 
@@ -94,7 +94,7 @@ If Docker is not installed, install [Docker Desktop](https://www.docker.com/prod
 
 ### Native install — RabbitMQ prerequisite
 
-Native installs require RabbitMQ to be installed and running before the installer runs. The installer detects this and aborts with instructions if it can't find RabbitMQ.
+Native installs require RabbitMQ to be installed and running before the installer runs. The installer checks for RabbitMQ and warns (without aborting) if it's missing — you'll need to install/start it and create the `praxis` user yourself before the service can connect.
 
 ```bash
 # Debian/Ubuntu
@@ -119,6 +119,7 @@ The installer creates the `praxis` RabbitMQ user and grants it permissions autom
 - `/usr/local/bin/praxis` — symlink to `praxis_cli` (preferred command name)
 - `/usr/local/bin/praxisctl` — service control utility
 - `/usr/local/share/praxis/nodes/praxis_node_linux` — node agent
+- `/usr/local/share/praxis/nodes/praxis_node_tiny_c_linux` — optional minimal C node, staged when available (also staged for the Windows target via `--with-win-node`)
 - `/etc/systemd/system/praxis-service.service` — system-wide systemd unit
 - `/etc/praxis/env` — service config (`PRAXIS_RABBITMQ_URL`, etc.)
 - `/var/lib/praxis/` — data directory (SQLite database lives here by default)
@@ -184,6 +185,8 @@ praxisctl config edit       # opens /etc/praxis/env in $EDITOR
 
 `praxisctl` re-execs itself under `sudo` when run by an unprivileged user.
 
+Beyond the named subcommands above, `praxisctl` also exposes a generic escape hatch: `praxisctl set <key> <value>` / `get <key>` read and write arbitrary keys in the env file, `praxisctl config path` prints the env file path, and `praxisctl version` prints the praxisctl/service version.
+
 Inside the docker install, the same commands work via `docker compose`:
 
 ```bash
@@ -194,7 +197,7 @@ docker compose exec praxis praxisctl set-rabbitmqurl amqp://praxis:praxis@rabbit
 
 ## Configuring the CLI — `praxis set-rabbitmqurl`
 
-The `praxis` CLI reads its RabbitMQ URL from `~/.config/praxis/config` (key `PRAXIS_RABBITMQ_URL`) and falls back to `amqp://praxis:praxis@localhost:5672` if no config is set.
+The `praxis` CLI reads its RabbitMQ URL (key `PRAXIS_RABBITMQ_URL`) from a config file whose location depends on the OS — `~/.config/praxis/config` on Linux, `~/Library/Application Support/praxis/config` on macOS, or `%APPDATA%\praxis\config` on Windows — and falls back to `amqp://praxis:praxis@localhost:5672` if no config is set.
 
 ```bash
 praxis set-rabbitmqurl amqp://praxis:praxis@my-server:5672

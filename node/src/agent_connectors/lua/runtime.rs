@@ -520,6 +520,29 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
 
     praxis
         .set(
+            "read_file_prefix",
+            lua.create_function(|_, (path, max_bytes): (String, usize)| {
+                use std::io::Read;
+
+                let max_bytes = max_bytes.min(1024 * 1024);
+                let mut file = match std::fs::File::open(path) {
+                    Ok(file) => file,
+                    Err(_) => return Ok(None),
+                };
+                let mut bytes = vec![0; max_bytes];
+                let count = match file.read(&mut bytes) {
+                    Ok(count) => count,
+                    Err(_) => return Ok(None),
+                };
+                bytes.truncate(count);
+                Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
             "write_file",
             lua.create_function(|_, (path, content): (String, String)| {
                 std::fs::write(&path, &content).map_err(|e| {

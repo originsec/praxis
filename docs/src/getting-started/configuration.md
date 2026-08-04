@@ -4,16 +4,21 @@ Praxis uses LLMs for several features-semantic operations, tool discovery during
 
 ## LLM Providers
 
-Open **Settings** (`Ctrl+S`) → **LLM Providers** in the praxis TUI.
+Open **Settings** (`Ctrl+S`) → **LLM** in the praxis TUI.
 
 ### Adding a Model
 
-1. Click **Add Model**
-2. Select a **Provider**
-3. Enter your **API Key** (optional for local providers — Ollama and Custom)
-4. For **Custom**, and optionally for **Ollama**, set a **Base URL**
-5. Click the refresh button to pull available models from the provider (not supported by all providers), or enter the model name manually
-6. Click **Save**
+In **Settings** (`Ctrl+S`), stay on the **LLM** tab, use `↑`/`↓` to select
+**Add Model**, and press `Enter`. In the form:
+
+1. Choose a **Provider**
+2. Enter your **API Key** (optional for local providers — Ollama and Custom)
+3. For **Custom**, and optionally for **Ollama**, set a **Base URL**
+4. Refresh the provider model list when supported, or enter a model name manually
+5. Save with `Ctrl+S`
+
+Use `Tab` / `Shift+Tab` to move between Settings tabs. The TUI status bar
+lists the available form controls.
 
 ### Supported Providers
 
@@ -26,7 +31,7 @@ Two providers are designed for local or self-hosted inference:
 **Ollama** — defaults to `http://localhost:11434/v1`, so if you are
 running a stock Ollama install nothing else is needed. API key is
 optional. Model discovery uses Ollama's native `/api/tags` endpoint, so
-the refresh button works even though Ollama is strictly OpenAI-API
+the model-refresh action works even though Ollama is strictly OpenAI-API
 compatible for inference. Override the base URL on the model definition
 if Ollama is listening elsewhere.
 
@@ -40,15 +45,15 @@ base URL.
 
 Once you've added models, assign them to features under **Feature Selection**:
 
-**Orchestrator** - Powers the free-form Orchestrator chat. Needs a capable model that follows tool-calling instructions reliably.
+**Orchestrator** - Powers an interactive AI agent that can autonomously manage operations. It will drive target agents through multi-turn conversations to achieve a given task, so it needs a capable model that follows tool-calling instructions reliably. A companion **Max Tokens** setting caps how long its responses can run.
 
-**Documentation Helper** - Powers the [Help Assistant](../usage/help-assistant.md) (`Ctrl+H`). Falls back to the Orchestrator model when unset.
-
-**Semantic Operations** - Used when executing operations through agents. This is the "brain" that orchestrates what the agent should do. Pick something capable.
+**Semantic Operations** - Used when executing operations through agents. Pick something capable.
 
 **Semantic Parser** - Used during semantic recon to extract tool definitions from config files. Speed matters here since it runs multiple times; a fast model like Haiku or GPT-4o-mini works well.
 
 **Traffic Parser** - Summarizes intercepted traffic. Again, speed is valuable; you don't need the most powerful model.
+
+**Documentation Helper** - Powers the [Help Assistant](../usage/help-assistant.md) (`Ctrl+H`), which answers questions about using Praxis from the bundled documentation. Falls back to the Orchestrator model when unset.
 
 ### Speed vs. Capability
 
@@ -69,12 +74,14 @@ Most configuration is done through the praxis TUI, but some things are set via e
 |----------|---------|-------------|
 | `PRAXIS_DATABASE_URL` | SQLite in home dir | Database connection string |
 | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ URL |
+| `RUST_LOG` | `info` | Log level filter (tracing `EnvFilter` syntax) |
 
 ### Node
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ URL |
+| `RUST_LOG` | `info` | Log level filter (tracing `EnvFilter` syntax) |
 
 ### Database
 

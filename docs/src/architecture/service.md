@@ -2,7 +2,7 @@
 
 The service is the central backend that coordinates nodes, manages data, and
 orchestrates operations. It is the only component that talks to nodes —
-clients (CLI, web, external ACP tools) always reach nodes through the
+clients (the TUI and external ACP tools) always reach nodes through the
 service's ACP server and proxy layer.
 
 ## Overview
@@ -33,9 +33,8 @@ service's ACP server and proxy layer.
 │                         RabbitMQ                             │
 └─────────────────────────────┬────────────────────────────────┘
                               │
-              ┌───────────────┼───────────────┐
-              │               │               │
-           Nodes           Clients          Web
+                              │
+                        Nodes and Clients
 ```
 
 ## ACP server and node proxy
@@ -48,7 +47,7 @@ node, the `AcpNodeProxy`
 target node's ACP server. Responses and `session/update` notifications
 flow back the same way.
 
-The service's internal orchestrator subsystems (e.g. `tools`, future
+The service's internal orchestrator subsystems (e.g. `tools`,
 `semantic_ops`, `claude_bridge`) also drive nodes through this same proxy,
 using `AcpNodeProxy::request` / `request_collecting_text`. Internal
 callers get a `svc_*` pseudo-client-id so their responses are completed
@@ -61,13 +60,19 @@ The service maintains state for all connected nodes:
 ```rust
 struct NodeState {
     node_id: String,
+    node_type: String,
+    capabilities: Vec<NodeCapability>,
     machine_name: String,
     os_details: String,
-    agents: Vec<AgentInfo>,
+    discovered_agents: Vec<DiscoveredAgent>,
     selected_agent: Option<SelectedAgent>,
-    intercept_status: InterceptStatus,
-    terminal_active: bool,
-    last_seen: DateTime<Utc>,
+    intercept_active: bool,
+    intercept_supported: bool,
+    intercept_status: Option<InterceptStatus>,
+    last_update: DateTime<Utc>,
+    status: NodeStatus,
+    active_terminal_id: Option<String>,
+    privileged: bool,
 }
 ```
 
@@ -221,7 +226,7 @@ The service uses SQLAlchemy-style database abstraction supporting SQLite and Pos
 
 ```sql
 -- Configuration
-CREATE TABLE config (
+CREATE TABLE service_config (
     key TEXT PRIMARY KEY,
     value TEXT
 );
@@ -236,19 +241,21 @@ CREATE TABLE operation_definitions (
 );
 
 -- Operation executions
-CREATE TABLE semantic_operations (
-    id TEXT PRIMARY KEY,
+CREATE TABLE operations (
+    operation_id TEXT PRIMARY KEY,
     node_id TEXT,
     agent_short_name TEXT,
-    operation_name TEXT,
+    operation_spec TEXT,
     status TEXT,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
     output TEXT,
     created_at TIMESTAMP,
-    completed_at TIMESTAMP
+    -- ...
 );
 
--- Traffic log
-CREATE TABLE traffic_log (
+-- Intercepted traffic
+CREATE TABLE intercepted_traffic (
     id INTEGER PRIMARY KEY,
     timestamp TIMESTAMP,
     node_id TEXT,
@@ -282,7 +289,7 @@ CREATE TABLE chain_triggers (
     updated_at TEXT NOT NULL
 );
 
--- Chain definitions, executions, etc.
+-- Operation chains, chain executions, etc.
 ```
 
 ### Connection
@@ -305,6 +312,12 @@ Handles communication with LLM providers:
 - Mistral
 - xAI
 - Ollama (local)
+- NVIDIA
+- MiniMax
+- Moonshot AI
+- Fireworks AI
+- OpenRouter
+- Custom (OpenAI-compatible)
 
 ### Configuration
 
@@ -330,13 +343,15 @@ The service processes messages from multiple queues:
 - `Registration` - node startup
 - `InformationUpdate` - periodic state update
 - `CommandResponse` - response to command
+- `TerminalOutput` - terminal session output
 - `InterceptedTraffic` - captured traffic
-- `ReconResultUpdate` - recon data
+- `InterceptStatusUpdate` - intercept status change
+- `Acp` - ACP JSON-RPC frame from the node's ACP server
 - `SemanticParserRequest` - parser request from node
 
 ### Client Messages (ClientSignal)
 
-- `Registration` - client (web) connection
+- `Registration` - client connection
 - `Command` - forward to node
 - `SemanticOpRun` - execute operation
 - `ChainRun` - execute chain
@@ -379,10 +394,10 @@ Bridge nodes only support the Session capability. They do not support intercepti
 
 ## Startup Sequence
 
-1. Load configuration from database
-2. Seed default Lua agent scripts (if table is empty)
-3. Connect to RabbitMQ
-4. Declare queues and broadcast exchanges
+1. Connect to RabbitMQ
+2. Declare queues and broadcast exchanges
+3. Load configuration from database
+4. Seed default Lua agent scripts (if table is empty)
 5. Start message consumers
 6. Initialize semantic ops manager
 7. Initialize chain executor

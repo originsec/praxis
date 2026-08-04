@@ -99,6 +99,10 @@ impl App {
                 }
                 true
             }
+            MouseAction::OpenHelp => {
+                self.open_help();
+                true
+            }
             MouseAction::Quit => {
                 self.should_quit = true;
                 true

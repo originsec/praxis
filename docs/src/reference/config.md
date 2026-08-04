@@ -27,7 +27,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PRAXIS_NODES_DIR` | (none) | Directory containing node binaries for download |
+| `PRAXIS_NODES_DIR` | (none) | Directory containing node binaries for download. No Rust code in this repo reads it — it only appears in the Dockerfile and `pkg/` packaging examples, so it may be vestigial or packaging-only rather than something Praxis itself consumes. |
 
 ### Build
 
@@ -58,35 +58,52 @@ Service configuration is stored in the database and managed via the praxis TUI.
 When disabled or missing, logging is off by default. The service broadcasts the
 current setting to nodes and clients at startup and on registration.
 
+### Log Query
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `log_query_row_limit` | `10000000` | Maximum rows returned from database tables in KQL log-query searches |
+
 ### LLM Provider Settings
 
-Access via **Settings** (`Ctrl+S`) > **LLM Providers** in the praxis TUI.
+Access via **Settings** (`Ctrl+S`) > **LLM** in the praxis TUI.
+
+LLM configuration has two levels: a single list of named model
+definitions, and per-feature keys that each point at one definition by
+name.
 
 | Key | Format | Description |
 |-----|--------|-------------|
-| `llm.semantic_ops.provider` | `anthropic` | Provider for semantic operations |
-| `llm.semantic_ops.model` | `claude-sonnet-4-20250514` | Model for semantic operations |
-| `llm.semantic_ops.api_key` | (encrypted) | API key for provider |
-| `llm.semantic_parser.provider` | `anthropic` | Provider for semantic parsing |
-| `llm.semantic_parser.model` | `claude-haiku-4-5-20241022` | Model for parsing |
-| `llm.semantic_parser.api_key` | (encrypted) | API key for provider |
-| `llm.traffic_parser.provider` | `anthropic` | Provider for traffic analysis |
-| `llm.traffic_parser.model` | `claude-haiku-4-5-20241022` | Model for traffic analysis |
-| `llm.traffic_parser.api_key` | (encrypted) | API key for provider |
-| `llm.orchestrator.provider` | `anthropic` | Provider for Orchestrator |
-| `llm.orchestrator.model` | `claude-sonnet-4-20250514` | Model for Orchestrator |
-| `llm.orchestrator.api_key` | (encrypted) | API key for provider |
+| `llm_model_definitions` | JSON array | Named model definitions. Each entry has `name`, `provider`, `model`, `apiKey`, and an optional `baseUrl` override. |
+| `llm_feature_semantic_parser` | string | Name of the model definition used for semantic parsing |
+| `llm_feature_traffic_parser` | string | Name of the model definition used for traffic analysis |
+| `llm_traffic_parser_body_limit_kb` | integer | Maximum text body sent to the Traffic Parser, in KiB (default: `60`; larger bodies retain their beginning and end) |
+| `llm_feature_semantic_ops` | string | Name of the model definition used for semantic operations |
+| `llm_feature_orchestrator` | string | Name of the model definition used for the Orchestrator |
+| `llm_feature_doc_helper` | string | Name of the model definition used for the documentation helper agent; falls back to `llm_feature_orchestrator` when unset |
 
-Feature assignment stores the **model definition name** (not provider/model
-pairs) under:
+Example `llm_model_definitions` value:
 
-| Key | Description |
-|-----|-------------|
-| `llm_feature_orchestrator` | Model definition for the Orchestrator |
-| `llm_feature_doc_helper` | Model definition for the Help Assistant; falls back to `llm_feature_orchestrator` when unset |
-| `llm_feature_semantic_ops` | Model definition for semantic operations |
-| `llm_feature_semantic_parser` | Model definition for semantic recon parsing |
-| `llm_feature_traffic_parser` | Model definition for intercept traffic summarisation |
+```json
+[
+  {
+    "name": "sonnet",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "apiKey": "sk-ant-..."
+  },
+  {
+    "name": "haiku",
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20241022",
+    "apiKey": "sk-ant-..."
+  }
+]
+```
+
+Each `llm_feature_*` key stores the `name` of one entry above (e.g.
+`llm_feature_orchestrator` = `"sonnet"`). A feature with no assigned model
+definition, or one whose `name` no longer resolves, is disabled.
 
 ### Prompt Timeout
 
@@ -111,21 +128,30 @@ The Claude Bridge allows Claude Code to connect directly to the service as a vir
 
 ### MCP Server Settings
 
-Access via **Settings** (`Ctrl+S`) > **MCP Server** in the praxis TUI.
+Access via **Settings** (`Ctrl+S`) > **Service** in the praxis TUI.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `mcp_server_enabled` | `false` | Enable the built-in MCP SSE server |
-| `mcp_server_port` | `8585` | Port for the MCP SSE server |
+| `mcp_server_enabled` | `true` | Enable the built-in MCP server |
+| `mcp_server_port` | `8585` | Port for the MCP server |
 
-The MCP server exposes all Praxis tools via the Model Context Protocol over SSE transport. It is used by the built-in Orchestrator and can also be used by external AI agents. See [MCP Server](../usage/mcp.md) for full details.
+The MCP server exposes all Praxis tools via the Model Context Protocol over streamable-HTTP transport. It is used by the built-in Orchestrator and can also be used by external AI agents. See [MCP Server](../usage/mcp.md) for full details.
+
+### Praxis Agent Settings
+
+Access via **Settings** (`Ctrl+S`) > **Agents** in the praxis TUI.
+
+| Key | Format | Description |
+|-----|--------|-------------|
+| `praxis_agent_settings` | JSON: `{"modelRef": "<name>", "thinkingEffort": "<string>", "enabled": bool}` | Config for the built-in Praxis agent connector. `modelRef` names an entry in `llm_model_definitions`; `thinkingEffort` is a free-form string (e.g. `low`/`medium`/`high`) appended to the session system prompt. |
+| `praxis_agent_system_prompt` | string | Optional system prompt override for the Praxis agent connector |
 
 ### Supported Providers
 
 | Provider ID | Name | API Key | Base URL |
 |-------------|------|---------|----------|
 | `anthropic` | Anthropic | required | fixed |
-| `openai` | OpenAI | required | fixed (overridable) |
+| `openai` | OpenAI | required | fixed |
 | `gemini` | Google (Gemini) | required | fixed |
 | `groq` | Groq | required | fixed |
 | `cerebras` | Cerebras | required | fixed |
@@ -156,7 +182,7 @@ provider::model
 Examples:
 - `anthropic::claude-sonnet-4-20250514`
 - `openai::gpt-4o`
-- `google::gemini-1.5-pro`
+- `gemini::gemini-1.5-pro`
 - `groq::llama-3.3-70b-versatile`
 
 ## Node Configuration
@@ -175,19 +201,53 @@ Each agent connector may have specific configuration. See individual connector d
 
 #### Claude Code
 
-- Config path: `~/.claude.json` or `~/.config/claude/config.json`
-- MCP servers: `~/.claude/mcp.json`
+- Config path: `~/.claude/settings.json` (global settings) and `~/.claude.json` (preferences)
+- MCP servers: `~/.claude/mcp.json`, `.mcp.json`, and enabled plugin MCP
+  definitions
+- Plugins: `~/.claude/plugins/installed_plugins.json` with cached components in
+  `~/.claude/plugins/cache/`
 - Sessions: `~/.claude/projects/`
 
 #### Gemini CLI
 
 - Config path: `~/.gemini/settings.json`
-- Sessions: `~/.gemini/sessions/`
+- Sessions: `~/.gemini/tmp/<sha256-hash>/chats/`
 
 #### M365 Copilot
 
 - Mode: DevTools (via CDP)
 - Platform: Windows only
+
+#### Claude Desktop
+
+- Config path: `%APPDATA%\Claude\claude_desktop_config.json` (MCP servers), plus `config.json` and `developer_settings.json` in the same directory
+- Sessions: none — Code/Chat are static UI modes driven via CDP, not session files
+- Platform: Windows only
+
+#### Codex CLI
+
+- Config path: `~/.codex/config.toml` (MCP servers), `~/.codex/auth.json` (credentials)
+- Sessions: `~/.codex/sessions/`, `~/.codex/archived_sessions/`
+
+#### Cursor Agent
+
+- Config path: `~/.cursor/cli-config.json` (global), `.cursor/cli.json` / `.cursor/mcp.json` (project)
+- Sessions: `~/.config/cursor/chats/<project_hash>/<chat_id>/` (SQLite `store.db`)
+
+#### Droid CLI
+
+- Config path: `~/.factory/settings.json`, `~/.factory/mcp.json`
+- Sessions: `~/.factory/sessions/`
+
+#### Pi Coding Agent
+
+- Config path: `~/.pi/agent/settings.json` (no MCP support — extensions are the intended extension mechanism)
+- Sessions: `~/.pi/agent/sessions/<encoded-cwd>/`
+
+#### Antigravity CLI
+
+- Config path: `~/.gemini/antigravity-cli/settings.json`
+- Sessions: `~/.gemini/antigravity-cli/brain/`
 
 ## Operation Definitions
 
@@ -216,13 +276,15 @@ Operations are defined in JSON and stored in the service database.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Short name (used with category) |
+| `item_type` | string | No | Import validation marker; if present must equal `"operation"` |
+| `name` | string | Yes | Display name |
+| `short_name` | string | Yes | Short name, combined with `category` to form `full_name` |
 | `description` | string | Yes | Human-readable description |
 | `category` | string | Yes | Category for organization |
-| `agent_info` | string | No | Context for the AI agent |
-| `timeout` | u64 | Yes | Timeout in seconds |
+| `agent_info` | string | Yes | Context for the AI agent |
+| `timeout` | u64 | No (default `60`) | Timeout in seconds |
 | `operation_prompt` | string | Yes | The prompt to execute |
-| `mode` | string | Yes | `one-shot` or `agent` |
+| `mode` | string | No (default `one-shot`) | `one-shot` or `agent` |
 | `agent_iterations` | u32 | No | Max iterations (agent mode) |
 | `yolo_mode` | bool | No | Auto-approve actions |
 | `model_ref` | string | No | Model override (`provider::model`) |
@@ -230,7 +292,7 @@ Operations are defined in JSON and stored in the service database.
 
 ### Full Name
 
-Operations are referenced by `category::name`, e.g., `recon::find_credentials`.
+Operations are referenced by `category::short_name`, e.g., `recon::find_credentials`.
 
 ## Chain Definitions
 
@@ -246,7 +308,9 @@ Chains are visual workflows stored in the service database.
 | `GenericPrompt` | `id`, `prompt`, `session_group`, `block_config` |
 | `Memory` | `id`, `mode` (`store` or `retrieve`), `key` |
 | `Loop` | `id`, `max_iterations` |
-| `Termination` | `id`, `label` |
+| `Tool` | `id`, `tool_name`, `tool_params`, `block_config` |
+| `Payload` | `id`, `payload_id`, `block_config` |
+| `Termination` | `id`, `block_config` |
 
 `block_config` fields (all optional):
 
@@ -277,12 +341,13 @@ Elements in the same session group share an agent session context.
   "from_element": "trigger-1",
   "to_element": "op-1",
   "from_port": 0,
-  "to_port": 0,
-  "condition": "Always"
+  "to_port": 0
 }
 ```
 
-`condition` values: `Always` (default), `OnSuccess`, `OnFailure`.
+`condition` is optional. Omit it entirely for a connection that always
+fires — when present, it must be `OnSuccess` or `OnFailure`. `"Always"` is
+not a valid value and fails to deserialize.
 
 ## Intercept Rules
 
@@ -295,7 +360,7 @@ Rules for matching and processing intercepted traffic.
   "name": "Capture API Keys",
   "regex_pattern": "Authorization:\\s*Bearer",
   "target_direction": "send",
-  "scope": { "type": "all" },
+  "scope": "all",
   "enabled": true,
   "summarization_prompt": "Extract and summarize the authentication tokens"
 }
@@ -311,11 +376,15 @@ Rules for matching and processing intercepted traffic.
 
 ### Scope
 
+`RuleScope` carries no internal tag attribute (unlike sibling enums in the
+same file that do), so it serializes with serde's default external
+tagging rather than a `{"type": "..."}` shape.
+
 | Type | Example | Description |
 |------|---------|-------------|
-| `all` | `{"type": "all"}` | All nodes/agents |
-| `node` | `{"type": "node", "node_id": "abc123"}` | Specific node |
-| `agent` | `{"type": "agent", "node_id": "abc123", "agent_short_name": "claudecode"}` | Specific agent |
+| `all` | `"all"` | All nodes/agents (bare string) |
+| `node` | `{"node": {"node_id": "abc123"}}` | Specific node |
+| `agent` | `{"agent": {"node_id": "abc123", "agent_short_name": "claudecode"}}` | Specific agent |
 
 ## Database Schema
 
@@ -324,16 +393,27 @@ Rules for matching and processing intercepted traffic.
 Default location: `~/.praxis/operations.db`
 
 Tables:
-- `config` - Key-value configuration
+- `service_config` - Key-value configuration
 - `operation_definitions` - Semantic operations
-- `semantic_operations` - Operation executions
-- `chain_definitions` - Chain workflows
+- `operations` - Operation executions
+- `operation_chains` - Chain workflows
 - `chain_executions` - Chain runs
-- `traffic_log` - Intercepted traffic
+- `chain_triggers` - Automated chain triggers (scheduled, intercept-match, new-node)
+- `chain_memories` - Key-value store for chain Memory elements
+- `chain_payloads` - Static content for Payload chain elements
+- `intercepted_traffic` - Intercepted traffic
 - `intercept_rules` - Traffic rules
 - `traffic_matches` - Rule matches
 - `recon_results` - Stored recon data
-- `application_logs` - Centralized logging table (controlled by `application_logs_enabled`)
+- `event_log` - Centralized logging table (controlled by `application_logs_enabled`)
+- `session_transactions` - Per-prompt transaction records (request/response text, timing, status)
+- `lua_agent_scripts` - Lua agent connector scripts (built-in and custom)
+- `toolkit_actions` - Toolkit tool execution log
+- `remote_nodes` - Persisted remote (virtual) node bridge configs
+- `agent_chat_sessions` - AgentChat sessions
+- `agent_chat_agents` - Agents participating in an AgentChat session
+- `agent_chat_channels` - AgentChat channels
+- `agent_chat_messages` - AgentChat channel and DM messages
 
 ### PostgreSQL
 
@@ -343,7 +423,7 @@ For production and multi-instance deployments, use PostgreSQL. See [Database Con
 
 | Service | Port | Protocol |
 |---------|------|----------|
-| MCP SSE Server | 8585 | HTTP |
+| MCP Server | 8585 | HTTP |
 | Claude Bridge CCRv1 | 8586 | WS |
 | Claude Bridge CCRv2 | 8587 | HTTP |
 | RabbitMQ | 5672 | AMQP |
@@ -353,7 +433,7 @@ For production and multi-instance deployments, use PostgreSQL. See [Database Con
 
 ## CLI Configuration
 
-The Praxis CLI (`praxis_cli`) stores state and can be configured via command-line options or environment variables.
+The Praxis CLI (`praxis`) stores state and can be configured via command-line options or its config file.
 
 ### CLI State File
 
@@ -365,19 +445,34 @@ The Praxis CLI (`praxis_cli`) stores state and can be configured via command-lin
 Contents:
 ```json
 {
-  "client_id": "uuid-generated-on-first-run"
+  "client_id": "uuid-generated-on-first-run",
+  "sessions": {
+    "<node_id>": "<session_id>"
+  }
 }
 ```
 
+`sessions` maps node IDs to the CLI's currently active ACP session ID on
+that node, populated by `session create` and consumed by `session prompt`
+/ `session close`.
+
 ### CLI Options
 
-| Option | Environment Variable | Default | Description |
-|--------|---------------------|---------|-------------|
-| `-r, --rabbitmq` | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ URL |
-| `-t, --timeout` | - | `600` | Connection/command timeout in seconds |
-| `-C, --command` | - | - | Run a single command and exit |
-| `--status` | - | - | Check connection status |
-| `--clear` | - | - | Clear local state |
+The RabbitMQ URL is never read from a `-r`/`--rabbitmq` flag or an OS
+environment variable — no such flag exists. It is read from
+`~/.config/praxis/config` (key `PRAXIS_RABBITMQ_URL`). Use
+`praxis set-rabbitmqurl <url>` to persist it and `praxis config` to see
+the resolved URL and its source.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-t, --timeout` | `600` | Connection/command timeout in seconds |
+| `-C, --command` | - | Run a single command and exit |
+| `--status` | - | Check connection status |
+| `--clear` | - | Clear local state (client ID) |
+| `--acp` | - | Run as ACP stdio proxy (forward JSON-RPC over stdin/stdout to the service) |
+| `--resume` | - | Resume a saved orchestrator session, selected from a list |
+| `--continue` | - | Continue the most recent local orchestrator session |
 
 ## File Locations
 
@@ -387,8 +482,8 @@ Contents:
 |------|------|
 | Database | `~/.praxis/operations.db` |
 | CLI State | `~/.praxis/cli.json` |
-| CLI Binary | `~/.praxis/bin/praxis_cli` |
-| Claude Config | `~/.claude.json` or `~/.config/claude/config.json` |
+| CLI Binary | `/usr/local/bin/praxis` (symlink to `praxis_cli`) |
+| Claude Config | `~/.claude/settings.json` and `~/.claude.json` |
 | Gemini Config | `~/.gemini/settings.json` |
 
 ### macOS
@@ -397,8 +492,8 @@ Contents:
 |------|------|
 | Database | `~/.praxis/operations.db` |
 | CLI State | `~/.praxis/cli.json` |
-| CLI Binary | `~/.praxis/bin/praxis_cli` |
-| Claude Config | `~/.claude.json` or `~/.config/claude/config.json` |
+| CLI Binary | `/usr/local/bin/praxis` (symlink to `praxis_cli`) |
+| Claude Config | `~/.claude/settings.json` and `~/.claude.json` |
 | Gemini Config | `~/.gemini/settings.json` |
 
 ### Windows
@@ -407,6 +502,6 @@ Contents:
 |------|------|
 | Database | `%USERPROFILE%\.praxis\operations.db` |
 | CLI State | `%USERPROFILE%\.praxis\cli.json` |
-| CLI Binary | `%USERPROFILE%\.praxis\bin\praxis_cli.exe` |
+| CLI Binary | `%USERPROFILE%\.praxis\bin\praxis.exe` (copy of `praxis_cli.exe`) |
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |

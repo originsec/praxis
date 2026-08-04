@@ -99,6 +99,8 @@ fn register_focus_hits(
     results_area: Rect,
     state: &crate::app::LogQueryState,
 ) {
+    app.text_selection_region_register(editor_area);
+    app.text_selection_region_register(results_area);
     app.hits_register(
         editor_area,
         MouseAction::LogQueryFocus(LogQueryFocus::Editor),
@@ -132,6 +134,8 @@ fn register_focus_hits(
     );
     if state.row_expanded && !state.rows.is_empty() {
         let panes = list_detail::layout(results_area, state.results_split_percent);
+        app.text_selection_region_register(panes.list);
+        app.text_selection_region_register(panes.detail);
         app.hits_register(
             split_border_rect(panes.list),
             MouseAction::LogQueryResultsSplitDragStart,

@@ -1,6 +1,7 @@
 mod acp;
 mod app;
 mod client;
+mod clipboard;
 mod commands;
 mod config;
 mod event;
@@ -10,6 +11,7 @@ mod markdown;
 mod output;
 mod session_store;
 mod state;
+mod text_selection;
 mod ui;
 
 use anyhow::Result;

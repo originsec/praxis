@@ -55,12 +55,14 @@ Updates are session-gated: if a session is open when an update arrives, it is
 queued and applied after the session closes. If multiple updates arrive while a
 session is open, only the latest is kept.
 
-### Fingerprint Caching
+### Fingerprinting
 
 Fingerprinting runs `--version` on each agent binary to verify availability and
-extract the version string. Results are cached for 60 seconds when the agent is
-available. Unavailable agents (not installed) are re-checked on every cycle so
-they are discovered as soon as they appear.
+extract the version string. There is no result cache - every agent is
+re-checked live on each fingerprint pass, so an agent uninstalled since the
+last check is never reported as available. The service triggers a
+fingerprint pass on each node roughly every 30 seconds via a
+`NodeInformationUpdateRequest` broadcast.
 
 ### Development Builds
 
@@ -167,17 +169,17 @@ Sessions allow direct interaction with agents:
 
 ### CLI Agents (ACP)
 
-Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY. The node uses the `agent-client-protocol` crate's `ClientSideConnection` for typed, async communication:
+Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY. The node uses the `agent-client-protocol` crate's builder API (`acp::Client::builder()`) for typed, async communication:
 
 1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`) via `tokio::process::Command`
-2. `ClientSideConnection` established over the subprocess stdin/stdout
+2. A byte-stream transport (`acp::ByteStreams`) wraps the subprocess stdin/stdout, and the builder connects over it via `connect_with`
 3. Initialize handshake via typed `InitializeRequest`/`InitializeResponse`
 4. Prompts sent via typed `PromptRequest`, responses received as `PromptResponse` with `StopReason`
-5. Real-time streaming updates (`SessionUpdate` variants: text chunks, tool calls, tool results, plans) delivered via the `Client` trait's `session_notification` callback
-6. Permission requests handled via the `Client` trait's `request_permission` callback
+5. Real-time streaming updates (`SessionUpdate` variants: text chunks, tool calls, tool results, plans) delivered via an `on_receive_notification` callback registered on the builder
+6. Permission requests handled via an `on_receive_request` callback registered on the builder
 7. Cancellation via `CancelNotification`
 
-The connection runs on a dedicated thread with a `LocalSet` (since `ClientSideConnection` is `!Send`). An `AcpHandle` provides a `Send`-safe interface for the Lua runtime via channels.
+The driver runs on a dedicated OS thread with its own single-threaded (`current_thread`) Tokio runtime, spawned by `spawn_acp_client`, so synchronous Lua callers can block on replies without occupying the caller's runtime. An `AcpHandle` provides a `Send`-safe interface for the Lua runtime via channels.
 
 ### Browser-based Agents
 
@@ -223,7 +225,7 @@ Standard ACP methods supported:
   ```json
   {
     "extensions": { "_praxis/recon": { "version": 1 } },
-    "connectors": [ { "shortName": "claude-code", "name": "Claude Code" }, ... ],
+    "connectors": [ { "shortName": "claudecode", "name": "Claude Code" }, ... ],
     "nodeId": "..."
   }
   ```
@@ -345,7 +347,7 @@ reconnection loop immediately re-registers without the usual reconnect delay.
 | `CleanupRequired` | Rollback incomplete; re-enable blocked until Disable/Reset cleanup succeeds |
 
 `InterceptStatus.cleanup_required` surfaces this to service/CLI status
-(e.g. `praxis_cli intercept status`); the Intercept TUI window does not
+(e.g. `praxis intercept status`); the Intercept TUI window does not
 enumerate per-node pills.
 
 ## Registration
