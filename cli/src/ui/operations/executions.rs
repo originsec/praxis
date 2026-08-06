@@ -192,7 +192,7 @@ fn render_exec_detail(
 
         if let Some(ref result) = op.result {
             let short_result = if result.len() > 40 {
-                format!("{}...", &result[..40])
+                format!("{}...", truncate_at_char_boundary(result, 40))
             } else {
                 result.replace('\n', " ")
             };
@@ -347,7 +347,7 @@ fn render_exec_detail(
                     Some(common::ElementConfig::Transform { .. }) => "Transform".to_string(),
                     Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
                         let short = if prompt.len() > 12 {
-                            &prompt[..12]
+                            truncate_at_char_boundary(prompt, 12)
                         } else {
                             prompt
                         };
@@ -436,7 +436,7 @@ fn render_exec_detail(
                     }
                     Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
                         let short = if prompt.len() > 60 {
-                            &prompt[..60]
+                            truncate_at_char_boundary(prompt, 60)
                         } else {
                             prompt
                         };
@@ -447,7 +447,7 @@ fn render_exec_detail(
                     }
                     Some(common::ElementConfig::Transform { prompt, .. }) => {
                         let short = if prompt.len() > 60 {
-                            &prompt[..60]
+                            truncate_at_char_boundary(prompt, 60)
                         } else {
                             prompt
                         };
@@ -466,7 +466,7 @@ fn render_exec_detail(
                     common::ElementExecutionStatus::Completed { output, .. } => {
                         if !output.is_empty() {
                             let short = if output.len() > 100 {
-                                format!("{}...", &output[..100])
+                                format!("{}...", truncate_at_char_boundary(output, 100))
                             } else {
                                 output.clone()
                             };
@@ -570,7 +570,7 @@ pub fn execution_detail_section_at_row(
 
     if let Some(ref result) = op.result {
         let short_result = if result.len() > 40 {
-            format!("{}...", &result[..40])
+            format!("{}...", truncate_at_char_boundary(result, 40))
         } else {
             result.replace('\n', " ")
         };
@@ -633,6 +633,18 @@ fn visual_line_height(line: &Line<'_>, width: u16) -> u16 {
     ((line_width - 1) / width + 1) as u16
 }
 
+fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn op_status_display(status: &SemanticOpStatus) -> (&'static str, Color) {
     match status {
         SemanticOpStatus::Queued => ("queued", STATUS_QUEUED),
@@ -672,5 +684,21 @@ fn format_duration(dur: chrono::Duration) -> String {
         format!("{}m{}s", secs / 60, secs % 60)
     } else {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_at_char_boundary;
+
+    #[test]
+    fn truncation_does_not_split_multibyte_characters() {
+        let text = format!("{}—tail", "a".repeat(99));
+
+        assert_eq!(truncate_at_char_boundary(&text, 100), "a".repeat(99));
+        assert_eq!(
+            truncate_at_char_boundary(&text, 102),
+            format!("{}—", "a".repeat(99))
+        );
     }
 }
