@@ -25,8 +25,7 @@ pub(crate) fn insert_newline(text: &mut String, cursor: &mut usize) {
 pub(crate) fn wants_newline(key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Enter => {
-            key.modifiers.contains(KeyModifiers::SHIFT)
-                || key.modifiers.contains(KeyModifiers::ALT)
+            key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT)
         }
         //
         // Some paste paths and a few terminals deliver a literal newline
@@ -56,11 +55,10 @@ pub(crate) fn move_line_up(text: &str, cursor: &mut usize) -> bool {
     if line_start == 0 {
         return false;
     }
-    let col = pos - line_start;
+    let col = text[line_start..pos].chars().count();
     let prev_end = line_start - 1; // the '\n'
     let prev_start = text[..prev_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let prev_len = prev_end - prev_start;
-    *cursor = prev_start + col.min(prev_len);
+    *cursor = prev_start + byte_offset_at_column(&text[prev_start..prev_end], col);
     true
 }
 
@@ -78,15 +76,20 @@ pub(crate) fn move_line_down(text: &str, cursor: &mut usize) -> bool {
     if line_end >= text.len() {
         return false;
     }
-    let col = pos - line_start;
+    let col = text[line_start..pos].chars().count();
     let next_start = line_end + 1;
     let next_end = text[next_start..]
         .find('\n')
         .map(|i| next_start + i)
         .unwrap_or(text.len());
-    let next_len = next_end - next_start;
-    *cursor = next_start + col.min(next_len);
+    *cursor = next_start + byte_offset_at_column(&text[next_start..next_end], col);
     true
+}
+
+fn byte_offset_at_column(line: &str, column: usize) -> usize {
+    line.char_indices()
+        .nth(column)
+        .map_or(line.len(), |(offset, _)| offset)
 }
 
 pub(crate) fn backspace(text: &mut String, cursor: &mut usize) -> bool {
@@ -192,4 +195,72 @@ pub(crate) fn history_down(
         *text = saved_input.to_string();
     }
     *cursor = text.len();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertical_navigation_preserves_character_columns_and_allows_editing() {
+        for target in ["éxy", "界xy", "🙂xy", "e\u{301}xy", "x", ""] {
+            for column in 0..=3 {
+                for upwards in [false, true] {
+                    let mut text = if upwards {
+                        format!("{target}\nabc")
+                    } else {
+                        format!("abc\n{target}")
+                    };
+                    let mut cursor = if upwards {
+                        target.len() + 1 + column
+                    } else {
+                        column
+                    };
+                    let moved = if upwards {
+                        move_line_up(&text, &mut cursor)
+                    } else {
+                        move_line_down(&text, &mut cursor)
+                    };
+                    assert!(moved);
+                    let target_start = if upwards { 0 } else { 4 };
+                    let expected = target_start
+                        + target
+                            .chars()
+                            .take(column)
+                            .map(char::len_utf8)
+                            .sum::<usize>();
+                    assert_eq!(cursor, expected);
+                    assert!(text.is_char_boundary(cursor));
+                    let original = text.clone();
+                    insert_char(&mut text, &mut cursor, '中');
+                    assert!(backspace(&mut text, &mut cursor));
+                    assert_eq!(text, original);
+                    assert_eq!(cursor, expected);
+                    delete(&mut text, &cursor);
+                    assert!(text.is_char_boundary(cursor));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vertical_navigation_counts_multibyte_source_characters() {
+        let text = "é界🙂\nabcdef";
+        let mut cursor = "é界".len();
+        assert!(move_line_down(text, &mut cursor));
+        assert_eq!(cursor, "é界🙂\nab".len());
+        assert!(move_line_up(text, &mut cursor));
+        assert_eq!(cursor, "é界".len());
+    }
+
+    #[test]
+    fn vertical_navigation_stops_at_first_and_last_lines() {
+        let text = "é\n🙂";
+        let mut cursor = "é".len();
+        assert!(!move_line_up(text, &mut cursor));
+        assert_eq!(cursor, "é".len());
+        cursor = text.len();
+        assert!(!move_line_down(text, &mut cursor));
+        assert_eq!(cursor, text.len());
+    }
 }

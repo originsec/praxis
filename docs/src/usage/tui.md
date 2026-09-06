@@ -29,7 +29,8 @@ LLM-powered conversation interface for coordinating operations across the Praxis
 - `Ctrl+E` toggles the tools panel; `Ctrl+Alt+E` expands it fully
 - `Shift+Enter` (or `Alt+Enter`) inserts a newline in the prompt; bare
   `Enter` sends. Multi-line drafts grow the input box; `↑`/`↓` move
-  between lines first, then through command history.
+  between lines first, then through command history. Vertical movement preserves
+  the character column in Unicode text and stops at the end of shorter lines.
 
 ## Nodes (`Ctrl+L`)
 
@@ -47,7 +48,8 @@ running on the node; resume from the Active Sessions overlay). `Ctrl+C`
 cancels an in-flight prompt, or closes the session if the agent is idle.
 `Shift+Enter` (or `Alt+Enter`) inserts a newline; bare `Enter` sends.
 Multi-line drafts grow the input box; `↑`/`↓` move between lines first,
-then through history.
+then through history. Vertical movement preserves the character column, including
+Unicode text, and stops at the end of shorter lines.
 The status bar shows `N sessions` whenever any concurrent sessions are
 live. On first connect, whenever you open the Nodes window, and after a
 node reset, the TUI calls `session/list` on each node to pick up
@@ -212,7 +214,9 @@ Response bodies in `TrafficLogs` and JSON columns like
 
 Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
 
-- **Executions** — live tracking of running/queued/completed operations and chains with duration timers
+- **Executions** — live tracking of running/queued/completed operations and chains
+  with duration timers. Operation result previews stay on one line and truncate
+  without splitting Unicode characters.
 - **Library** — browse operation and chain definitions with search filtering and detail view
 - **Triggers** — automated chain firing rules
 
