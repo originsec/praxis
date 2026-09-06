@@ -191,11 +191,7 @@ fn render_exec_detail(
         ];
 
         if let Some(ref result) = op.result {
-            let short_result = if result.len() > 40 {
-                format!("{}...", &result[..40])
-            } else {
-                result.replace('\n', " ")
-            };
+            let short_result = result_preview(result);
             status_spans.push(Span::styled("  Result: ", Style::default().fg(DIM)));
             status_spans.push(Span::styled(short_result, Style::default().fg(ACCENT)));
         }
@@ -672,5 +668,51 @@ fn format_duration(dur: chrono::Duration) -> String {
         format!("{}m{}s", secs / 60, secs % 60)
     } else {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+fn result_preview(result: &str) -> String {
+    let prefix = common::truncate_str(result, 40).replace('\n', " ");
+    if result.len() > 40 {
+        format!("{prefix}...")
+    } else {
+        prefix
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::result_preview;
+
+    #[test]
+    fn result_preview_handles_multibyte_characters_at_cutoff() {
+        for character in ['é', '界', '🙂'] {
+            let result = format!("{}{}tail", "a".repeat(39), character);
+            assert_eq!(result_preview(&result), format!("{}...", "a".repeat(39)));
+        }
+        assert_eq!(
+            result_preview(&"界".repeat(14)),
+            format!("{}...", "界".repeat(13))
+        );
+    }
+
+    #[test]
+    fn result_preview_preserves_short_and_exact_length_results() {
+        for result in ["", "hello", "é界🙂", &"a".repeat(40), &"🙂".repeat(10)] {
+            assert_eq!(result_preview(result), result);
+        }
+        assert_eq!(
+            result_preview(&"a".repeat(41)),
+            format!("{}...", "a".repeat(40))
+        );
+    }
+
+    #[test]
+    fn result_preview_keeps_short_and_truncated_results_on_one_line() {
+        assert_eq!(result_preview("hello\nworld"), "hello world");
+        assert_eq!(
+            result_preview(&format!("hello\n{}", "a".repeat(40))),
+            format!("hello {}...", "a".repeat(34))
+        );
     }
 }
