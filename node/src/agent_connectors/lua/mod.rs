@@ -310,6 +310,9 @@ pub fn create_agent_from_script(
 include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 
 #[cfg(test)]
+mod helper_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{EMBEDDED_LUA_SCRIPTS, runtime};
     use std::fs;
