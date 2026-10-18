@@ -34,6 +34,10 @@ pub const LLM_ORCHESTRATOR_THINKING: &str = "llm_orchestrator_thinking";
 /// reasoning_effort; empty leaves the provider default.
 pub const LLM_ORCHESTRATOR_EFFORT: &str = "llm_orchestrator_effort";
 
+/// Orchestrator conversation budget in estimated tokens. Above it, older
+/// turns are summarized into a single message (default 100000).
+pub const LLM_ORCHESTRATOR_CONTEXT_BUDGET: &str = "llm_orchestrator_context_budget";
+
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
@@ -82,6 +86,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_ORCHESTRATOR_TOOL_MODE,
     LLM_ORCHESTRATOR_THINKING,
     LLM_ORCHESTRATOR_EFFORT,
+    LLM_ORCHESTRATOR_CONTEXT_BUDGET,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use futures_util::StreamExt;
 use lapin::Channel;
@@ -33,6 +33,7 @@ pub(super) struct AiSettings {
     pub model: String,
     pub max_tokens: u32,
     pub reasoning: Option<ReasoningConfig>,
+    pub context_budget: usize,
     pub native: AtomicBool,
     pub native_system: String,
     pub manual_system: String,
@@ -62,6 +63,11 @@ pub(super) struct SessionCtx {
     pub tools: Vec<Tool>,
     pub cancel: Arc<AtomicBool>,
     pub stop: Arc<AtomicBool>,
+    //
+    // Prompt size reported by the provider for the latest request; feeds
+    // the compaction trigger alongside the local estimate.
+    //
+    pub last_prompt_tokens: AtomicU64,
 }
 
 impl SessionCtx {
@@ -178,6 +184,8 @@ pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) 
         };
 
         if let Some(usage) = &response.usage {
+            ctx.last_prompt_tokens
+                .store(usage.prompt_tokens as u64, Ordering::SeqCst);
             send_usage(ctx, usage).await;
         }
 
@@ -381,25 +389,6 @@ async fn send_usage(ctx: &SessionCtx, usage: &Usage) {
         usage.total_tokens,
     ))
     .await;
-}
-
-//
-// Keep the system prompt plus roughly the last `keep` messages, cutting only
-// where a new operator turn starts (a plain-text user message) so a
-// tool_use is never separated from its tool_result.
-//
-
-pub(super) fn trim_history(history: &mut Vec<Message>, keep: usize) {
-    if history.len() <= keep + 1 {
-        return;
-    }
-    let earliest = history.len() - keep;
-    let Some(cut) = (earliest..history.len())
-        .find(|&i| history[i].role == Role::User && matches!(history[i].content, Content::Text(_)))
-    else {
-        return;
-    };
-    history.drain(1..cut);
 }
 
 //

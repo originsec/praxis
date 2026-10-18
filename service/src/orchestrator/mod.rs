@@ -1,10 +1,11 @@
+mod compaction;
 mod engine;
 mod markers;
 mod tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use lapin::Channel;
 use serde_json::Value;
@@ -19,15 +20,22 @@ use rmcp::{ServiceExt, transport::StreamableHttpClientTransport};
 use crate::acp_server::{acp_error_response, acp_response, session_update_user_text};
 use crate::config::ServiceConfig;
 use crate::config::service_config::{
-    LLM_ORCHESTRATOR_EFFORT, LLM_ORCHESTRATOR_MAX_TOKENS, LLM_ORCHESTRATOR_THINKING,
-    LLM_ORCHESTRATOR_TOOL_MODE,
+    LLM_ORCHESTRATOR_CONTEXT_BUDGET, LLM_ORCHESTRATOR_EFFORT, LLM_ORCHESTRATOR_MAX_TOKENS,
+    LLM_ORCHESTRATOR_THINKING, LLM_ORCHESTRATOR_TOOL_MODE,
 };
 use crate::messaging::send_to_client;
 
+use compaction::{CompactionOutcome, maybe_compact};
 use engine::{AiSettings, LoopOutcome, SessionCtx, run_loop};
 use tools::{convert_mcp_tools, get_local_tool_definitions};
 
 const ORCHESTRATOR_PROMPT: &str = include_str!("../prompts/orchestrator.prompt");
+
+//
+// Default conversation budget (estimated tokens) before older turns are
+// compacted into a summary.
+//
+const DEFAULT_CONTEXT_BUDGET: usize = 100_000;
 
 //
 // One orchestrator session per client. The service holds no persistent
@@ -238,7 +246,11 @@ impl OrchestratorManager {
                     .filter(|e| !e.is_empty()),
             });
 
-        let history_count: usize = 20;
+        let context_budget: usize = config
+            .get(LLM_ORCHESTRATOR_CONTEXT_BUDGET)
+            .and_then(|s| s.trim().parse().ok())
+            .filter(|n| *n >= 4_000)
+            .unwrap_or(DEFAULT_CONTEXT_BUDGET);
 
         drop(config);
 
@@ -323,6 +335,7 @@ impl OrchestratorManager {
                 model,
                 max_tokens,
                 reasoning,
+                context_budget,
                 native: AtomicBool::new(native),
                 native_system,
                 manual_system,
@@ -330,6 +343,7 @@ impl OrchestratorManager {
             tools,
             cancel: Arc::clone(&cancel_flag),
             stop: Arc::clone(&stop_flag),
+            last_prompt_tokens: AtomicU64::new(0),
         });
 
         //
@@ -369,7 +383,15 @@ impl OrchestratorManager {
                 ctx.send(session_update_user_text(&ctx.session_id, &prompt))
                     .await;
 
-                engine::trim_history(&mut conversation_history, history_count);
+                //
+                // Compact before the model sees the new prompt. Cancelling
+                // here ends the turn (cancel_prompt already answered it).
+                //
+                if let CompactionOutcome::Interrupted =
+                    maybe_compact(&ctx, &mut conversation_history).await
+                {
+                    continue;
+                }
                 let turn_start = conversation_history.len() - 1;
 
                 match run_loop(&ctx, &mut conversation_history).await {
