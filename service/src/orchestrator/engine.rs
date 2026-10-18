@@ -246,12 +246,12 @@ pub(super) async fn run_loop(
             send_usage(ctx, usage).await;
         }
 
-        let assistant = response
+        let (assistant, finish_reason) = response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message)
-            .unwrap_or_else(|| Message::assistant(""));
+            .map(|c| (c.message, c.finish_reason))
+            .unwrap_or_else(|| (Message::assistant(""), None));
 
         let calls: Vec<PendingCall> = if native {
             assistant
@@ -294,7 +294,22 @@ pub(super) async fn run_loop(
         };
 
         if calls.is_empty() {
-            history.push(assistant_message);
+            //
+            // A final answer with no visible text (a refusal, the output
+            // limit hit while reasoning, ...) would otherwise show nothing,
+            // and an empty assistant turn is rejected by some providers on
+            // the next request. Store and show an explanatory note instead.
+            //
+            if assistant_message.joined_text().trim().is_empty() {
+                let note = empty_response_note(finish_reason.as_deref());
+                if scope.label.is_none() {
+                    ctx.send(session_update_text(&ctx.session_id, note.clone()))
+                        .await;
+                }
+                history.push(Message::assistant(note));
+            } else {
+                history.push(assistant_message);
+            }
             return LoopOutcome::Completed;
         }
 
@@ -506,6 +521,22 @@ async fn send_usage(ctx: &SessionCtx, usage: &Usage) {
     .await;
 }
 
+fn empty_response_note(finish_reason: Option<&str>) -> String {
+    match finish_reason.map(str::to_ascii_lowercase).as_deref() {
+        Some("refusal" | "content_filter" | "safety" | "prohibited_content" | "blocklist") => {
+            format!(
+                "_The model declined to respond (stop reason: {})._",
+                finish_reason.unwrap_or_default()
+            )
+        }
+        Some("max_tokens" | "length") => "_The response hit the output token limit before any \
+            text was produced. Raise llm_orchestrator_max_tokens or lower the reasoning effort._"
+            .to_string(),
+        Some(other) => format!("_The model returned no text (stop reason: {})._", other),
+        None => "_The model returned no text._".to_string(),
+    }
+}
+
 //
 // Endpoints that cannot do native function calling reject the request with
 // an error naming tool support (Ollama: "does not support tools",
@@ -661,6 +692,15 @@ impl Display {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_responses_get_explanatory_notes() {
+        assert!(empty_response_note(Some("refusal")).contains("declined"));
+        assert!(empty_response_note(Some("SAFETY")).contains("declined"));
+        assert!(empty_response_note(Some("max_tokens")).contains("output token limit"));
+        assert!(empty_response_note(Some("end_turn")).contains("no text"));
+        assert!(empty_response_note(None).contains("no text"));
+    }
 
     #[test]
     fn detects_tool_unsupported_errors() {
