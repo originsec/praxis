@@ -82,6 +82,19 @@ name.
 | `llm_feature_orchestrator` | string | Name of the model definition used for the Orchestrator |
 | `llm_feature_doc_helper` | string | Name of the model definition used for the documentation helper agent; falls back to `llm_feature_orchestrator` when unset |
 
+Orchestrator settings (**Settings** → **Orchestrator**, plus max tokens under
+**LLM**); see [Orchestrator](../usage/orchestrator.md#settings). Changes apply
+to new orchestrator sessions.
+
+| Key | Format | Default | Description |
+|-----|--------|---------|-------------|
+| `llm_orchestrator_max_tokens` | integer | `25000` | Output token cap per orchestrator model response |
+| `llm_orchestrator_tool_mode` | `auto` \| `native` \| `manual` | `auto` | Tool-calling mode. `auto` uses the provider's native function calling except for `ollama` and `custom`, which use prompt-based calls |
+| `llm_orchestrator_thinking` | bool | `true` | Request model reasoning and show it in the client |
+| `llm_orchestrator_effort` | string | empty | Optional effort hint (`low`, `medium`, `high`, `xhigh`, `max`) sent as Anthropic `output_config.effort` / OpenAI-compatible `reasoning_effort` |
+| `llm_orchestrator_context_budget` | integer | `100000` | Estimated tokens above which older turns are summarized (minimum `4000`) |
+| `llm_orchestrator_approval_gate` | bool | `true` | Require operator approval before the orchestrator runs mutating tools |
+
 Example `llm_model_definitions` value:
 
 ```json
@@ -89,13 +102,13 @@ Example `llm_model_definitions` value:
   {
     "name": "sonnet",
     "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-5-5",
     "apiKey": "sk-ant-..."
   },
   {
     "name": "haiku",
     "provider": "anthropic",
-    "model": "claude-haiku-4-5-20241022",
+    "model": "claude-haiku-5-5",
     "apiKey": "sk-ant-..."
   }
 ]
@@ -408,6 +421,8 @@ Tables:
 - `event_log` - Centralized logging table (controlled by `application_logs_enabled`)
 - `session_transactions` - Per-prompt transaction records (request/response text, timing, status)
 - `lua_agent_scripts` - Lua agent connector scripts (built-in and custom)
+- `orchestrator_playbooks` - Orchestrator playbooks (Agent Skills `SKILL.md` documents, built-in and custom)
+- `orchestrator_memories` - Orchestrator memory notes, scoped by engagement
 - `toolkit_actions` - Toolkit tool execution log
 - `remote_nodes` - Persisted remote (virtual) node bridge configs
 - `agent_chat_sessions` - AgentChat sessions

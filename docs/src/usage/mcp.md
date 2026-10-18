@@ -160,6 +160,29 @@ returning success. `trigger_create` returns the created trigger's full ID as
 `trigger_toggle` return only after the requested trigger is deleted or updated.
 Service-side validation and database errors are returned as MCP tool errors.
 
+### Orchestrator Playbooks
+
+- `playbook_list` — List playbooks (name, description, built-in flag)
+- `playbook_get` — Get a playbook's full `SKILL.md` document by name
+- `playbook_save` — Create or replace a playbook from a `SKILL.md` document
+  (YAML frontmatter with `name` and `description`, then Markdown
+  instructions). The document is validated against the
+  [Agent Skills](https://agentskills.io/specification) frontmatter rules.
+- `playbook_delete` — Delete a playbook by name
+
+See [Orchestrator → Playbooks](./orchestrator.md#playbooks) for the format and
+how the Orchestrator uses them.
+
+### Approval for Autonomous Callers
+
+When the built-in [Orchestrator](./orchestrator.md#approval-gate) calls these
+tools, state-changing calls (`write_file`, `op_create`, `op_delete`,
+`chain_create`, `trigger_create`, `trigger_delete`, `trigger_toggle`,
+`node_reset`, `playbook_save`, `playbook_delete`, YOLO `session_create`, and
+`session_prompt` to a YOLO session) wait for operator approval in the TUI.
+External MCP clients are not gated by Praxis; use your client's own tool
+approval settings.
+
 ### Traffic
 
 - `traffic_search` — Search intercepted traffic
