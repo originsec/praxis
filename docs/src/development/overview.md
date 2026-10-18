@@ -163,8 +163,13 @@ On Windows, these opt-in checks exercise installed applications. Run them from
 a normal console with output capture disabled:
 
 ```powershell
+cargo test -p praxis_cli editor::tests::windows_console_handoff_restores_cooked_input -- --ignored --exact --nocapture --test-threads=1
 cargo test -p praxis_cli editor::tests::windows_notepad_roundtrip_manual -- --ignored --exact --nocapture --test-threads=1
 ```
+
+The first check verifies console modes through two editor handoffs without user
+input. On Windows, mouse capture must be disabled before restoring line input,
+because disabling mouse capture restores a saved console mode.
 
 In Notepad, replace the file contents with `praxis-editor-ok`, save, and close
 the editor. Press Enter once at the terminal confirmation, then press `r` to

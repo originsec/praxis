@@ -462,11 +462,11 @@ async fn run_tui(
 
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = disable_raw_mode();
         if keyboard_enhancement {
             let _ = execute!(io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
         }
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = disable_raw_mode();
         original_hook(info);
     }));
 
@@ -539,18 +539,23 @@ async fn run_tui(
         }
     }
 
-    disable_raw_mode()?;
-    if keyboard_enhancement {
+    let keyboard_restore = if keyboard_enhancement {
         execute!(
             terminal.backend_mut(),
             crossterm::event::PopKeyboardEnhancementFlags,
-        )?;
-    }
-    execute!(
+        )
+    } else {
+        Ok(())
+    };
+    let screen_restore = execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture,
-    )?;
+    );
+    let input_restore = disable_raw_mode();
+    keyboard_restore?;
+    screen_restore?;
+    input_restore?;
 
     if let Ok(client) = Arc::try_unwrap(client) {
         client.disconnect().await;

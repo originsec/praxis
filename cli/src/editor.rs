@@ -11,12 +11,19 @@ impl TerminalHandoff {
         let handoff = Self {
             _pause: input.pause()?,
         };
-        crossterm::terminal::disable_raw_mode()?;
+
+        //
+        // On Windows, disabling mouse capture restores the console mode
+        // saved while the TUI was raw. Switch to cooked input afterward so
+        // the editor and its completion prompt receive normal Enter/Ctrl+C.
+        //
+
         crossterm::execute!(
             io::stdout(),
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen,
         )?;
+        crossterm::terminal::disable_raw_mode()?;
         Ok(handoff)
     }
 }
@@ -91,41 +98,50 @@ mod tests {
     use std::io::{Cursor, Write};
 
     #[cfg(windows)]
-    #[test]
-    #[ignore = "interactive: real Windows console and Notepad required; run with --nocapture --test-threads=1"]
-    fn windows_notepad_roundtrip_manual() {
-        use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+    struct ConsoleRestore;
+
+    #[cfg(windows)]
+    impl Drop for ConsoleRestore {
+        fn drop(&mut self) {
+            let _ = crossterm::execute!(
+                io::stdout(),
+                crossterm::event::DisableMouseCapture,
+                crossterm::terminal::LeaveAlternateScreen,
+            );
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
+    }
+
+    #[cfg(windows)]
+    struct ReaderStop {
+        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+
+    #[cfg(windows)]
+    impl Drop for ReaderStop {
+        fn drop(&mut self) {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::Release);
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn windows_console() -> (
+        ConsoleRestore,
+        ReaderStop,
+        crate::event::TerminalInput,
+        std::sync::mpsc::Receiver<crossterm::event::Event>,
+    ) {
         use std::io::IsTerminal;
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
             mpsc,
         };
-        use std::time::{Duration, Instant};
-
-        struct ConsoleRestore;
-        impl Drop for ConsoleRestore {
-            fn drop(&mut self) {
-                let _ = crossterm::execute!(
-                    io::stdout(),
-                    crossterm::event::DisableMouseCapture,
-                    crossterm::terminal::LeaveAlternateScreen,
-                );
-                let _ = crossterm::terminal::disable_raw_mode();
-            }
-        }
-        struct ReaderStop {
-            stopped: Arc<AtomicBool>,
-            worker: Option<std::thread::JoinHandle<()>>,
-        }
-        impl Drop for ReaderStop {
-            fn drop(&mut self) {
-                self.stopped.store(true, Ordering::Release);
-                if let Some(worker) = self.worker.take() {
-                    let _ = worker.join();
-                }
-            }
-        }
 
         assert!(
             io::stdin().is_terminal() && io::stdout().is_terminal(),
@@ -133,21 +149,9 @@ mod tests {
         );
         assert!(
             !crossterm::terminal::is_raw_mode_enabled().unwrap(),
-            "Start the manual test from a normal console"
+            "Start the console test from a normal console"
         );
-        let mut file = tempfile::Builder::new()
-            .prefix("praxis_notepad_roundtrip_")
-            .suffix(".txt")
-            .tempfile()
-            .unwrap();
-        file.write_all(b"original").unwrap();
-        let path = file.into_temp_path();
-        io::stdout().write_all(
-            b"Notepad roundtrip test:\r\nReplace original with praxis-editor-ok, save, and close Notepad.\r\nThen press Enter ONCE at the terminal confirmation prompt.\r\nFinally press r to verify the TUI reader resumed. Ctrl+C cancels.\r\n"
-        ).unwrap();
-        io::stdout().flush().unwrap();
-
-        let _console = ConsoleRestore;
+        let console = ConsoleRestore;
         crossterm::terminal::enable_raw_mode().unwrap();
         crossterm::execute!(
             io::stdout(),
@@ -162,10 +166,53 @@ mod tests {
             move |event| forward.send(event).is_ok(),
             move || reader_stopped.load(Ordering::Acquire),
         );
-        let _reader = ReaderStop {
+        let reader = ReaderStop {
             stopped,
             worker: Some(worker),
         };
+        (console, reader, input, events)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires a Windows console; no interaction needed; run with --nocapture --test-threads=1"]
+    fn windows_console_handoff_restores_cooked_input() {
+        let (_console, _reader, input, _events) = windows_console();
+        assert!(crossterm::terminal::is_raw_mode_enabled().unwrap());
+        for _ in 0..2 {
+            let handoff = TerminalHandoff::acquire(&input).unwrap();
+            assert!(
+                !crossterm::terminal::is_raw_mode_enabled().unwrap(),
+                "Editor input must be cooked after mouse capture is disabled"
+            );
+            drop(handoff);
+            assert!(
+                crossterm::terminal::is_raw_mode_enabled().unwrap(),
+                "TUI input must be raw after the editor returns"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "interactive: real Windows console and Notepad required; run with --nocapture --test-threads=1"]
+    fn windows_notepad_roundtrip_manual() {
+        use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+        use std::time::{Duration, Instant};
+
+        let mut file = tempfile::Builder::new()
+            .prefix("praxis_notepad_roundtrip_")
+            .suffix(".txt")
+            .tempfile()
+            .unwrap();
+        file.write_all(b"original").unwrap();
+        let path = file.into_temp_path();
+        io::stdout().write_all(
+            b"Notepad roundtrip test:\r\nReplace original with praxis-editor-ok, save, and close Notepad.\r\nThen press Enter ONCE at the terminal confirmation prompt.\r\nFinally press r to verify the TUI reader resumed. Ctrl+C cancels.\r\n"
+        ).unwrap();
+        io::stdout().flush().unwrap();
+
+        let (_console, _reader, input, events) = windows_console();
         let status = run("notepad.exe", &path, &input).unwrap();
         assert!(status.success(), "Notepad exited with {status}");
         assert_eq!(
