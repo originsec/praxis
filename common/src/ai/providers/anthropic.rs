@@ -68,6 +68,19 @@ impl AnthropicClient {
         };
 
         //
+        // Wire dump at debug — full body, no event-log fanout (payloads
+        // can be multi-KB and would flood the application event log).
+        //
+        if let Ok(json) = serde_json::to_string(&body) {
+            tracing::debug!(
+                target: "common::ai::provider",
+                "Anthropic request to {}: {}",
+                ANTHROPIC_API_URL,
+                json
+            );
+        }
+
+        //
         // Send request.
         //
         let response = self
@@ -84,12 +97,27 @@ impl AnthropicClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            tracing::debug!(
+                target: "common::ai::provider",
+                "Anthropic response error {}: {}",
+                status,
+                body
+            );
             return Err(anyhow!("Anthropic API error {}: {}", status, body));
         }
 
-        let api_response: AnthropicResponse = response
-            .json()
+        let response_body = response
+            .text()
             .await
+            .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+        tracing::debug!(
+            target: "common::ai::provider",
+            "Anthropic response from {}: {}",
+            ANTHROPIC_API_URL,
+            response_body
+        );
+
+        let api_response: AnthropicResponse = serde_json::from_str(&response_body)
             .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
         //
