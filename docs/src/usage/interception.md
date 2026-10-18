@@ -59,9 +59,11 @@ multi-agent attribution.
 
 Lines starting with `#` are ignored. To disable a target without
 deleting it, comment out the entire section. Praxis ships built-in
-targets for the bundled connectors (Claude Code, Claude Desktop,
-Cursor, Droid, Gemini, M365 Copilot); the defaults are seeded on first
-boot.
+targets for the bundled connectors (Claude Code, Claude Desktop, Comet,
+Cursor, Droid, Gemini, M365 Copilot, OpenClaw); the defaults are seeded on
+first boot. Existing deployments keep their stored file, so targets added in
+a later release only appear after **Reset to built-in defaults** or after
+adding the sections by hand.
 
 ### Managing targets
 

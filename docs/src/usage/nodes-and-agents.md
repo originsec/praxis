@@ -82,12 +82,17 @@ Agents are the AI assistants detected on each node. When a node fingerprints suc
 
 - **[Antigravity CLI](../connectors/agy.md)** - Google's terminal AI-agent interface (`agy`)
 - **Claude Code** - Anthropic's CLI assistant
-- **Claude Desktop** - Anthropic's desktop app (Windows only)
+- **[ChatGPT Atlas](../connectors/atlas.md)** - OpenAI's discontinued browser (macOS, recon-only, experimental)
+- **[Claude Desktop](../connectors/claude-desktop.md)** - Anthropic's desktop app, including Cowork recon (sessions Windows only; macOS recon experimental)
+- **[Claude for Chrome](../connectors/claude-for-chrome.md)** - Anthropic's browser extension, found in Chromium-family profiles (recon-only)
 - **Codex CLI** - OpenAI's CLI assistant
+- **[Codex Desktop](../connectors/codex-desktop.md)** - OpenAI's Codex/ChatGPT desktop app (recon-only, experimental)
 - **Cursor Agent** - Cursor's background agent CLI (Linux only)
 - **[Droid CLI](../connectors/droid.md)** - Factory's CLI coding agent
 - **Gemini CLI** - Google's CLI assistant
 - **M365 Copilot** - Microsoft 365 Copilot (Windows only)
+- **[OpenClaw](../connectors/openclaw.md)** - open-source always-on personal agent (`openclaw`)
+- **[Perplexity Comet](../connectors/comet.md)** - Perplexity's agentic browser (experimental)
 - **[Pi Coding Agent](../connectors/pi.md)** - minimal terminal coding harness (`pi`)
 
 See [Agent Connectors](../connectors/overview.md) for the full connector list and platform notes.
@@ -145,6 +150,16 @@ Different agents support different features:
 | Config Editing | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | ✓ |
 | MCP Discovery | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | - |
 | Traffic Intercept | ✓ | - | ✓ | - | - | ✓ | ✓ | ✓ | ✓ | - |
+
+The agentic-app and browser connectors:
+
+| Feature | OpenClaw | Comet | Codex Desktop | Claude for Chrome | Atlas |
+|---------|----------|-------|---------------|-------------------|-------|
+| Static Recon | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Semantic Recon | ✓ | - | - | - | - |
+| Sessions | ✓ | ✓ (experimental) | - | - | - |
+| MCP Discovery | ✓ | - | - | - | - |
+| Traffic Intercept | ✓ | ✓ | - | - | - |
 
 Codex traffic interception is not yet supported; implementation is tracked in
 [issue #259](https://github.com/originsec/praxis/issues/259).

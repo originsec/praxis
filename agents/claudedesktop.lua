@@ -16,7 +16,29 @@ local MODE_CHAT_SELECTOR = 'button[aria-label="Chat"]'
 local MESSAGE_SELECTOR = 'div.contents'
 local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop response"]'
 
-local CLAUDE_CONFIG_REL = praxis.path_join({ "AppData", "Roaming", "Claude" })
+local MACOS_BUNDLE_ID = "com.anthropic.claudefordesktop"
+local MSIX_PACKAGE_NAME = "Claude"
+
+--
+-- Electron userData directories, relative to a user home. Since the
+-- Windows installer moved to MSIX, %APPDATA%\Claude is redirected into the
+-- package's LocalCache; the legacy Squirrel install still uses Roaming.
+-- Resolved per call (not at load) so the host OS is read at recon time.
+--
+
+local function config_roots()
+  local os_name = praxis.os_name()
+  if os_name == "windows" then
+    return {
+      praxis.path_join({ "AppData", "Roaming", "Claude" }),
+      praxis.path_join({ "AppData", "Local", "Packages", "Claude_pzs8sxrjxfjjc",
+        "LocalCache", "Roaming", "Claude" }),
+    }
+  elseif os_name == "macos" then
+    return { praxis.path_join({ "Library", "Application Support", "Claude" }) }
+  end
+  return {}
+end
 
 local MODE_SELECTORS = {
   [WORKING_DIR_CHAT] = {
@@ -51,17 +73,43 @@ local function verify_binary(path)
 end
 
 local function pick_path()
-  if praxis.os_name() ~= "windows" then
+  local os_name = praxis.os_name()
+  if os_name == "macos" then
+    local exe, version = helpers.find_macos_app({ "Claude.app" }, { MACOS_BUNDLE_ID })
+    return exe, version
+  end
+  if os_name ~= "windows" then
     return nil, nil
   end
 
-  return helpers.find_executable({
+  local path, version = helpers.find_executable({
     name = "claude",
     home_dirs = {
       windows = { "${LOCALAPPDATA}\\AnthropicClaude" },
     },
     verify = verify_binary,
   })
+  if path then
+    return path, version
+  end
+
+  --
+  -- MSIX install (the default since the .exe download switched to MSIX).
+  -- The executable's location inside the package is not documented, so try
+  -- the usual Electron layouts. Untested.
+  --
+
+  local location, package_version = helpers.windows_appx_package(MSIX_PACKAGE_NAME)
+  if location then
+    for _, rel in ipairs({ { "app", "claude.exe" }, { "claude.exe" } }) do
+      local exe = praxis.path_join({ location, table.unpack(rel) })
+      if praxis.path_exists(exe) then
+        return exe, package_version
+      end
+    end
+  end
+
+  return nil, nil
 end
 
 local function build_adapter(mode, input_override)
@@ -129,7 +177,19 @@ local function ensure_dev_settings(process_path)
     error("could not determine user home")
   end
 
-  local config_dir = praxis.path_join({ home, CLAUDE_CONFIG_REL })
+  --
+  -- Write to whichever userData root the installed build actually uses
+  -- (the MSIX-redirected one when present), defaulting to Roaming.
+  --
+
+  local roots = config_roots()
+  local config_dir = praxis.path_join({ home, roots[1] })
+  for _, rel in ipairs(roots) do
+    local candidate = praxis.path_join({ home, rel })
+    if praxis.path_is_dir(candidate) then
+      config_dir = candidate
+    end
+  end
   local settings_path = praxis.path_join({ config_dir, "developer_settings.json" })
   praxis.log_debug("claudedesktop: ensure_dev_settings path=" .. settings_path)
 
@@ -237,6 +297,16 @@ local function post_initialize(handle, working_dir)
 end
 
 local function run_create_session(ctx)
+  --
+  -- Enabling the main-process debugger relies on Windows UI Automation.
+  -- macOS is recon-only until there's a sourced way to reach the debugger
+  -- there (the Electron fuses for the macOS build are unverified).
+  --
+
+  if praxis.os_name() ~= "windows" then
+    error("Claude Desktop sessions are only supported on Windows")
+  end
+
   praxis.kill_processes_by_name(PROCESS_NAME)
   praxis.sleep_ms(500)
 
@@ -327,41 +397,186 @@ local function run_session_close(state)
   end
 end
 
-local recon_config = {
-  home_dir = CLAUDE_CONFIG_REL,
+--
+-- Cowork (the agentic mode inside Claude Desktop) keeps local-mode state
+-- under <userData>/local-agent-mode-sessions/<account>/<org>/: one
+-- local_<uuid>.json per session, plus scheduled tasks, account settings and
+-- Cowork memory. Cloud-mode sessions (the default since Oct 2026) leave
+-- nothing on disk. Layout from claude.com/docs/third-party/claude-desktop/
+-- data-storage; the deeper file names come from public bug reports.
+--
 
-  --
-  -- Claude Desktop has two UI modes (Code and Chat) exposed as project paths.
-  -- These are static and always present, so no dynamic discovery needed.
-  --
+local COWORK_DIR = "local-agent-mode-sessions"
+local COWORK_WALK_DEPTH = 5
 
-  project_discovery = function(_home)
-    return { WORKING_DIR_CODE, WORKING_DIR_CHAT }
-  end,
+local function cowork_files(home)
+  local files = {}
+  for _, rel in ipairs(config_roots()) do
+    local base = praxis.path_join({ home, rel, COWORK_DIR })
+    if praxis.path_is_dir(base) then
+      for _, f in ipairs(praxis.walk_files(base, COWORK_WALK_DEPTH) or {}) do
+        table.insert(files, f)
+      end
+    end
+  end
+  return files
+end
 
-  home_configs = {
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "claude_desktop_config.json" }), type = "global_settings", mcp = true },
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "config.json" }), type = "app_config" },
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "extensions-blocklist.json" }), type = "extensions_blocklist" },
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "Preferences" }), type = "preferences" },
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "developer_settings.json" }), type = "developer_settings" },
-    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "logs", "*.log" }), type = "log" },
-  },
+local function cowork_file_type(path)
+  local name = path:match("([^/\\]+)$") or ""
+  if name == "scheduled-tasks.json" then
+    return "cowork_scheduled_tasks"
+  elseif name == "cowork_account_settings.json" then
+    return "cowork_account_settings"
+  elseif name == "audit.jsonl" then
+    return "cowork_audit_log"
+  elseif name == "manifest.json" and path:find("/rpm/manifest.json$") then
+    return "cowork_session_plugins"
+  elseif name:match("%.md$") and path:find("/memory/") then
+    return "cowork_memory"
+  end
+  return nil
+end
 
-  mcp_parsers = {
-    default = helpers.parse_mcp_from_json,
-  },
+local function discover_cowork_sessions(home)
+  local sessions = {}
+  for _, f in ipairs(cowork_files(home)) do
+    local name = f:match("([^/\\]+)$") or ""
+    local id = name:match("^local_(.+)%.json$")
+    if id then
+      local parsed = helpers.parse_json(praxis.read_file(f)) or {}
+      local messages = type(parsed.messages) == "table" and #parsed.messages or 0
+      table.insert(sessions, {
+        session_id = id,
+        context_path = "Cowork",
+        session_file = f,
+        last_modified = "",
+        message_count = messages,
+        content = nil,
+      })
+    end
+  end
+  return sessions
+end
 
-  auth_check = function(path)
-    -- For now we disable code as it's a wrapper around claude code and we have
-    -- a more robust way of interacting with that. Not removing the custom selector 
-    -- logic as we'll need it for Cowork when i get around to that. 
-    -- return path == WORKING_DIR_CODE or path == WORKING_DIR_CHAT
-    return path == WORKING_DIR_CHAT
-  end,
+local function cowork_plugin_roots(home)
+  local roots = {}
+  for _, rel in ipairs(config_roots()) do
+    local pattern = praxis.path_join({ home, rel, "cowork_plugins", "**", ".claude-plugin", "plugin.json" })
+    for _, manifest in ipairs(praxis.glob_files(pattern) or {}) do
+      table.insert(roots, praxis.path_parent(praxis.path_parent(manifest)))
+    end
+  end
+  return roots
+end
 
-  post_collect = nil,
-}
+local function discover_skills(home, _project_paths)
+  local skills = {}
+  for _, root in ipairs(cowork_plugin_roots(home)) do
+    for _, s in ipairs(helpers.discover_skill_md_skills(root, { dir = "skills" })) do
+      table.insert(skills, s)
+    end
+  end
+  return skills
+end
+
+local function add_cowork_configs(result, _ctx)
+  for _, home in ipairs(praxis.user_homes() or {}) do
+    for _, f in ipairs(cowork_files(home)) do
+      local config_type = cowork_file_type(helpers.norm(f))
+      if config_type then
+        table.insert(result.config_items, { path = f, config_type = config_type })
+      end
+    end
+  end
+end
+
+--
+-- Admin-managed settings and organisation-provisioned plugins live outside
+-- the user's home.
+--
+
+local function system_configs(_is_semantic)
+  local buffer = helpers.new_recon_result()
+  local os_name = praxis.os_name()
+  local patterns = {}
+  if os_name == "macos" then
+    patterns = {
+      { "/Library/Managed Preferences/" .. MACOS_BUNDLE_ID .. ".plist", "managed_preferences" },
+      { "/Library/Managed Preferences/*/" .. MACOS_BUNDLE_ID .. ".plist", "managed_preferences" },
+      { "/Library/Application Support/Claude/org-plugins/**/.claude-plugin/plugin.json", "org_plugin" },
+    }
+  elseif os_name == "windows" then
+    patterns = {
+      { "C:/Program Files/Claude/org-plugins/**/.claude-plugin/plugin.json", "org_plugin" },
+    }
+  end
+  for _, p in ipairs(patterns) do
+    for _, path in ipairs(praxis.glob_files(p[1]) or {}) do
+      table.insert(buffer.config_items, { path = path, config_type = p[2] })
+    end
+  end
+  return buffer
+end
+
+local function build_home_configs()
+  local configs = {}
+  local function add(path, config_type, mcp)
+    table.insert(configs, { path = path, type = config_type, mcp = mcp })
+  end
+
+  for _, rel in ipairs(config_roots()) do
+    add(praxis.path_join({ rel, "claude_desktop_config.json" }), "global_settings", true)
+    add(praxis.path_join({ rel, "config.json" }), "app_config")
+    add(praxis.path_join({ rel, "extensions-blocklist.json" }), "extensions_blocklist")
+    add(praxis.path_join({ rel, "Preferences" }), "preferences")
+    add(praxis.path_join({ rel, "developer_settings.json" }), "developer_settings")
+    add(praxis.path_join({ rel, "logs", "*.log" }), "log")
+    add(praxis.path_join({ rel, "Claude Extensions", "*", "manifest.json" }), "extension_manifest")
+    add(praxis.path_join({ rel, "Claude Extensions Settings", "*.json" }), "extension_settings")
+    add(praxis.path_join({ rel, "cowork_plugins", "**", ".claude-plugin", "plugin.json" }), "cowork_plugin")
+  end
+
+  if praxis.os_name() == "macos" then
+    add(praxis.path_join({ "Library", "Logs", "Claude", "*.log" }), "log")
+  end
+
+  return configs
+end
+
+local function build_recon_config()
+  return {
+    home_dir = config_roots()[1],
+
+    --
+    -- Claude Desktop has two UI modes (Code and Chat) exposed as project paths.
+    -- These are static and always present, so no dynamic discovery needed.
+    --
+
+    project_discovery = function(_home)
+      return { WORKING_DIR_CODE, WORKING_DIR_CHAT }
+    end,
+
+    system_configs = system_configs,
+    home_configs = build_home_configs(),
+
+    mcp_parsers = {
+      default = helpers.parse_mcp_from_json,
+    },
+
+    auth_check = function(path)
+      -- For now we disable code as it's a wrapper around claude code and we have
+      -- a more robust way of interacting with that. Not removing the custom selector 
+      -- logic as we'll need it for Cowork when i get around to that. 
+      -- return path == WORKING_DIR_CODE or path == WORKING_DIR_CHAT
+      return path == WORKING_DIR_CHAT
+    end,
+
+    session_discovery = discover_cowork_sessions,
+    skill_discovery = discover_skills,
+    post_collect = add_cowork_configs,
+  }
+end
 
 return {
   name = AGENT_NAME,
@@ -377,12 +592,13 @@ return {
   end,
 
   --
-  -- Recon is config-only (no CDP discovery). Claude Desktop's config lives in
-  -- %APPDATA%\Claude, and project paths (Code/Chat modes) are static.
+  -- Recon is file-only (no CDP discovery): app config, extensions and
+  -- Cowork state from the Electron userData dir. Project paths (Code/Chat
+  -- modes) are static.
   --
 
   recon = function(ctx)
-    return helpers.run_standard_recon(ctx, recon_config)
+    return helpers.run_standard_recon(ctx, build_recon_config())
   end,
 
   create_session = function(ctx)

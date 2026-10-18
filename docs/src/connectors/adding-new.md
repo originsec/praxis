@@ -190,7 +190,9 @@ The `praxis` global provides:
 
 This list is not exhaustive — see `node/src/agent_connectors/lua/runtime.rs` for every registered function.
 
-The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_json5` (comments, trailing commas, unquoted keys, single quotes), `parse_toml`, `find_macos_app` / `macos_plist_value` (app bundles located and verified by `CFBundleIdentifier`), `windows_appx_package` (MSIX install location and version), `windows_file_version`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
+
+The `chromium` module (`require("praxis.chromium")`) provides Chromium-family browser discovery shared by the agentic-browser connectors: `browser_user_data_dirs(home)` (Chrome, Chromium, Edge, Brave per OS), `profiles(user_data_dir)`, `extension_versions(profile_path, extension_id)` and `profile_config_items(profile, label)`. See `agents/claudechrome.lua` and `agents/comet.lua`.
 
 The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol, plus a `renderer_ops` backend for Electron apps whose renderer DOM isn't reachable from the main-process CDP connection. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
@@ -293,10 +295,14 @@ The `connect` config table:
 | `process_path` | string | Path to the executable |
 | `debug_port_env_var` | string | Environment variable for the debug port argument |
 | `debug_port_format` | string | Format string, e.g. `"--remote-debugging-port={}"` |
+| `debug_port_cli_arg` | string | CLI arg format string for Electron/Chromium, e.g. `"--remote-debugging-port={}"` (use instead of the env var pair) |
+| `extra_args` | table | Additional CLI args appended after the debug port arg, e.g. `{ "--user-data-dir=/tmp/profile", "https://example.com/" }` |
 | `base_port` | number | Base port number (random offset added) |
 | `port_range` | number | Range for random port selection (default 778) |
 | `kill_existing` | bool | Kill existing processes first (default true) |
 | `use_hidden_desktop` | bool | Spawn on hidden desktop on Windows (default true). In debug builds, `PRAXIS_NOT_HIDDEN` defaults to `1` (visible); in release builds it defaults to `0` (hidden). |
+
+> **Chromium browsers**: Chrome 136+ ignores `--remote-debugging-port` on the default user-data directory ([Chrome blog](https://developer.chrome.com/blog/remote-debugging-port)). To drive a stock Chrome, pass a separate `--user-data-dir` through `extra_args`. Also set `kill_existing = false` so the user's running browser (same executable name) isn't killed.
 
 ### DOM Operation Backends
 

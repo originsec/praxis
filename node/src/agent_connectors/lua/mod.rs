@@ -1,4 +1,6 @@
 pub mod cdp;
+#[cfg(test)]
+mod connector_tests;
 pub mod runtime;
 mod session;
 mod uia;

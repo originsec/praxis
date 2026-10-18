@@ -19,18 +19,25 @@ A connector handles four main capabilities:
 | Connector | Agent | Platform | Session Mode | Type |
 |-----------|-------|----------|--------------|------|
 | [`agy`](./agy.md) | Antigravity CLI | macOS, Linux, Windows | CLI | Lua |
+| [`atlas`](./atlas.md) | ChatGPT Atlas (discontinued) — *experimental* | macOS | Recon-only | Lua |
 | [`claude-bridge`](./claude-bridge.md) | Claude Code (inbound) | Any | CCRv1 (WS) / CCRv2 (HTTP+SSE) | Native |
 | [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI | Lua |
-| [`claudedesktop`](./claude-desktop.md) | Claude Desktop | Windows only | DevTools (Electron) | Lua |
+| [`claudechrome`](./claude-for-chrome.md) | Claude for Chrome (extension) | Linux, macOS, Windows | Recon-only | Lua |
+| [`claudedesktop`](./claude-desktop.md) | Claude Desktop, incl. Cowork recon — macOS *experimental* | Windows; macOS (recon-only) | DevTools (Electron) | Lua |
 | [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
+| [`codexdesktop`](./codex-desktop.md) | Codex desktop app (ChatGPT app) — *experimental* | macOS, Windows | Recon-only | Lua |
+| [`comet`](./comet.md) | Perplexity Comet — *experimental* | macOS, Windows | DevTools (Chromium) | Lua |
 | [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
 | [`droid`](./droid.md) | Droid CLI (Factory) | Linux, macOS, Windows | CLI | Lua |
 | [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
 | [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools | Lua |
+| [`openclaw`](./openclaw.md) | OpenClaw | Linux, macOS, Windows | CLI | Lua |
 | [`pi`](./pi.md) | Pi Coding Agent (`@mariozechner/pi-coding-agent`) | Linux, Windows | CLI | Lua |
 | [`praxis`](./praxis.md) | Native LLM agent (provider-agnostic) | Any | ACP (native streaming) | Native |
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
+
+Connectors marked *experimental* were built from vendor docs and source code without a test machine for that platform. Their paths and selectors are unverified and may need fixes against real installs.
 
 **Note**: Agent implementations change over time. Connectors may break when agents update and will require maintenance to work with the latest versions.
 
@@ -125,7 +132,7 @@ When a node starts, it runs fingerprinting for all registered connectors. Any ag
 
 All registered connectors are re-fingerprinted together on each cycle (roughly every 30 seconds), so both newly-installed and newly-removed agents are picked up on the next pass.
 
-Most connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, Pi) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction. The Praxis Agent and the Claude Bridge are native (Rust) connectors — the Praxis Agent is gated by service config (it appears only when enabled and a model definition is selected), and Claude Bridge is always present.
+Most connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, OpenClaw, Pi and the agentic-browser connectors) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron), M365 Copilot (WebView) and Comet (Chromium) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction. The browser connectors share profile and extension discovery through the `praxis.chromium` Lua library. The Praxis Agent and the Claude Bridge are native (Rust) connectors — the Praxis Agent is gated by service config (it appears only when enabled and a model definition is selected), and Claude Bridge is always present.
 
 ## Development Builds
 

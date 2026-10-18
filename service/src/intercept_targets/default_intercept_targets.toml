@@ -18,6 +18,10 @@ url_pattern = "messages"
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
+[comet]
+domains = ["www.perplexity.ai", "perplexity.ai"]
+url_pattern = "rest/sse/perplexity_ask"
+
 [cursor]
 domains = ["agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 
@@ -35,3 +39,7 @@ domains = ["generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"]
 [m365copilot]
 domains = ["substrate.office.com"]
 url_pattern = "m365Copilot/Chathub"
+
+[openclaw]
+domains = ["api.openai.com", "chatgpt.com"]
+url_pattern = "responses|chat/completions"

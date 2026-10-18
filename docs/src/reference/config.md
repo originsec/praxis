@@ -220,9 +220,9 @@ Each agent connector may have specific configuration. See individual connector d
 
 #### Claude Desktop
 
-- Config path: `%APPDATA%\Claude\claude_desktop_config.json` (MCP servers), plus `config.json` and `developer_settings.json` in the same directory
-- Sessions: none — Code/Chat are static UI modes driven via CDP, not session files
-- Platform: Windows only
+- Config path: `%APPDATA%\Claude\claude_desktop_config.json` (MCP servers), plus `config.json` and `developer_settings.json` in the same directory. MSIX installs use `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude`, macOS uses `~/Library/Application Support/Claude`
+- Sessions: Code/Chat are static UI modes driven via CDP. Local Cowork sessions are discovered from `local-agent-mode-sessions/`
+- Platform: Windows (sessions + recon), macOS (recon only, experimental)
 
 #### Codex CLI
 
@@ -243,6 +243,21 @@ Each agent connector may have specific configuration. See individual connector d
 
 - Config path: `~/.pi/agent/settings.json` (no MCP support — extensions are the intended extension mechanism)
 - Sessions: `~/.pi/agent/sessions/<encoded-cwd>/`
+
+#### OpenClaw
+
+- Config path: `~/.openclaw/openclaw.json` (JSON5; MCP servers under `mcp.servers`, channels under `channels`)
+- Sessions: `~/.openclaw/agents/<id>/agent/openclaw-agent.sqlite` (legacy: `~/.openclaw/agents/<id>/sessions/*.jsonl`)
+
+#### Codex Desktop
+
+- Config path: shares `~/.codex` with Codex CLI; app-only state in `~/.codex/.codex-global-state.json` and `~/.codex/worktrees/`
+- Platform: macOS, Windows (recon only, experimental)
+
+#### Agentic browsers (Comet, Atlas, Claude for Chrome)
+
+- Config path: the browser's Chromium user-data directory (profiles, preferences, extension manifests)
+- Sessions: Comet only, via CDP (experimental)
 
 #### Antigravity CLI
 

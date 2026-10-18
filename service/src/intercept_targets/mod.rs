@@ -90,6 +90,8 @@ mod tests {
         let targets = parse(default_text()).expect("default file should parse");
         assert!(targets.iter().any(|t| t.agent_short_name == "claudecode"));
         assert!(targets.iter().any(|t| t.agent_short_name == "cursor"));
+        assert!(targets.iter().any(|t| t.agent_short_name == "comet"));
+        assert!(targets.iter().any(|t| t.agent_short_name == "openclaw"));
         assert!(targets.iter().all(|t| !t.domains.is_empty()));
     }
 

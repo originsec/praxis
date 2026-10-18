@@ -56,8 +56,9 @@ When you send a prompt:
 
 1. `session/prompt` is forwarded to the node that owns the session
 2. The node's per-session Lua VM handles the prompt — spawning a
-   one-shot non-interactive subprocess (`claudecode`, `codex`), driving
-   the connector via Chrome DevTools Protocol (`m365-copilot`), or
+   one-shot non-interactive subprocess (`claudecode`, `codex`, `openclaw`),
+   driving the connector via Chrome DevTools Protocol (`m365-copilot`,
+   `comet`), or
    talking to the connector's embedded ACP subprocess (`cursor`, `gemini`)
 3. Streaming updates (`session/update` notifications) flow back as the
    agent generates text, calls tools, and builds plans
