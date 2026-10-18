@@ -2,6 +2,7 @@ mod body;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use common::mcp::{McpTrafficInfo, classify_mcp_request};
 use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
 use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
@@ -1421,6 +1422,7 @@ const H2_FRAME_CONTINUATION: u8 = 0x9;
 // HTTP/2 frame flags (RFC 7540 Section 6).
 //
 
+const H2_FLAG_END_STREAM: u8 = 0x1;
 const H2_FLAG_END_HEADERS: u8 = 0x4;
 const H2_FLAG_ACK: u8 = 0x1;
 const H2_FLAG_PADDED: u8 = 0x8;
@@ -1701,6 +1703,15 @@ where
     let mut stream_paths: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
 
     //
+    // MCP classification per stream (stream_id -> info). Request HEADERS
+    // and DATA arrive in separate frames, and response frames are matched
+    // back to the request through this map until the response ends.
+    //
+
+    let mut stream_mcp: std::collections::HashMap<u32, McpTrafficInfo> =
+        std::collections::HashMap::new();
+
+    //
     // Per-direction HPACK decoders. Kept for the lifetime of the connection
     // so the dynamic table stays in sync across frames.
     //
@@ -1777,6 +1788,9 @@ where
                                     request_body: None,
                                     response_status: None,
                                     response_headers: None,
+                                    mcp: stream_mcp
+                                        .get(&frame.stream_id)
+                                        .map(|info| info.for_response(None, Some(&decompressed))),
                                     response_body: Some(decompressed),
                                 };
                                 let _ = traffic_tx.try_send(entry);
@@ -1818,11 +1832,20 @@ where
                                     request_headers: None,
                                     request_body: None,
                                     response_status: status,
+                                    mcp: stream_mcp
+                                        .get(&decoded.stream_id)
+                                        .map(|info| info.for_response(Some(&headers), None)),
                                     response_headers: Some(headers),
                                     response_body: None,
                                 };
                                 let _ = traffic_tx.try_send(entry);
                             }
+                        }
+
+                        if matches!(frame.frame_type, H2_FRAME_DATA | H2_FRAME_HEADERS)
+                            && frame.flags & H2_FLAG_END_STREAM != 0
+                        {
+                            stream_mcp.remove(&frame.stream_id);
                         }
 
                         //
@@ -1886,6 +1909,11 @@ where
                                     .unwrap_or_else(|| format!("/stream/{}", decoded.stream_id));
                                 let url = format!("https://{}{}", host, path);
 
+                                let mcp = classify_mcp_request(Some(&headers), None);
+                                if let Some(info) = &mcp {
+                                    stream_mcp.insert(decoded.stream_id, info.clone());
+                                }
+
                                 if let Some(matched_agent) =
                                     capture_agent_label(capture_config, &agent, &url)
                                 {
@@ -1906,6 +1934,7 @@ where
                                         request_body: None,
                                         response_status: None,
                                         response_headers: None,
+                                        mcp,
                                         response_body: None,
                                     };
                                     let _ = traffic_tx.try_send(entry);
@@ -1950,6 +1979,13 @@ where
                                 //
 
                                 let decompressed = decompress_grpc_payload(data);
+                                let mcp = match stream_mcp.get(&frame.stream_id) {
+                                    Some(info) => Some(info.with_request_body(&decompressed)),
+                                    None => classify_mcp_request(None, Some(&decompressed)),
+                                };
+                                if let Some(info) = &mcp {
+                                    stream_mcp.insert(frame.stream_id, info.clone());
+                                }
 
                                 let entry = InterceptedTrafficEntry {
                                     id: None,
@@ -1968,6 +2004,7 @@ where
                                     request_body: Some(decompressed),
                                     response_status: None,
                                     response_headers: None,
+                                    mcp,
                                     response_body: None,
                                 };
                                 let _ = traffic_tx.try_send(entry);
@@ -2578,6 +2615,7 @@ where
                         },
                         response_status: None,
                         response_headers: None,
+                        mcp: classify_mcp_request(Some(&headers_map), Some(&body)),
                         response_body: None,
                     };
                     let _ = traffic_tx.try_send(entry);
@@ -2620,6 +2658,7 @@ where
                         },
                         response_status: None,
                         response_headers: None,
+                        mcp: classify_mcp_request(Some(&headers_map), Some(&body)),
                         response_body: None,
                     };
                     let _ = traffic_tx.try_send(entry);
@@ -2711,6 +2750,7 @@ where
                     request_body: None,
                     response_status: None,
                     response_headers: None,
+                    mcp: None,
                     response_body: None,
                 };
                 let _ = traffic_tx.try_send(request_entry);
@@ -2729,6 +2769,7 @@ where
                     request_body: None,
                     response_status: status_code,
                     response_headers: Some(response_headers_map.clone()),
+                    mcp: None,
                     response_body: None,
                 };
                 let _ = traffic_tx.try_send(response_entry);
@@ -2778,6 +2819,10 @@ where
                 .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
                 .map(|(_, v)| v.as_str());
             let decompressed_body = decompress_body(&response_body, content_encoding);
+            let request_mcp = classify_mcp_request(Some(&headers_map), Some(&body));
+            let response_mcp = request_mcp.as_ref().map(|info| {
+                info.for_response(Some(&response_headers_map), Some(&decompressed_body))
+            });
 
             //
             // Send to service.
@@ -2796,6 +2841,7 @@ where
                 request_body: if body.is_empty() { None } else { Some(body) },
                 response_status: None,
                 response_headers: None,
+                mcp: request_mcp,
                 response_body: None,
             };
             let _ = traffic_tx.try_send(request_entry);
@@ -2814,6 +2860,7 @@ where
                 request_body: None,
                 response_status: status_code,
                 response_headers: Some(response_headers_map),
+                mcp: response_mcp,
                 response_body: if decompressed_body.is_empty() {
                     None
                 } else {
@@ -2920,6 +2967,7 @@ where
                                 request_body: None,
                                 response_status: None,
                                 response_headers: None,
+                                mcp: None,
                                 response_body: Some(message),
                             };
                             let _ = traffic_tx.try_send(entry);
@@ -2979,6 +3027,7 @@ where
                                 request_body: Some(message),
                                 response_status: None,
                                 response_headers: None,
+                                mcp: None,
                                 response_body: None,
                             };
                             let _ = traffic_tx.try_send(entry);
@@ -3794,6 +3843,10 @@ async fn handle_http_request(
             &url_str,
         ) {
             let decompressed_body = decompress_body(&response_body, content_encoding.as_deref());
+            let request_mcp = classify_mcp_request(Some(&req_headers), Some(&body_bytes));
+            let response_mcp = request_mcp
+                .as_ref()
+                .map(|info| info.for_response(Some(&resp_headers), Some(&decompressed_body)));
 
             let request_entry = InterceptedTrafficEntry {
                 id: None,
@@ -3813,6 +3866,7 @@ async fn handle_http_request(
                 },
                 response_status: None,
                 response_headers: None,
+                mcp: request_mcp,
                 response_body: None,
             };
             let _ = traffic_tx.try_send(request_entry);
@@ -3831,6 +3885,7 @@ async fn handle_http_request(
                 request_body: None,
                 response_status: Some(status_code),
                 response_headers: Some(resp_headers.clone()),
+                mcp: response_mcp,
                 response_body: if decompressed_body.is_empty() {
                     None
                 } else {
@@ -4001,6 +4056,7 @@ async fn handle_plain_websocket(
                 request_body: None,
                 response_status: None,
                 response_headers: None,
+                mcp: None,
                 response_body: None,
             });
             let _ = traffic_tx.try_send(InterceptedTrafficEntry {
@@ -4017,6 +4073,7 @@ async fn handle_plain_websocket(
                 request_body: None,
                 response_status: Some(status),
                 response_headers: Some(response_headers_map),
+                mcp: None,
                 response_body: (!captured_response.is_empty()).then_some(captured_response),
             });
         }
@@ -4055,6 +4112,7 @@ async fn handle_plain_websocket(
             request_body: None,
             response_status: None,
             response_headers: None,
+            mcp: None,
             response_body: None,
         };
         let _ = traffic_tx.try_send(request_entry);
@@ -4072,6 +4130,7 @@ async fn handle_plain_websocket(
             request_body: None,
             response_status: Some(status),
             response_headers: Some(response_headers_map),
+            mcp: None,
             response_body: None,
         };
         let _ = traffic_tx.try_send(response_entry);

@@ -501,6 +501,52 @@ impl Database {
             }
         }
 
+        //
+        // Migration: MCP classification columns on intercepted_traffic, set
+        // by the node when an exchange is MCP JSON-RPC. They back the
+        // McpTrafficLogs log-query table, which filters on mcp_method.
+        //
+        const MCP_COLUMNS: &[(&str, &str, &str)] = &[
+            ("mcp_method", "TEXT", "TEXT"),
+            ("mcp_name", "TEXT", "TEXT"),
+            ("mcp_protocol_version", "TEXT", "TEXT"),
+            ("mcp_session_id", "TEXT", "TEXT"),
+            ("mcp_jsonrpc_id", "TEXT", "TEXT"),
+            ("mcp_is_error", "INTEGER", "BIGINT"),
+        ];
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                for (column, sqlite_type, _) in MCP_COLUMNS {
+                    let _ = sqlx::query(&format!(
+                        "ALTER TABLE intercepted_traffic ADD COLUMN {} {}",
+                        column, sqlite_type
+                    ))
+                    .execute(pool)
+                    .await;
+                }
+                let _ = sqlx::query(
+                    "CREATE INDEX IF NOT EXISTS idx_traffic_mcp_method ON intercepted_traffic(mcp_method)",
+                )
+                .execute(pool)
+                .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                for (column, _, pg_type) in MCP_COLUMNS {
+                    let _ = sqlx::query(&format!(
+                        "ALTER TABLE intercepted_traffic ADD COLUMN IF NOT EXISTS {} {}",
+                        column, pg_type
+                    ))
+                    .execute(pool)
+                    .await;
+                }
+                let _ = sqlx::query(
+                    "CREATE INDEX IF NOT EXISTS idx_traffic_mcp_method ON intercepted_traffic(mcp_method)",
+                )
+                .execute(pool)
+                .await;
+            }
+        }
+
         Ok(())
     }
 
@@ -748,6 +794,7 @@ mod foreign_key_tests {
             request_body: None,
             response_status: Some(200),
             response_headers: None,
+            mcp: None,
             response_body: None,
         }
     }

@@ -2778,6 +2778,9 @@ pub struct InterceptedTrafficEntry {
     pub response_headers: Option<IndexMap<String, String>>,
     /// Response body (may be large, stored as bytes)
     pub response_body: Option<Vec<u8>>,
+    /// MCP classification, set by the node when the exchange is MCP JSON-RPC
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<crate::mcp::McpTrafficInfo>,
 }
 
 impl InterceptedTrafficEntry {

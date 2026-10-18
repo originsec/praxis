@@ -181,9 +181,14 @@ fn build_row(state: &InterceptState, row: &DisplayRow) -> Row<'static> {
                         .add_modifier(Modifier::BOLD),
                 )),
                 Cell::from(format_http_status(entry.response_status)),
-                Cell::from(Span::styled(
-                    truncate(&entry.url, 70),
-                    Style::default().fg(TEXT),
+                Cell::from(Line::from(
+                    mcp_badge(entry)
+                        .into_iter()
+                        .chain([Span::styled(
+                            truncate(&entry.url, 70),
+                            Style::default().fg(TEXT),
+                        )])
+                        .collect::<Vec<_>>(),
                 )),
             ])
         }
@@ -498,6 +503,28 @@ fn format_http_status(status: Option<u16>) -> Span<'static> {
             )
         }
     }
+}
+
+//
+// "MCP <method> <name>" prefix for rows the node classified as MCP; red when
+// the response was a JSON-RPC or tool error.
+//
+
+fn mcp_badge(entry: &InterceptedTrafficEntry) -> Option<Span<'static>> {
+    let mcp = entry.mcp.as_ref()?;
+    let label = match &mcp.name {
+        Some(name) => format!("MCP {} {} ", mcp.method, truncate(name, 32)),
+        None => format!("MCP {} ", mcp.method),
+    };
+    let color = if mcp.is_error == Some(true) {
+        STATUS_5XX
+    } else {
+        ACCENT
+    };
+    Some(Span::styled(
+        label,
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ))
 }
 
 pub fn method_color(method: &str) -> ratatui::style::Color {

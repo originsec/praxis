@@ -84,6 +84,69 @@ pub const TABLES: &[TableSchema] = &[
         ],
     },
     TableSchema {
+        name: "McpTrafficLogs",
+        description: "Intercepted traffic classified as MCP",
+        source: "DB",
+        columns: &[
+            ColumnSchema {
+                name: "timestamp",
+                description: "Capture time",
+            },
+            ColumnSchema {
+                name: "traffic_id",
+                description: "Traffic record ID",
+            },
+            ColumnSchema {
+                name: "node_id",
+                description: "Node identifier",
+            },
+            ColumnSchema {
+                name: "agent_short_name",
+                description: "Agent short name",
+            },
+            ColumnSchema {
+                name: "direction",
+                description: "Request/response",
+            },
+            ColumnSchema {
+                name: "host",
+                description: "MCP server host",
+            },
+            ColumnSchema {
+                name: "url",
+                description: "Full URL",
+            },
+            ColumnSchema {
+                name: "mcp_method",
+                description: "JSON-RPC method",
+            },
+            ColumnSchema {
+                name: "mcp_name",
+                description: "Tool/prompt name or resource URI",
+            },
+            ColumnSchema {
+                name: "protocol_version",
+                description: "MCP protocol version",
+            },
+            ColumnSchema {
+                name: "session_id",
+                description: "Legacy Mcp-Session-Id",
+            },
+            ColumnSchema {
+                name: "jsonrpc_id",
+                description: "JSON-RPC request id",
+            },
+            ColumnSchema {
+                name: "is_error",
+                description: "Response is an error",
+            },
+            ColumnSchema {
+                name: "response_status",
+                description: "HTTP status code",
+            },
+        ],
+    },
+    TableSchema {
         name: "NodeLogs",
         description: "Connected nodes",
         source: "MEM",

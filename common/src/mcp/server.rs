@@ -2,7 +2,7 @@ use anyhow::Result;
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
 };
 use serde_json::json;
@@ -121,7 +121,7 @@ fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
 }
 
 fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         serde_json::to_string_pretty(&value).unwrap(),
     )]))
 }
@@ -1395,8 +1395,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
 #[tool_handler(router = self.tool_router)]
 impl<C: McpClient + Clone + 'static> ServerHandler for PraxisServer<C> {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION))
             .with_instructions(
                 "Praxis C2 framework for orchestrating AI coding agents. \

@@ -361,6 +361,19 @@ the trigger engine for a match may still complete; Clear does not revoke
 in-flight match side effects. A generation check skips only triggers that
 have not yet entered the engine when Clear has already advanced.
 
+### MCP Traffic Classification
+
+The node tags captured HTTP exchanges that carry [Model Context Protocol](./mcp.md) JSON-RPC, so MCP calls an agent makes to remote MCP servers can be queried on their own. Classification is attempted on every captured request, header path first:
+
+1. **Headers** — revision 2026-07-28 requires `Mcp-Method` on every Streamable HTTP POST and `Mcp-Name` on `tools/call`, `resources/read`, and `prompts/get`. A request with `Mcp-Method` is MCP; `Mcp-Name` values in the `=?base64?…?=` form are decoded.
+2. **Body fallback** — older revisions (2025-11-25 and earlier) send no method header, so the JSON-RPC body's `method` is matched against the MCP namespace (`tools/*`, `resources/*`, `prompts/*`, `notifications/*`, `server/discover`, `subscriptions/listen`, `completion/complete`, `logging/setLevel`, `sampling/createMessage`, `elicitation/create`, `roots/list`). Methods other JSON-RPC protocols share — `initialize` (ACP, LSP), `ping`, and `tasks/*` (A2A) — only count when something else marks the request as MCP: an `MCP-Protocol-Version` or `Mcp-Session-Id` header, an `io.modelcontextprotocol/*` `_meta` key, or (for `initialize`) a date-shaped `protocolVersion`. ACP's integer `protocolVersion` and LSP's `processId`-style initialize are not misclassified.
+
+For each MCP exchange the node records the method, target name (tool/prompt name or resource URI), protocol version (header, `_meta`, or initialize params/result), legacy `Mcp-Session-Id`, and JSON-RPC id. The response entry gets the same fields plus `is_error`, set when the response (plain JSON or an SSE stream) is a JSON-RPC error or a tool result with `isError: true`.
+
+On HTTP/1.1 the request and response are classified together. On HTTP/2, `H2_HEADERS` and `H2_DATA` frames are classified per stream (headers first, then the request body), and response frames on a classified stream are tagged until the stream ends; a body split across several DATA frames is only classified from the headers.
+
+Classified entries show an `MCP <method> <name>` badge in the Traffic tab URL column (red when the response was an error) and are queryable through the [`McpTrafficLogs`](./log-query.md#mcptrafficlogs) log-query table.
+
 ## Cleanup and Recovery
 
 Enable records recovery intent before changing proxy settings, hosts/routes,

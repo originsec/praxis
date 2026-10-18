@@ -1069,56 +1069,33 @@ impl McpServerManager {
         let bind_addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
         common::log_info!("Starting MCP streamable-http server on {}", bind_addr);
 
-        //
-        // rmcp 1.x replaced SSE transport with streamable-http. The server
-        // mounts at /mcp (was /sse) and we build it as an axum service
-        // instead of letting rmcp own the listener loop.
-        //
-
         let ct = CancellationToken::new();
         let rabbitmq_url = rabbitmq_url.to_string();
+        let shared_url = rabbitmq_url.clone();
 
-        let service_ct = ct.clone();
-
-        //
-        // Orchestrator (and other) MCP clients hold a session for the life of
-        // a conversation — often idle for long stretches between prompts.
-        // rmcp's default LocalSessionManager keep_alive is 5 minutes of
-        // inactivity, which kills the session worker and leaves the client
-        // reconnecting to a deleted session (404 spam) while tool calls fail.
-        // Session lifetime is already owned by the orchestrator task (it drops
-        // the RunningService on close/replace), so disable the inactivity
-        // timeout here.
-        //
-        let mut session_manager =
-            rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default();
-        session_manager.session_config.keep_alive = None;
-
-        let service: rmcp::transport::streamable_http_server::StreamableHttpService<
-            PraxisServer<ServiceMcpClient>,
-            rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
-        > = rmcp::transport::streamable_http_server::StreamableHttpService::new(
-            move || {
-                let url = rabbitmq_url.clone();
-                let client = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        ServiceMcpClient::connect(&url, 600).await
-                    })
-                });
-                match client {
-                    Ok(c) => Ok(PraxisServer::with_client(c)),
-                    Err(e) => {
-                        common::log_error!("Failed to create MCP client: {}", e);
-                        Err(std::io::Error::other(format!("Failed to create MCP client: {}", e)))
-                    }
+        let legacy_factory = move || {
+            let url = rabbitmq_url.clone();
+            let client = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(async { ServiceMcpClient::connect(&url, 600).await })
+            });
+            match client {
+                Ok(c) => Ok(PraxisServer::with_client(c)),
+                Err(e) => {
+                    common::log_error!("Failed to create MCP client: {}", e);
+                    Err(std::io::Error::other(format!(
+                        "Failed to create MCP client: {}",
+                        e
+                    )))
                 }
-            },
-            std::sync::Arc::new(session_manager),
-            rmcp::transport::streamable_http_server::StreamableHttpServerConfig::default()
-                .with_cancellation_token(service_ct),
-        );
+            }
+        };
+        let shared = PraxisServer::<ServiceMcpClient>::new(move || {
+            let url = shared_url.clone();
+            async move { ServiceMcpClient::connect(&url, 600).await }
+        });
 
-        let router = axum::Router::new().nest_service("/mcp", service);
+        let router = mcp_router(legacy_factory, shared, ct.clone());
         let listener = tokio::net::TcpListener::bind(bind_addr).await?;
         let shutdown_ct = ct.clone();
         let serve_task = tokio::spawn(async move {
@@ -1177,6 +1154,89 @@ impl McpServerManager {
     }
 }
 
+//
+// Build the /mcp endpoint. It serves two protocol eras side by side:
+//
+// - Legacy revisions (2025-11-25 and earlier) open with an initialize
+//   handshake and hold an Mcp-Session-Id. rmcp calls the service factory
+//   once per session, so each session gets its own RabbitMQ client.
+// - Revision 2026-07-28 is stateless: every request carries its protocol
+//   version (MCP-Protocol-Version header + `_meta`) and rmcp calls the
+//   factory once per request. Connecting and registering a RabbitMQ client
+//   per request is far too heavy, so these requests go to a second rmcp
+//   service whose factory hands out clones of one lazily-connected
+//   PraxisServer. PraxisServer holds its client lock for the duration of a
+//   tool call, so modern tool calls are serialised across clients.
+//
+// Routing is only an optimisation: either rmcp service can serve either era
+// (rmcp decides per request), so a misrouted request still works.
+//
+
+fn mcp_router(
+    legacy_factory: impl Fn() -> Result<PraxisServer<ServiceMcpClient>, std::io::Error>
+    + Send
+    + Sync
+    + 'static,
+    shared: PraxisServer<ServiceMcpClient>,
+    ct: CancellationToken,
+) -> axum::Router {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+
+    //
+    // Orchestrator (and other) MCP clients hold a legacy session for the
+    // life of a conversation — often idle for long stretches between
+    // prompts. rmcp's default LocalSessionManager keep_alive is 5 minutes of
+    // inactivity, which kills the session worker and leaves the client
+    // reconnecting to a deleted session (404 spam) while tool calls fail.
+    // Session lifetime is already owned by the orchestrator task (it drops
+    // the RunningService on close/replace), so disable the inactivity
+    // timeout here.
+    //
+
+    let mut session_manager = LocalSessionManager::default();
+    session_manager.session_config.keep_alive = None;
+
+    let legacy = StreamableHttpService::new(
+        legacy_factory,
+        Arc::new(session_manager),
+        StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token()),
+    );
+    let modern = StreamableHttpService::new(
+        move || Ok(shared.clone()),
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default()
+            .with_legacy_session_mode(false)
+            .with_cancellation_token(ct.child_token()),
+    );
+
+    let endpoint = axum::routing::any(move |request: axum::extract::Request| {
+        let legacy = legacy.clone();
+        let modern = modern.clone();
+        async move {
+            if is_modern_mcp_request(request.headers()) {
+                modern.handle(request).await
+            } else {
+                legacy.handle(request).await
+            }
+        }
+    });
+    axum::Router::new().nest_service("/mcp", endpoint)
+}
+
+//
+// Protocol versions are ISO dates, so string order is release order.
+// Requests without the header are legacy (pre-2025-06-18 clients omit it).
+//
+
+fn is_modern_mcp_request(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(common::mcp::traffic::HEADER_MCP_PROTOCOL_VERSION)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v >= rmcp::model::ProtocolVersion::V_2026_07_28.as_str())
+}
+
 impl Default for McpServerManager {
     fn default() -> Self {
         Self::new()
@@ -1220,6 +1280,201 @@ mod tests {
         ] {
             assert!(server.get_tool(name).is_some(), "missing MCP tool {name}");
         }
+    }
+
+    //
+    // Dual-era MCP endpoint tests. The PraxisServer client factory always
+    // fails, which is fine: listing tools and discovery never need a client.
+    // The legacy factory counts its calls so tests can prove which rmcp
+    // service handled a request.
+    //
+
+    fn offline_server() -> PraxisServer<ServiceMcpClient> {
+        PraxisServer::new(|| async { Err(anyhow!("no RabbitMQ in tests")) })
+    }
+
+    async fn spawn_dual_era_server() -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        CancellationToken,
+    ) {
+        let legacy_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = legacy_calls.clone();
+        let ct = CancellationToken::new();
+        let router = mcp_router(
+            move || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(offline_server())
+            },
+            offline_server(),
+            ct.clone(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = ct.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async move { shutdown.cancelled_owned().await })
+                .await;
+        });
+        (format!("http://{}/mcp", addr), legacy_calls, ct)
+    }
+
+    //
+    // Streamable HTTP answers with plain JSON or an SSE stream; return the
+    // first JSON-RPC message either way.
+    //
+
+    async fn first_message(response: reqwest::Response) -> Value {
+        let text = response.text().await.unwrap();
+        serde_json::from_str(&text).unwrap_or_else(|_| {
+            text.lines()
+                .filter_map(|l| l.strip_prefix("data:"))
+                .find_map(|d| serde_json::from_str(d.trim()).ok())
+                .unwrap_or_else(|| panic!("no JSON-RPC message in response: {text}"))
+        })
+    }
+
+    fn modern_meta() -> Value {
+        json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "praxis-test", "version": "0"},
+            "io.modelcontextprotocol/clientCapabilities": {}
+        })
+    }
+
+    async fn post(url: &str, headers: &[(&str, &str)], body: Value) -> reqwest::Response {
+        let mut request = reqwest::Client::new()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
+        for (k, v) in headers {
+            request = request.header(*k, *v);
+        }
+        request.body(body.to_string()).send().await.unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn legacy_client_uses_initialize_session() {
+        use rmcp::ServiceExt;
+
+        let (url, legacy_calls, ct) = spawn_dual_era_server().await;
+        let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url.as_str());
+        let client = ().serve(transport).await.expect("legacy initialize");
+
+        let info = client.peer_info().expect("server info");
+        assert_eq!(
+            info.protocol_version,
+            rmcp::model::ProtocolVersion::V_2025_11_25
+        );
+        let tools = client.list_all_tools().await.unwrap();
+        assert!(tools.iter().any(|t| t.name == "node_list"));
+        assert_eq!(legacy_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let _ = client.cancel().await;
+        ct.cancel();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn modern_client_is_served_statelessly() {
+        use rmcp::ClientServiceExt;
+
+        let (url, legacy_calls, ct) = spawn_dual_era_server().await;
+        let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url.as_str());
+        let client = ()
+            .serve_with_lifecycle(
+                transport,
+                rmcp::ClientLifecycleMode::Discover {
+                    preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+                },
+            )
+            .await
+            .expect("modern discover");
+
+        let info = client.peer_info().expect("server info");
+        assert_eq!(
+            info.protocol_version,
+            rmcp::model::ProtocolVersion::V_2026_07_28
+        );
+        let tools = client.list_all_tools().await.unwrap();
+        assert!(tools.iter().any(|t| t.name == "node_list"));
+        assert_eq!(
+            legacy_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "modern requests must not build a per-session client"
+        );
+
+        let _ = client.cancel().await;
+        ct.cancel();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn raw_http_requests_for_both_eras() {
+        let (url, _legacy_calls, ct) = spawn_dual_era_server().await;
+
+        //
+        // 2026-07-28: discovery advertises both eras, and a tools/list
+        // with the standard headers is answered without a session.
+        //
+
+        let discover = post(
+            &url,
+            &[
+                ("MCP-Protocol-Version", "2026-07-28"),
+                ("Mcp-Method", "server/discover"),
+            ],
+            json!({"jsonrpc": "2.0", "id": 1, "method": "server/discover",
+                   "params": {"_meta": modern_meta()}}),
+        )
+        .await;
+        assert_eq!(discover.status(), 200);
+        let discover = first_message(discover).await;
+        let versions = discover["result"]["supportedVersions"].as_array().unwrap();
+        for v in ["2026-07-28", "2025-11-25"] {
+            assert!(versions.contains(&json!(v)), "missing {v}: {discover}");
+        }
+
+        let list = post(
+            &url,
+            &[
+                ("MCP-Protocol-Version", "2026-07-28"),
+                ("Mcp-Method", "tools/list"),
+            ],
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+                   "params": {"_meta": modern_meta()}}),
+        )
+        .await;
+        assert_eq!(list.status(), 200);
+        assert!(list.headers().get("mcp-session-id").is_none());
+        let list = first_message(list).await;
+        assert!(
+            list["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["name"] == "node_list")
+        );
+
+        //
+        // 2025-11-25: initialize mints a session id.
+        //
+
+        let init = post(
+            &url,
+            &[],
+            json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "praxis-test", "version": "0"}
+            }}),
+        )
+        .await;
+        assert_eq!(init.status(), 200);
+        assert!(init.headers().get("mcp-session-id").is_some());
+        let init = first_message(init).await;
+        assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
+
+        ct.cancel();
     }
 
     #[tokio::test]

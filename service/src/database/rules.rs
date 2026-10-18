@@ -326,7 +326,7 @@ impl Database {
             Err(_) => return Ok(0),
         };
         let limit = limit.min(MAX_TRAFFIC_QUERY_LIMIT).max(1);
-        let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body
+        let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error
              FROM intercepted_traffic ORDER BY id DESC LIMIT $1";
         let rows = self.db_fetch_all(sql, db_args![limit as i64]).await?;
         let mut created = 0usize;
@@ -454,6 +454,7 @@ fn parse_match_with_traffic_metadata_row(row: &DbRow) -> Result<TrafficMatchWith
             request_body: None,
             response_status: response_status.map(|s| s as u16),
             response_headers,
+            mcp: None,
             response_body: None,
         },
     })
