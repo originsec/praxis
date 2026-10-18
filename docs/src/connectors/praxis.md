@@ -92,7 +92,7 @@ There is no permission gate; the agent runs every tool call it produces. Treat t
 
 ## Tool calling
 
-The agent currently uses **manual tool-call parsing**: a system-prompt rule teaches the model to emit tool invocations as a JSON block (`{"tool": "run_command", "args": {…}}`) and `parse_manual_tool_call` extracts them from the streamed text. Native function calling (Anthropic `tool_use`, OpenAI `tools`) is a planned follow-up — it requires extending `common::ai::ChatCompletionRequest` with a typed `tools` field across all providers.
+The agent currently uses **manual tool-call parsing**: a system-prompt rule teaches the model to emit tool invocations as a JSON block (`{"tool": "run_command", "args": {…}}`) and `parse_manual_tool_call` extracts them from the streamed text. The shared AI client now supports [native tool calling](../development/ai-tools.md), which the Orchestrator uses. This connector still uses its existing text-parser loop; migrating the connector is a separate follow-up.
 
 Practical implication: the raw tool-call JSON streams to the user as text alongside the structured `ToolCall` notification. Clients render the structured event as an inline tool call (with status updates), but the JSON itself is also visible in the chunk stream.
 
@@ -199,7 +199,7 @@ Wire format is camelCase. The two configurable limits (`maxToolIterations`, `com
 
 ### Sessions stream raw JSON tool-call blocks alongside the structured tool call
 
-Expected with the current manual tool-call parser. The structured `ToolCall` event is what UIs render inline; the raw JSON is part of the underlying assistant text. Native function calling will eliminate this once landed.
+Expected with the current manual tool-call parser. The structured `ToolCall` event is what UIs render inline; the raw JSON is part of the underlying assistant text. Migrating this connector to the shared native tool-calling interface would remove those raw JSON blocks.
 
 ### `run_command` cancellation is slow
 

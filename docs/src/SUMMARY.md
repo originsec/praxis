@@ -17,6 +17,7 @@
 - [Interception](./usage/interception.md)
 - [Log Query](./usage/log-query.md)
 - [Orchestrator](./usage/orchestrator.md)
+- [Durable Missions](./usage/missions.md)
 - [Help Assistant](./usage/help-assistant.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [MCP Server](./usage/mcp.md)
@@ -55,6 +56,7 @@
 
 - [Contributing](./development/overview.md)
 - [Semantic Parser](./development/semantic-parser.md)
+- [Native AI Tool Calls](./development/ai-tools.md)
 
 # Reference
 

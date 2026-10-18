@@ -41,6 +41,35 @@ use super::ServiceContext;
 
 pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Result<()> {
     match message {
+        ClientSignalMessage::MissionRequest {
+            client_id,
+            request_id,
+            command,
+        } => {
+            let manager = ctx.mission_manager.clone();
+            let channel = ctx.client_publish_channel.clone();
+
+            //
+            // Database-backed recovery and event queries must not block the
+            // dispatcher that delivers node replies and cancellation requests.
+            //
+
+            tokio::spawn(async move {
+                let result = manager
+                    .handle(command)
+                    .await
+                    .map_err(|error| error.to_string());
+                if let Err(error) = send_to_client(
+                    &channel,
+                    &client_id,
+                    ClientDirectMessage::MissionResponse { request_id, result },
+                )
+                .await
+                {
+                    tracing::warn!("Unable to deliver mission response: {error}");
+                }
+            });
+        }
         //
         // Client lifecycle.
         //
@@ -143,9 +172,7 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             rule_id,
             limit,
             offset,
-        } => {
-            handle_traffic_matches(ctx, client_id, request_id, rule_id, limit, offset).await
-        }
+        } => handle_traffic_matches(ctx, client_id, request_id, rule_id, limit, offset).await,
         ClientSignalMessage::TrafficClear {
             client_id,
             request_id,
@@ -226,9 +253,7 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             client_id,
             request_id,
             node_id,
-        } => {
-            handle_intercept_disable(ctx, client_id, request_id, node_id).await
-        }
+        } => handle_intercept_disable(ctx, client_id, request_id, node_id).await,
 
         //
         // Application logging.
@@ -315,6 +340,7 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         //
         ClientSignalMessage::ChainRun {
             client_id,
+            request_id,
             chain_id,
             node_id,
             agent_short_name,
@@ -324,6 +350,7 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_chain_run(
                 ctx,
                 client_id,
+                request_id,
                 chain_id,
                 node_id,
                 agent_short_name,

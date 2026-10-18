@@ -32,6 +32,34 @@ LLM-powered conversation interface for coordinating operations across the Praxis
   between lines first, then through command history. Vertical movement preserves
   the character column in Unicode text and stops at the end of shorter lines.
 
+### Durable missions
+
+Use `/mission` commands in the Orchestrator input. They share the CLI syntax,
+including quoted arguments, model selection, budgets, and `--json`:
+
+```text
+/mission create audit "Inspect agent configuration and report evidence" --scope "Read-only"
+/mission list
+/mission show MISSION_ID
+/mission attach MISSION_ID
+/mission steer MISSION_ID "Focus on configuration drift"
+/mission pause MISSION_ID
+/mission resume MISSION_ID --reconciliation "Confirmed the last tool did not write files"
+/mission cancel MISSION_ID
+/mission detach
+/mission --help
+```
+
+Results and polled events appear in the conversation. Commands run outside the
+UI event loop, so the terminal remains responsive while waiting for the service.
+`attach` and `watch` are aliases; `--after SEQUENCE` skips earlier events.
+`/mission detach`, `Ctrl+C`, and closing the TUI stop watching without cancelling
+the service-side mission. Use explicit `pause` or `cancel` to stop mission work.
+`Ctrl+C` still cancels an ordinary in-flight orchestrator prompt, if present.
+The command palette includes **mission list**. Ordinary chat and local
+`--resume`/`--continue` sessions continue to work as before; durable mission IDs
+refer to service records that can be inspected from another client.
+
 ## Nodes (`Ctrl+L`)
 
 Node and agent management with integrated session chat and terminal access:

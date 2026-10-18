@@ -87,6 +87,7 @@ All recon tools take a `node` prefix and an `agent` short-name.
 - `session_create` — Create a new ACP session (`node`, `agent`, optional `project`, `yolo`). Returns a `session_id`.
 - `session_list` — Enumerate active ACP sessions on a node (`node`). Returns each session's id (full + short), title, and cwd.
 - `session_prompt` — Send a prompt to a session (`node`, `session_id`, `prompt`)
+- `session_cancel` — Cancel an active prompt without closing its session (`node`, `session_id`). Cancellation bypasses long-running tool requests.
 - `session_close` — Close a session (`node`, `session_id`)
 
 ### Operations & Chains
@@ -95,9 +96,9 @@ All recon tools take a `node` prefix and an `agent` short-name.
 - `op_definition` — Show the full definition of an operation or chain
 - `chain_create` — Create a reusable linear chain from existing operations
 - `op_create` — Create a new operation and persist it to the library. **Warning:** this writes a real, reusable operation — getting the prompt wrong can cause unintended agent behavior on target systems the next time it runs.
-- `op_run` — Run an operation or chain
+- `op_run` — Run an operation or chain. Returns the existing short ID plus `id_full` for operations or `execution_id_full` for chains. Chain launches use request-correlated replies, so simultaneous launches receive their own execution IDs. Preserve full IDs to track and cancel child work reliably.
 - `op_info` — Show full info for an operation or chain execution
-- `op_cancel` — Cancel a running operation or chain execution
+- `op_cancel` — Cancel a running operation or chain execution. Accepts full IDs as well as prefixes and bypasses long-running tool requests; the execution must be present in the client cache (`op_list` refreshes it).
 - `op_delete` — Permanently remove an operation definition. **Warning:** this is destructive and cannot be undone.
 - `op_list` — List tracked operations and chain executions
 
@@ -163,3 +164,44 @@ Service-side validation and database errors are returned as MCP tool errors.
 ### Traffic
 
 - `traffic_search` — Search intercepted traffic
+
+## Durable mission tool
+
+The `mission` tool accepts a tagged command object. It returns immediately after
+the service accepts the command; creating a mission does not hold the MCP request
+open for the duration of the work. Disconnecting the MCP client leaves it running.
+
+```json
+{
+  "action": "create",
+  "spec": {
+    "name": "Configuration audit",
+    "objective": "Inspect selected agent configuration and cite evidence",
+    "scope": "Read-only inspection of node abc",
+    "budget": {"max_iterations": 30, "max_tokens": 200000, "max_active_seconds": 1800},
+    "verify": true
+  }
+}
+```
+
+Supported actions:
+
+| Action | Fields |
+|--------|--------|
+| `create` | `spec`: name, objective, optional scope/model/budget/verify |
+| `list` | None |
+| `get` | `id` |
+| `events` | `id`, optional `after` event sequence (default 0) |
+| `steer` | `id`, `instruction` |
+| `pause` | `id` |
+| `resume` | `id`, optional `reconciliation`, optional replacement `budget` |
+| `cancel` | `id` |
+
+Responses are tagged as `mission`, `missions`, or `events`, with their payload in
+`data`. Poll `events` with the last observed sequence for incremental progress,
+and `get` for status, checkpoint, budget usage, pending actions, and results.
+Event requests return at most 500 records; advance `after` to fetch further pages.
+Pause/cancel remain independent requests while other clients poll. If a request
+times out, inspect mission records before repeating a mutation. Recovery from
+uncertain side effects requires an operator reconciliation; see
+[Durable missions](./missions.md).

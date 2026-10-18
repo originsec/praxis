@@ -5,3 +5,5 @@ pub mod openai;
 pub use anthropic::AnthropicClient;
 pub use gemini::GeminiClient;
 pub use openai::OpenAIClient;
+
+mod wire;

@@ -1,6 +1,6 @@
 use crate::acp::AcpNotification;
 use crate::client::Client;
-use crate::intercept_live::{try_push_bounded, LivePushResult, INTERCEPT_LIVE_CAPACITY};
+use crate::intercept_live::{INTERCEPT_LIVE_CAPACITY, LivePushResult, try_push_bounded};
 use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
     InterceptRule, InterceptStatus, InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult,
@@ -13,6 +13,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
+    MissionOutput {
+        watch_id: Option<String>,
+        result: Result<String, String>,
+    },
     Terminal(Event),
     AcpNotification(AcpNotification),
     SessionListPoll,
@@ -81,7 +85,10 @@ pub enum AppEvent {
     /// TrafficGet returned an entry with no bodies — plant empty sentinel.
     InterceptBodyFetchEmpty(i64),
     /// Body fetch failed — clear inflight so retry works and surface the error.
-    InterceptBodyFetchFailed { id: i64, message: String },
+    InterceptBodyFetchFailed {
+        id: i64,
+        message: String,
+    },
     /// Outcome of an enable/disable toggle run off the event loop.
     InterceptToggleResult {
         node_id: String,

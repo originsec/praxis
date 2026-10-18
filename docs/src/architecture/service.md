@@ -124,10 +124,10 @@ Agent mode uses system prompts embedded at build time:
 | Prompt | Location | Purpose |
 |--------|----------|---------|
 | Semantic Op Agent | `service/src/prompts/semantic_op_agent.prompt` | Orchestrator behavior |
-| Tool Calling | `common/src/prompts/tool_calling.prompt` | Tool call JSON format |
+| Tool Calling | `common/src/prompts/tool_calling.prompt` | Legacy text tool-call format for semantic agents and explicit chat compatibility mode |
 | Task Completion | `common/src/prompts/task_completion.prompt` | Completion signal format |
 
-These prompts are compiled into the binary using `include_str!` and cannot be modified at runtime. This ensures consistent behavior and prevents prompt injection.
+These prompts are compiled into the binary using `include_str!` and cannot be modified at runtime. The interactive Orchestrator and durable missions send native tool schemas through `common::ai`; the Orchestrator appends the legacy tool-format prompt only when `llm_orchestrator_native_tools=false`. Native calls preserve provider call IDs and signed assistant history. The shared inference engine provides context compaction and cancellable network waits. Embedded prompts provide a consistent baseline but do not by themselves prevent prompt injection.
 
 ### Model Override
 
@@ -217,6 +217,22 @@ Event triggers fire outside the polling loop, in direct response to events:
 ### Trigger Storage
 
 Triggers are stored in the `chain_triggers` database table with JSON-serialized `trigger_config` and `target_spec` columns. The engine queries this table for due triggers and event-based triggers, and updates it after firing.
+
+## Durable Missions
+
+The mission manager owns background Orchestrator workers independently of client
+connections. Each mission persists its objective, budget, model history and
+structured checkpoint in `missions`. Compare-and-swap revisions reject stale
+writers. The append-only `mission_events` journal records steering, dispatch,
+results, usage and verification; per-mission ordering supports cursor-based
+watching and steering delivery on SQLite and PostgreSQL.
+
+Workers reserve model budgets before inference and record tool intent before
+execution. Startup marks unfinished work interrupted and preserves durable stop
+requests. Resumption recovers recorded outcomes and requires operator
+reconciliation for dispatched calls with unknown outcomes. Atomic flags interrupt
+model and tool waits; child cleanup is bounded. See [Durable Missions](../usage/missions.md)
+for controls and verification limits.
 
 ## Database
 

@@ -1,3 +1,4 @@
+pub mod mission_requests;
 mod client;
 mod frame;
 pub mod ops;

@@ -396,9 +396,31 @@ pub(super) async fn handle_chain_set_disabled(
 // Chain execution
 // ---------------------------------------------------------------------------
 
+fn chain_run_response(
+    request_id: Option<&str>,
+    chain_id: &str,
+    result: Result<String, String>,
+) -> ClientDirectMessage {
+    if let Some(request_id) = request_id {
+        ClientDirectMessage::ChainRunResponse {
+            request_id: request_id.to_string(),
+            result,
+        }
+    } else {
+        match result {
+            Ok(execution_id) => ClientDirectMessage::ChainExecutionStarted {
+                execution_id,
+                chain_id: chain_id.to_string(),
+            },
+            Err(message) => ClientDirectMessage::ChainError { message },
+        }
+    }
+}
+
 pub(super) async fn handle_chain_run(
     ctx: &ServiceContext,
     client_id: String,
+    request_id: Option<String>,
     chain_id: String,
     node_id: String,
     agent_short_name: String,
@@ -414,6 +436,20 @@ pub(super) async fn handle_chain_run(
         target_spec.is_some()
     );
 
+    if request_id.is_some() && target_spec.is_some() {
+        let _ = send_to_client(
+            &ctx.client_publish_channel,
+            &client_id,
+            chain_run_response(
+                request_id.as_deref(),
+                &chain_id,
+                Err("Correlated chain launch requires a single target".into()),
+            ),
+        )
+        .await;
+        return;
+    }
+
     //
     // Get the chain definition.
     //
@@ -423,9 +459,11 @@ pub(super) async fn handle_chain_run(
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
-                ClientDirectMessage::ChainError {
-                    message: format!("Chain not found: {}", chain_id),
-                },
+                chain_run_response(
+                    request_id.as_deref(),
+                    &chain_id,
+                    Err(format!("Chain not found: {}", chain_id)),
+                ),
             )
             .await;
             return;
@@ -434,9 +472,7 @@ pub(super) async fn handle_chain_run(
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
-                ClientDirectMessage::ChainError {
-                    message: e.to_string(),
-                },
+                chain_run_response(request_id.as_deref(), &chain_id, Err(e.to_string())),
             )
             .await;
             return;
@@ -543,10 +579,7 @@ pub(super) async fn handle_chain_run(
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
-                ClientDirectMessage::ChainExecutionStarted {
-                    execution_id,
-                    chain_id,
-                },
+                chain_run_response(request_id.as_deref(), &chain_id, Ok(execution_id)),
             )
             .await;
         }
@@ -554,9 +587,7 @@ pub(super) async fn handle_chain_run(
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
-                ClientDirectMessage::ChainError {
-                    message: e.to_string(),
-                },
+                chain_run_response(request_id.as_deref(), &chain_id, Err(e.to_string())),
             )
             .await;
         }
@@ -867,3 +898,31 @@ pub(super) async fn handle_chain_trigger_list(
 // ---------------------------------------------------------------------------
 // Lua agent scripts
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod correlated_launch_tests {
+    use super::*;
+
+    #[test]
+    fn launch_success_and_error_preserve_request_id() {
+        assert!(
+            matches!(chain_run_response(Some("request-a"), "chain", Ok("execution-a".into())),
+            ClientDirectMessage::ChainRunResponse { request_id, result: Ok(execution_id) }
+            if request_id == "request-a" && execution_id == "execution-a")
+        );
+        assert!(
+            matches!(chain_run_response(Some("request-b"), "chain", Err("missing".into())),
+            ClientDirectMessage::ChainRunResponse { request_id, result: Err(error) }
+            if request_id == "request-b" && error == "missing")
+        );
+    }
+
+    #[test]
+    fn legacy_launch_keeps_existing_response() {
+        assert!(
+            matches!(chain_run_response(None, "chain", Ok("execution".into())),
+            ClientDirectMessage::ChainExecutionStarted { execution_id, chain_id }
+            if execution_id == "execution" && chain_id == "chain")
+        );
+    }
+}

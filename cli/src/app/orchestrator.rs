@@ -106,6 +106,8 @@ impl OrchestratorSessionState {
 }
 
 pub struct OrchestratorState {
+    pub mission_watch_id: Option<String>,
+    pub mission_watch: Option<tokio_util::sync::DropGuard>,
     pub sessions: Vec<OrchestratorSessionState>,
     pub active_session_index: Option<usize>,
     pub input: String,
@@ -196,6 +198,8 @@ impl OrchestratorState {
 impl Default for OrchestratorState {
     fn default() -> Self {
         Self {
+            mission_watch_id: None,
+            mission_watch: None,
             sessions: Vec::new(),
             active_session_index: None,
             input: String::new(),
@@ -464,6 +468,12 @@ impl App {
                     return;
                 }
                 KeyCode::Char('c') => {
+                    if self.orchestrator.mission_watch.take().is_some() {
+                        self.orchestrator.mission_watch_id = None;
+                        self.push_mission_output(Ok(
+                            "Detached from mission; it continues running.".into(),
+                        ));
+                    }
                     if let Some(session) = self.orchestrator.active_session() {
                         if session.is_streaming {
                             let sid = session.session_id.clone();
@@ -509,7 +519,7 @@ impl App {
                     .map(|s| s.is_streaming)
                     .unwrap_or(false);
 
-                if !input.is_empty() && !is_streaming {
+                if !input.is_empty() && (!is_streaming || input.starts_with("/mission")) {
                     //
                     // Save to history.
                     //
@@ -650,10 +660,8 @@ impl App {
                 // Prefer line movement inside a multi-line draft; fall
                 // back to history when already on the first line.
                 //
-                if !input::move_line_up(
-                    &self.orchestrator.input,
-                    &mut self.orchestrator.cursor_pos,
-                ) {
+                if !input::move_line_up(&self.orchestrator.input, &mut self.orchestrator.cursor_pos)
+                {
                     input::history_up(
                         &mut self.orchestrator.input,
                         &mut self.orchestrator.cursor_pos,
@@ -697,8 +705,99 @@ impl App {
         }
     }
 
+    pub(crate) fn push_mission_output(&mut self, result: Result<String, String>) {
+        if self.orchestrator.active_session().is_none() {
+            self.orchestrator
+                .sessions
+                .push(OrchestratorSessionState::new(
+                    String::new(),
+                    "Session".into(),
+                ));
+            self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
+        }
+        if let Some(session) = self.orchestrator.active_session_mut() {
+            session.messages.push(match result {
+                Ok(text) => ConversationEntry::Info(text),
+                Err(error) => ConversationEntry::Error(error),
+            });
+            session.scroll_offset = 0;
+        }
+    }
+
+    fn handle_mission_command(&mut self, input: &str) {
+        use crate::commands::mission::{self, MissionSubcommand};
+        if input == "detach" {
+            self.orchestrator.mission_watch.take();
+            self.orchestrator.mission_watch_id = None;
+            self.push_mission_output(Ok("Detached; mission continues. Use /mission pause ID or /mission cancel ID to stop it.".into()));
+            return;
+        }
+        let args = match mission::parse(input) {
+            Ok(args) => args,
+            Err(error) => {
+                self.push_mission_output(Err(error.to_string()));
+                return;
+            }
+        };
+        let Some(tx) = self.event_tx.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        if let MissionSubcommand::Watch { id, after } = args.command {
+            self.orchestrator.mission_watch.take();
+            let token = tokio_util::sync::CancellationToken::new();
+            self.orchestrator.mission_watch = Some(token.clone().drop_guard());
+            let watch_id = uuid::Uuid::new_v4().to_string();
+            self.orchestrator.mission_watch_id = Some(watch_id.clone());
+            self.push_mission_output(Ok(format!(
+                "Watching mission {id}. /mission detach leaves it running."
+            )));
+            tokio::spawn(async move {
+                let result = tokio::select! {
+                    _ = token.cancelled() => return,
+                    result = mission::watch(&client, id, after, |response| {
+                        tx.send(AppEvent::MissionOutput {
+                            watch_id: Some(watch_id.clone()),
+                            result: Ok(mission::format_response(&response, args.json)),
+                        }).is_ok()
+                    }) => result,
+                };
+                let _ = tx.send(AppEvent::MissionOutput {
+                    watch_id: Some(watch_id),
+                    result: result
+                        .map(|_| "Mission watch ended; use attach to reconnect.".into())
+                        .map_err(|e| e.to_string()),
+                });
+            });
+        } else {
+            let command = match args.command.into_request() {
+                Ok(command) => command,
+                Err(error) => {
+                    self.push_mission_output(Err(error.to_string()));
+                    return;
+                }
+            };
+            tokio::spawn(async move {
+                let result = client
+                    .mission(command)
+                    .await
+                    .map(|response| mission::format_response(&response, args.json))
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(AppEvent::MissionOutput {
+                    watch_id: None,
+                    result,
+                });
+            });
+        }
+    }
+
     pub(crate) async fn handle_slash_command(&mut self, input: &str) {
         let cmd = input.trim_start_matches('/').trim();
+
+        if cmd == "mission" || cmd.starts_with("mission ") {
+            self.handle_mission_command(cmd.strip_prefix("mission").unwrap().trim());
+            return;
+        }
 
         match cmd {
             "clear" => {
@@ -1222,15 +1321,9 @@ fn apply_orchestrator_tool_result(
 }
 
 fn has_pending_orchestrator_tool(messages: &[ConversationEntry]) -> bool {
-    messages.iter().any(|m| {
-        matches!(
-            m,
-            ConversationEntry::Tool {
-                outcome: None,
-                ..
-            }
-        )
-    })
+    messages
+        .iter()
+        .any(|m| matches!(m, ConversationEntry::Tool { outcome: None, .. }))
 }
 
 fn discard_empty_active_orchestrator_session(orchestrator: &mut OrchestratorState) {

@@ -94,6 +94,7 @@ agent session grep --node <prefix> --agent <name> <file> <pattern> # Grep sessio
 ```bash
 session create --node <prefix> --agent <name> [--yolo] [--project <path>] [--timeout <secs>]
 session prompt --node <prefix> <text>
+session cancel --node <prefix> [--session-id <id>]
 session close --node <prefix>
 ```
 
@@ -118,6 +119,11 @@ Non-interactive mode persists a single session id per node in
 `~/.praxis/cli.json` — `session create` stores it, `session prompt` and
 `session close` read it. The interactive TUI runs concurrent in-memory
 sessions and does not share state with the non-interactive subcommands.
+
+`session cancel --node PREFIX` cancels the active prompt in the saved session
+without closing it. Supply `--session-id ID` to target a known session explicitly,
+including a session created by a mission. This command sends an ACP cancellation
+notification and returns without waiting for the prompt to finish.
 
 ## Global Options
 
@@ -175,3 +181,47 @@ To reset local state:
 ```bash
 praxis --clear
 ```
+
+## Durable missions
+
+Missions run in the service and persist independently of the CLI connection.
+Use the full mission ID returned by `create` or `list`:
+
+```bash
+praxis mission create inventory "Inspect the selected nodes and summarize findings" \
+  --scope "Only nodes abc and def; read-only inspection" \
+  --max-iterations 30 --max-tokens 200000 --max-active-seconds 1800
+praxis mission list
+praxis mission show MISSION_ID
+praxis mission events MISSION_ID --after 42
+praxis mission watch MISSION_ID
+praxis mission steer MISSION_ID "Prioritize node abc and cite evidence"
+praxis mission pause MISSION_ID
+praxis mission resume MISSION_ID
+praxis mission cancel MISSION_ID
+```
+
+`create` accepts `--model MODEL` and enables a verification pass by default;
+`--no-verify` disables it. Budget defaults are 50 iterations, 500,000 tokens,
+and 3,600 active seconds. Scope is part of the worker instructions, not an
+operating-system sandbox.
+
+`watch` (alias `attach`) polls events and stops when the mission is no longer
+running. `Ctrl+C` detaches immediately and leaves the mission running. Reconnect
+with `watch ID --after SEQUENCE` to avoid replaying older events. `pause` and
+`cancel` explicitly stop work. `show` includes checkpoints, findings, evidence,
+outstanding work, uncertain tool actions, budget usage, and verification results.
+
+After an interrupted tool call, inspect the affected system before resuming.
+Supply `--reconciliation "what was checked and the observed outcome"` when the
+service requires reconciliation. To raise a spent budget, `resume` accepts all
+three limits together: `--max-iterations`, `--max-tokens`, and
+`--max-active-seconds`. These replace total limits, rather than adding allowance.
+
+Event requests return at most 500 records; pass the last sequence as `--after`
+to fetch the next page. `watch` drains pages automatically.
+
+Every mission command accepts `--json`. Single requests return a tagged response
+object; `watch --json` prints one response per line. A request timeout does not
+prove a mutation failed: inspect `list`/`show` before retrying creation or steering.
+See [Durable missions](./missions.md) for recovery and execution semantics.

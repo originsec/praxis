@@ -13,12 +13,12 @@ use common::{
 use lapin::Channel;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
-use crate::intercept_live::{try_push_bounded, LivePushResult, INTERCEPT_LIVE_CAPACITY};
+use crate::intercept_live::{INTERCEPT_LIVE_CAPACITY, LivePushResult, try_push_bounded};
 
 pub struct Client {
     channel: Channel,
@@ -78,6 +78,7 @@ struct PendingAcp {
 
 #[derive(Default)]
 struct ClientState {
+    mission_requests: common::mcp::mission_requests::MissionRequests,
     system_state: Option<SystemState>,
     pending_initial_state: Option<oneshot::Sender<()>>,
     acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
@@ -372,7 +373,7 @@ impl Client {
                             Ok(Ok(r)) => break Ok(r),
                             Ok(Err(_)) => {
                                 break Ok(Err(
-                                    "registration response channel closed; retrying".into(),
+                                    "registration response channel closed; retrying".into()
                                 ));
                             }
                             Err(_) => {
@@ -539,6 +540,10 @@ impl Client {
         let mut state = state.lock().await;
 
         match message {
+            ClientDirectMessage::MissionResponse { request_id, result } => {
+                state.mission_requests.complete(&request_id, result);
+            }
+
             ClientDirectMessage::RegistrationAck(ack) => {
                 //
                 // Control-plane: only correlated RegistrationAck rebinds.
@@ -578,9 +583,9 @@ impl Client {
                                 ack.service_instance_id,
                                 pending.expected_instance
                             );
-                            let _ = pending.resp.send(Err(
-                                common::clear_epoch::REGISTRATION_RETRY_MARKER.into(),
-                            ));
+                            let _ = pending
+                                .resp
+                                .send(Err(common::clear_epoch::REGISTRATION_RETRY_MARKER.into()));
                         }
                         common::clear_epoch::RegistrationRejectAction::Fail => {
                             let _ = pending.resp.send(Err(format!(
@@ -1297,6 +1302,20 @@ impl Client {
         }
     }
 
+    pub async fn mission(
+        &self,
+        command: common::missions::MissionCommand,
+    ) -> Result<common::missions::MissionResponse> {
+        let pending = self.state.lock().await.mission_requests.register();
+        self.publish_signal(ClientSignalMessage::MissionRequest {
+            client_id: self.client_id.clone(),
+            request_id: pending.id.clone(),
+            command,
+        })
+        .await?;
+        pending.receive(self.timeout).await
+    }
+
     pub async fn get_state(&self) -> Option<SystemState> {
         self.state.lock().await.system_state.clone()
     }
@@ -1875,6 +1894,7 @@ impl Client {
     ) -> Result<()> {
         let message = ClientSignalMessage::ChainRun {
             client_id: self.client_id.clone(),
+            request_id: None,
             chain_id,
             node_id,
             agent_short_name,
@@ -2144,9 +2164,7 @@ impl Client {
         rx
     }
 
-    pub fn subscribe_service_instance(
-        &self,
-    ) -> tokio::sync::watch::Receiver<Option<String>> {
+    pub fn subscribe_service_instance(&self) -> tokio::sync::watch::Receiver<Option<String>> {
         //
         // Seed with the already-known registration instance so the TUI does
         // not start at None after connect (v4 review).
@@ -2164,9 +2182,7 @@ impl Client {
         rx
     }
 
-    pub fn subscribe_clear_boundary(
-        &self,
-    ) -> tokio::sync::watch::Receiver<Option<(String, u64)>> {
+    pub fn subscribe_clear_boundary(&self) -> tokio::sync::watch::Receiver<Option<(String, u64)>> {
         let (tx, rx) = tokio::sync::watch::channel(None);
         let state = self.state.clone();
         tokio::spawn(async move {
@@ -2191,9 +2207,7 @@ impl Client {
     async fn traffic_request<T>(
         &self,
         op_name: &str,
-        map_slot: impl Fn(
-            &mut ClientState,
-        ) -> &mut HashMap<String, oneshot::Sender<Result<T, String>>>,
+        map_slot: impl Fn(&mut ClientState) -> &mut HashMap<String, oneshot::Sender<Result<T, String>>>,
         build: impl FnOnce(String) -> ClientSignalMessage,
     ) -> Result<T> {
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -2510,5 +2524,26 @@ impl Client {
         self.request("log query", |s| &mut s.pending_log_query, message)
             .await
             .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(test)]
+mod mission_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mission_response_is_delivered_without_waiting_for_other_requests() {
+        let state = Arc::new(Mutex::new(ClientState::default()));
+        let first = state.lock().await.mission_requests.register();
+        let second = state.lock().await.mission_requests.register();
+        let message = ClientDirectMessage::MissionResponse {
+            request_id: second.id.clone(),
+            result: Ok(common::missions::MissionResponse::Events(Vec::new())),
+        };
+        Client::handle_direct_message(&state, &serde_json::to_vec(&message).unwrap()).await;
+        assert!(
+            matches!(second.receive(Duration::from_secs(1)).await.unwrap(), common::missions::MissionResponse::Events(events) if events.is_empty())
+        );
+        drop(first);
     }
 }

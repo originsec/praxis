@@ -537,6 +537,14 @@ impl App {
                 self.handle_acp_notification(notif).await;
                 true
             }
+            AppEvent::MissionOutput { watch_id, result } => {
+                if watch_id.is_none() || watch_id == self.orchestrator.mission_watch_id {
+                    self.push_mission_output(result);
+                    true
+                } else {
+                    false
+                }
+            }
             AppEvent::DocHelper(event) => self.apply_doc_helper_event(event),
             AppEvent::SessionListPoll => false,
             AppEvent::OrchestratorRetryRecovery => {
@@ -1297,6 +1305,9 @@ impl App {
                     self.popup = None;
                     return;
                 }
+                KeyCode::Enter
+                    if popup.kind == PopupKind::CommandPalette
+                        && popup.filtered_items().is_empty() => {}
                 KeyCode::Up | KeyCode::Down | KeyCode::Enter => {
                     //
                     // For ModelSelect, all keys go to popup.
@@ -1598,7 +1609,7 @@ impl App {
                 // Esc ladder: unfocus filter → clear filter → leave detail
                 // → close overlay.
                 //
-                use crate::keymap::{resolve_esc, EscOutcome};
+                use crate::keymap::{EscOutcome, resolve_esc};
                 match resolve_esc(
                     recon.filter_focused,
                     !recon.filter.is_empty(),
@@ -2342,9 +2353,10 @@ impl App {
                             } else {
                                 let rows = crate::ui::recon::tree::build_visible_rows(recon);
                                 if !rows.is_empty() {
-                                    let idx =
-                                        crate::ui::recon::tree::selected_visible_index(recon, &rows)
-                                            .unwrap_or(0);
+                                    let idx = crate::ui::recon::tree::selected_visible_index(
+                                        recon, &rows,
+                                    )
+                                    .unwrap_or(0);
                                     let new_idx = (idx + 3).min(rows.len() - 1);
                                     recon.selected = Some(rows[new_idx].id.clone());
                                     recon.config_content_error = None;

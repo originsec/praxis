@@ -24,20 +24,20 @@ If the MCP server is not enabled when you start a session, you'll see an error m
 
 ## Sessions and State
 
-The service holds **no persistent orchestrator state**. The TUI keeps one in-flight session against the service; when the TUI disconnects or closes the session, the conversation is dropped server-side.
+Ordinary chat sessions remain in memory on the service. The TUI keeps one in-flight session against the service; when the TUI disconnects or closes the session, that conversation is dropped server-side. [Durable missions](./missions.md) provide persistent work, checkpoints, and explicit recovery independently of the chat session.
 
 - **TUI (`praxis`)** — One session per TUI process. The TUI mirrors every turn to `~/.praxis/sessions/<session_id>.json` so you can resume later:
   - `praxis --continue` resumes the most recent saved session.
   - `praxis --resume` lists saved sessions and prompts you to pick one.
 
-  When resuming, the saved transcript is shown immediately and the prior turns are sent as conversation history with `session/new` so the model has recent context for the next prompt. History is trimmed to the most recent ~20 entries on every prompt (not just on resume), so very long conversations lose earlier turns rather than growing unbounded.
+  When resuming, the saved transcript is shown immediately and the prior turns are sent as conversation history with `session/new` so the model has recent context for the next prompt. Before every model turn, the service estimates context size against a 24,000-token history budget. It keeps the system instruction and initial user objective, preserves recent complete tool exchanges, and replaces older turns with bounded, explicitly incomplete extracts. Large tool results may be truncated in model context. This is a heuristic budget, not a provider tokenizer or a guarantee that an exceptionally large pinned objective will fit the selected model. The TUI resume transcript contains text, so a resumed chat is fresh model context rather than a continuation of provider-signed native tool history.
 
 ## What It Can Do
 
 The Orchestrator has access to all Praxis MCP tools:
 
 - **Node management** — List nodes, select nodes, request info updates
-- **Agent control** — List agents, select agents, run recon (static and semantic), query stored recon data (sessions, projects, tools)
+- **Agent control** — List agents, target agents explicitly, run recon (static and semantic), query stored recon data (sessions, projects, tools)
 - **Sessions** — Create sessions, send prompts, close sessions
 - **Operations** — List, run, monitor, and cancel semantic operations
 - **Chains** — List, run, monitor, and cancel chain workflows
@@ -71,7 +71,9 @@ The Orchestrator can break complex tasks into steps and show progress via the `r
 
 ## Concurrent Tool Calls
 
-When the model emits multiple independent tool-call JSON blocks in a single response, the Orchestrator runs them **concurrently** and returns all results together in one follow-up message before the next model turn. Dependent steps still run across turns (call prerequisites first, wait for results, then continue).
+The Orchestrator sends native JSON Schema tool definitions by default. It collects complete provider tool calls, validates tool names and required arguments, then runs independent calls **concurrently**. All results return with their original call IDs before the next model turn. Dependent steps still run across turns: call prerequisites first, wait for results, then continue. Calls are never executed from an incomplete or failed model stream.
+
+For an OpenAI-compatible endpoint that lacks native tool support, set the service configuration key `llm_orchestrator_native_tools` to `false` and create a new chat session. This explicitly enables the existing text-parser protocol; there is no automatic downgrade after a provider error. Native mode never interprets JSON printed in ordinary assistant text as a tool call. See [native AI tool compatibility](../development/ai-tools.md#provider-compatibility) for supported protocols and model limitations.
 
 This is useful for fan-out work such as listing nodes and available operations at the same time, or queueing `op_run` against several nodes in one step.
 
@@ -81,22 +83,20 @@ Token usage is displayed after each LLM call, showing prompt tokens, completion 
 
 ## Session Controls
 
-`Ctrl+C` cancels an in-flight inference while keeping the conversation. Type
+`Ctrl+C` cancels an in-flight inference or tool wait while keeping the conversation, including when the provider has stopped sending chunks. A chat session accepts one active prompt at a time. Cancellation during a tool batch records an uncertain outcome for every unresolved call: a remote action may already have occurred, so the Orchestrator must inspect state before trying it again. Cancellation does not automatically replay interrupted calls. Type
 `/clear` and press `Enter` to start a fresh conversation. See
 [Terminal UI](./tui.md#orchestrator-ctrlo) for the complete Orchestrator
 controls.
 
-## Model Recommendations
+## Model Compatibility
 
-The Orchestrator requires a capable model that can follow tool-calling instructions reliably:
-
-**Recommended:**
-- Anthropic: Claude Sonnet 4 or Claude Opus 4
-- OpenAI: GPT-4o
-- Google: Gemini 1.5 Pro
-
-**Not recommended:**
-- Smaller/faster models (Haiku, GPT-4o-mini) — these often fail to follow the tool calling format or hallucinate results
+Choose a model that supports native function calling on the configured provider
+endpoint. Praxis currently uses OpenAI-compatible Chat Completions, Anthropic
+Messages, or Gemini Generate Content. A model that requires OpenAI's Responses
+API for tools cannot use that protocol through the current Chat Completions
+transport. Configure a compatible model or explicitly use text compatibility
+mode when appropriate for the endpoint. Model selection remains under operator
+control.
 
 ## How It Differs from Semantic Operations
 
@@ -130,7 +130,7 @@ later as an opaque error on your first prompt). If you see this:
 
 ### Tools not executing
 
-- Ensure you're using a capable model (see recommendations above)
+- Check that the selected model supports the configured tool protocol (see compatibility above)
 - Check the tool execution results for error messages
 - Verify nodes are connected and agents are available
 

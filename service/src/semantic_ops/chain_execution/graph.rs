@@ -132,16 +132,6 @@ impl ExecutionGraph {
             .collect()
     }
 
-    /// Get the session group for an element (if any)
-    pub fn get_session_group(&self, element_id: &ElementId) -> Option<&SessionGroup> {
-        for (_group_id, (sg, element_ids)) in &self.session_groups {
-            if element_ids.contains(element_id) {
-                return Some(sg);
-            }
-        }
-        None
-    }
-
     /// Get the session group ID for an element (if any)
     pub fn get_session_group_id(&self, element_id: &ElementId) -> Option<String> {
         for (group_id, (_sg, element_ids)) in &self.session_groups {
@@ -422,10 +412,14 @@ mod tests {
         assert!(elements.contains(&"op2".to_string()));
 
         //
-        // Check get_session_group.
+        // Check session group membership.
         //
-        assert!(graph.get_session_group(&"op1".to_string()).is_some());
-        assert!(graph.get_session_group(&"trigger1".to_string()).is_none());
+        assert!(graph.get_session_group_id(&"op1".to_string()).is_some());
+        assert!(
+            graph
+                .get_session_group_id(&"trigger1".to_string())
+                .is_none()
+        );
 
         //
         // Termination is the terminal element.
@@ -501,8 +495,8 @@ mod tests {
         //
         // Memory elements have no session groups.
         //
-        assert!(graph.get_session_group(&"ms1".to_string()).is_none());
-        assert!(graph.get_session_group(&"mr1".to_string()).is_none());
+        assert!(graph.get_session_group_id(&"ms1".to_string()).is_none());
+        assert!(graph.get_session_group_id(&"mr1".to_string()).is_none());
 
         //
         // Termination is the terminal element.

@@ -412,33 +412,13 @@ pub async fn run(
             let chain_id = chain.id.clone();
             let chain_name = chain.name.clone();
 
-            client
-                .run_chain(
-                    chain_id.clone(),
-                    node_id.clone(),
-                    agent.to_string(),
-                    working_dir,
-                )
+            let execution_id = client
+                .run_chain_correlated(chain_id, node_id, agent.to_string(), working_dir)
                 .await?;
-
-            //
-            // Wait briefly and try to find the execution ID.
-            //
-
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            client.request_chain_execution_list().await?;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let execs = client.get_chain_executions().await;
-            let execution_id = execs
-                .iter()
-                .filter(|e| e.chain_id == chain_id && e.node_id == node_id)
-                .max_by_key(|e| e.started_at)
-                .map(|e| e.execution_id.clone());
 
             Ok(OpRunResult::Chain {
                 name: chain_name,
-                execution_id,
+                execution_id: Some(execution_id),
             })
         }
         None => Err(anyhow!(

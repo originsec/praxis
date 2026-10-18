@@ -11,7 +11,7 @@ pub use provider::Provider;
 
 pub use types::{
     AiResponse, ChatCompletionChoice, ChatCompletionDelta, ChatCompletionRequest,
-    ChatCompletionResponse, Content, Message, Role, Tool, Usage,
+    ChatCompletionResponse, Content, Message, Role, Tool, ToolCall, Usage,
 };
 
 pub use client::{

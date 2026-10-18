@@ -1671,6 +1671,11 @@ pub struct OrchestratorPlan {
 /// Messages that can be sent from client to server via CLIENT_SIGNAL_QUEUE
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClientSignalMessage {
+    MissionRequest {
+        client_id: String,
+        request_id: String,
+        command: crate::missions::MissionCommand,
+    },
     Registration(ClientRegistration),
     Command(CommandRequest),
     RemoveNode {
@@ -1814,6 +1819,8 @@ pub enum ClientSignalMessage {
     /// Run a chain
     ChainRun {
         client_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
         chain_id: String,
         node_id: String,
         agent_short_name: String,
@@ -2218,6 +2225,10 @@ pub enum ClientBroadcastMessage {
 /// Messages sent to a specific client queue
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClientDirectMessage {
+    MissionResponse {
+        request_id: String,
+        result: Result<crate::missions::MissionResponse, String>,
+    },
     RegistrationAck(ClientRegistrationAck),
     CommandResponse(CommandResponse),
     StateUpdate(SystemState),
@@ -2323,6 +2334,10 @@ pub enum ClientDirectMessage {
     /// Chain error
     ChainError {
         message: String,
+    },
+    ChainRunResponse {
+        request_id: String,
+        result: Result<String, String>,
     },
     /// Chain execution started
     ChainExecutionStarted {

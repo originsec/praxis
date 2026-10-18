@@ -218,10 +218,27 @@ triggers, see [Chain Triggers](#chain-triggers) below.
 
 **Memory** - Stores or retrieves data by key (mode is store or retrieve). Store passes data through unchanged; retrieve loads a previously stored key.
 
-**Loop** - Controls retries. `max_iterations` is the number of times the
-retry path may run: port `r` (0) fires on each retry and port `x` (1) fires
-once the retries are exhausted. For example, with `max_iterations: 1`, the
-Loop takes `r` once and then takes `x` on its next visit.
+**Loop** - Repeats a body, feeding its latest output into the next pass.
+Connect the body's final element to the Loop, port `r` (0) back to the body's
+first element, and port `x` (1) to the next step after the loop.
+`max_iterations` counts total completed body passes, including the first pass
+before reaching the Loop. With `max_iterations: 3`, the Loop takes `r` twice,
+then takes `x` after the third pass. With `max_iterations: 1`, it exits on its
+first visit without repeating the body.
+
+Both ports carry the most recent body output: `r` feeds it back into the body,
+and `x` sends the final pass's result to the exit branch. Each element rebuilds
+its input from the latest outputs on its active incoming connections; other
+incoming edges (such as the Trigger) remain additional context, separated by
+`---`. A repeated body waits for its current pass's branches; results from
+branches skipped on a later pass are discarded. Nested Loops start their counts
+over when their enclosing body repeats. Session groups retain conversation
+history while their session remains open, as usual.
+
+Previously, Loop cached first-pass inputs and treated `max_iterations` as a
+retry count, resulting in one extra body pass. Existing chains that need the
+same number of passes should increase their old `max_iterations` value by one;
+repeated bodies now receive the latest output instead of a fixed first input.
 
 **Tool** - Invokes a registered toolkit tool (picker lists known tools; params are JSON).
 
@@ -275,7 +292,8 @@ Elements in the same group share a color indicator on the canvas.
 **Same Session Group** - Elements share an agent session:
 - The first element creates the session
 - Subsequent elements reuse it
-- Session closes after the last element completes
+- The session remains available until the chain finishes or is cancelled
+- Elements in the group execute serially, even on independent branches
 - Context and state persist between elements
 
 **Different Session Groups** - Elements get isolated sessions:
@@ -301,13 +319,20 @@ Use separate groups when:
 
 When running a chain:
 
-1. The executor builds a dependency graph from connections
-2. Finds operations with no dependencies (starting points)
-3. Works through ready elements one at a time from a queue, fully awaiting each before starting the next
-4. As each element completes, marks it done and enqueues any newly-ready elements
-5. Repeats until all complete, or the chain ends via Termination
+1. The executor builds a dependency graph and starts at the Trigger.
+2. Ready independent elements execute in bounded parallel waves (four at a time by default).
+3. Elements sharing a session group or memory key run serially. Loop elements form a wave boundary so a new pass cannot consume an unfinished earlier pass.
+4. Results are committed in queue order. Join inputs retain the chain's authored connection order, independent of response timing.
+5. The executor schedules downstream elements when their active dependencies finish. Inactive conditional branches do not block joins. A block with `require_all_inputs: false` can run when any input fires and runs once per pass.
+6. Execution continues until no work remains; reaching Termination is required for success.
 
-Elements without dependencies on each other become ready at the same time, but execution is currently sequential — the executor does not run them concurrently, so ordering among independently-ready elements depends on queue order rather than true parallelism. Whether a failed element halts downstream progress depends on how its outgoing connections are configured — see Conditional Connections below.
+Set `PRAXIS_CHAIN_MAX_PARALLEL` on the service to a value from 1 to 64 to change the per-chain limit. Setting it to 1 gives sequential execution. Independent branches should use separate session groups; separate sessions still share their node's filesystem, so add explicit dependency edges when branches access the same files or other external state.
+
+Per-block `max_runtime` and the chain timeout bound all work, including session creation, tool execution, and waiting for services. A block's working directory takes precedence over its session group's directory, then the execution's directory. A shared session cannot change its directory or permission profile between blocks: conflicting overrides fail the block and require a separate group. Transforms use the service's LLM and do not create an agent session.
+
+Cancellation immediately stops scheduling and closes every tracked session asynchronously. A late session-creation response is also closed. A timed-out or cancelled operation can already have changed external state; inspect evidence before retrying. Chain progress is saved before each wave starts and after it completes. Service restarts mark interrupted executions failed; Praxis does not automatically replay their actions.
+
+Whether a failed element halts downstream progress depends on its outgoing connection conditions; see Conditional Connections below.
 
 ```diagram
     ┌─────┐

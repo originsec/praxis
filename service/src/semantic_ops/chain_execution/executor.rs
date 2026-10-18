@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use futures_util::future::join_all;
 use lapin::Channel;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{RwLock as TokioRwLock, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -29,7 +30,7 @@ use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
 //
 // Loop element output ports, as drawn in the TUI chain builder: `r` is
-// the retry path back into earlier elements, `x` is the exit taken once
+// the repeat path back into earlier elements, `x` is the exit taken once
 // iterations are exhausted.
 //
 
@@ -46,27 +47,154 @@ type ResolvedElement = (String, Option<bool>, Option<u32>);
 
 //
 // Pick the output port a Loop element activates for a given visit.
-// `iteration` is 1-based: the first visit is iteration 1.
+// `iteration` counts completed body passes, including the initial pass.
 //
 
 fn loop_active_port(iteration: u32, max_iterations: u32) -> u32 {
-    if iteration <= max_iterations {
+    if iteration < max_iterations {
         LOOP_PORT_RETRY
     } else {
         LOOP_PORT_EXIT
     }
 }
 
+#[derive(Clone)]
+struct TrackedSession {
+    node_id: String,
+    session_id: String,
+    working_dir: Option<String>,
+    yolo_mode: bool,
+}
+
+type ActiveSessions = Arc<std::sync::Mutex<HashMap<String, TrackedSession>>>;
+
+fn close_session_in_background(
+    node_id: String,
+    session_id: String,
+    channel: Channel,
+    proxy: Arc<AcpNodeProxy>,
+) {
+    tokio::spawn(async move {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            close_session(&node_id, &session_id, &channel, &proxy),
+        )
+        .await;
+        if !matches!(result, Ok(Ok(()))) {
+            tracing::warn!(%node_id, %session_id, "Could not confirm chain session closure");
+        }
+    });
+}
+
+fn close_tracked_sessions(sessions: &ActiveSessions, channel: &Channel, proxy: &Arc<AcpNodeProxy>) {
+    let active: Vec<_> = sessions
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, session)| session)
+        .collect();
+    for session in active {
+        close_session_in_background(
+            session.node_id,
+            session.session_id,
+            channel.clone(),
+            proxy.clone(),
+        );
+    }
+}
+
+async fn cancellable_timeout<T>(
+    token: &CancellationToken,
+    timeout_secs: Option<u64>,
+    future: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    let deadline = async {
+        match timeout_secs {
+            Some(seconds) => tokio::time::sleep(std::time::Duration::from_secs(seconds)).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err(anyhow::Error::new(crate::semantic_ops::Cancelled)),
+        _ = deadline => Err(anyhow::anyhow!("Execution timed out; review possible side effects before retrying")),
+        result = future => result,
+    }
+}
+
+fn take_ready_batch(
+    queue: &mut VecDeque<String>,
+    graph: &ExecutionGraph,
+    limit: usize,
+) -> Vec<String> {
+    let mut batch = Vec::new();
+    let mut resources = HashSet::new();
+    let count = queue.len();
+    for _ in 0..count {
+        let id = queue.pop_front().unwrap();
+        let element = &graph.nodes[&id].element;
+        if matches!(element, ChainElement::Loop { .. }) {
+            queue.push_front(id);
+            if batch.is_empty() {
+                batch.push(queue.pop_front().unwrap());
+            }
+            break;
+        }
+        let resource = match element {
+            ChainElement::Memory { key, .. } => Some(format!("memory:{key}")),
+            _ => graph
+                .get_session_group_id(&id)
+                .map(|group| format!("group:{group}")),
+        };
+        if resource
+            .as_ref()
+            .is_some_and(|resource| resources.contains(resource))
+        {
+            queue.push_back(id);
+            continue;
+        }
+        if let Some(resource) = resource {
+            resources.insert(resource);
+        }
+        batch.push(id);
+        if batch.len() == limit.max(1) {
+            break;
+        }
+    }
+    batch
+}
+
+struct OperationRecordGuard {
+    operation_id: String,
+    database: Arc<Database>,
+    finished: bool,
+}
+
+impl Drop for OperationRecordGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let database = self.database.clone();
+        let operation_id = self.operation_id.clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), database.update_status(
+                &operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None,
+                Some("Execution interrupted; side effects may have occurred. Review before retrying.".to_string()),
+            )).await;
+        });
+    }
+}
+
 struct CancelHandle {
     cancel_token: CancellationToken,
     //
-    // We keep the session/channel/proxy here so cancel() can close any
-    // active session on the node. The chain's own run loop tracks the live
-    // session_id — we take a snapshot each time a session is created.
+    // Cancellation can drain all active sessions without waiting for a
+    // running element or acquiring its execution lock.
     //
     channel: Channel,
     proxy: Arc<AcpNodeProxy>,
-    active_session: Arc<std::sync::Mutex<Option<(String, String)>>>, // (node_id, session_id)
+    active_sessions: ActiveSessions,
 }
 
 pub struct ChainExecutor {
@@ -148,15 +276,14 @@ impl ChainExecutor {
         }
 
         let cancel_token = CancellationToken::new();
-        let active_session: Arc<std::sync::Mutex<Option<(String, String)>>> =
-            Arc::new(std::sync::Mutex::new(None));
+        let active_sessions = Arc::new(std::sync::Mutex::new(HashMap::new()));
         self.cancel_handles.write().await.insert(
             execution_id.clone(),
             CancelHandle {
                 cancel_token: cancel_token.clone(),
                 channel: rabbitmq_channel.clone(),
                 proxy: acp_node_proxy.clone(),
-                active_session: active_session.clone(),
+                active_sessions: active_sessions.clone(),
             },
         );
 
@@ -226,7 +353,7 @@ impl ChainExecutor {
                 database,
                 state_clone.clone(),
                 cancel_token,
-                active_session,
+                active_sessions,
                 toolkit_manager,
             )
             .await;
@@ -290,17 +417,10 @@ impl ChainExecutor {
     //
 
     pub async fn cancel(&self, execution_id: &str) -> bool {
-        if let Some(handle) = self.cancel_handles.write().await.remove(execution_id) {
+        let handle = self.cancel_handles.write().await.remove(execution_id);
+        if let Some(handle) = handle {
             handle.cancel_token.cancel();
-
-            //
-            // If a session is active, close it so the node aborts the
-            // in-flight work.
-            //
-            let snapshot = handle.active_session.lock().unwrap().clone();
-            if let Some((node_id, session_id)) = snapshot {
-                let _ = close_session(&node_id, &session_id, &handle.channel, &handle.proxy).await;
-            }
+            close_tracked_sessions(&handle.active_sessions, &handle.channel, &handle.proxy);
             true
         } else {
             false
@@ -491,177 +611,295 @@ impl ChainExecutor {
         database: Arc<Database>,
         state: Arc<std::sync::RwLock<ChainExecutionState>>,
         cancel_token: CancellationToken,
-        active_session_snapshot: Arc<std::sync::Mutex<Option<(String, String)>>>,
+        active_sessions: ActiveSessions,
         toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Result<()> {
-        use std::collections::VecDeque;
+        let run_token = cancel_token.child_token();
+        let parallelism = std::env::var("PRAXIS_CHAIN_MAX_PARALLEL")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(4)
+            .clamp(1, 64);
+        let run = async {
+            let mut work_queue = VecDeque::from([graph.trigger_id.clone()]);
+            let mut resolved = HashMap::new();
+            let mut loop_counters: HashMap<String, u32> = HashMap::new();
+            let mut hit_counts: HashMap<String, u32> = HashMap::new();
 
-        let mut work_queue: VecDeque<String> = VecDeque::new();
-        let mut resolved: HashMap<String, ResolvedElement> = HashMap::new();
-        let mut loop_counters: HashMap<String, u32> = HashMap::new();
-        let mut hit_counts: HashMap<String, u32> = HashMap::new();
-        let mut initial_inputs: HashMap<String, String> = HashMap::new();
-
-        let mut active_session: Option<String> = None;
-        let mut current_session_group_id: Option<String> = None;
-        let mut current_session_yolo_mode: bool = false;
-
-        //
-        // Closure-equivalent helper: close the current session if any and
-        // clear the snapshot.
-        //
-        let close_if_active = |session: &mut Option<String>,
-                               snapshot: &Arc<std::sync::Mutex<Option<(String, String)>>>,
-                               channel: &Channel,
-                               proxy: &Arc<AcpNodeProxy>,
-                               node_id: &str| {
-            let channel = channel.clone();
-            let proxy = proxy.clone();
-            let node_id = node_id.to_string();
-            let taken = session.take();
-            let snapshot = snapshot.clone();
-            async move {
-                if let Some(sid) = taken {
-                    let _ = close_session(&node_id, &sid, &channel, &proxy).await;
-                    *snapshot.lock().unwrap() = None;
+            while !work_queue.is_empty() {
+                if run_token.is_cancelled() {
+                    return Err(anyhow::Error::new(crate::semantic_ops::Cancelled));
                 }
-            }
-        };
-
-        work_queue.push_back(graph.trigger_id.clone());
-
-        while let Some(element_id) = work_queue.pop_front() {
-            let hit = hit_counts.entry(element_id.clone()).or_insert(0);
-            *hit += 1;
-            if *hit > 1000 {
-                close_if_active(
-                    &mut active_session,
-                    &active_session_snapshot,
-                    &rabbitmq_channel,
-                    &acp_node_proxy,
-                    &node_id,
-                )
-                .await;
-                return Err(anyhow::anyhow!(
-                    "Safety limit: element {} executed >1000 times",
-                    element_id
-                ));
-            }
-
-            if cancel_token.is_cancelled() {
-                close_if_active(
-                    &mut active_session,
-                    &active_session_snapshot,
-                    &rabbitmq_channel,
-                    &acp_node_proxy,
-                    &node_id,
-                )
-                .await;
-                return Err(anyhow::anyhow!("Chain execution cancelled"));
-            }
-
-            let node = match graph.nodes.get(&element_id) {
-                Some(n) => n,
-                None => continue,
-            };
-
-            let element_session_group_id = graph.get_session_group_id(&element_id);
-            common::log_info!(
-                "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
-                common::short_id(&element_id),
-                element_session_group_id,
-                current_session_group_id,
-                active_session.as_ref().map(|s| common::short_id(s))
-            );
-
-            if element_session_group_id != current_session_group_id {
-                //
-                // Exit current session group if any.
-                //
-                if current_session_group_id.is_some() && active_session.is_some() {
-                    close_if_active(
-                        &mut active_session,
-                        &active_session_snapshot,
-                        &rabbitmq_channel,
-                        &acp_node_proxy,
-                        &node_id,
-                    )
-                    .await;
-                    common::log_info!("Closed session for session group");
-                }
-
-                //
-                // Enter new session group: create a session.
-                //
-                if let Some(ref group_id) = element_session_group_id {
-                    let session_group = graph.get_session_group(&element_id);
-                    let yolo_mode = session_group.map(|sg| sg.yolo_mode).unwrap_or(false);
-                    current_session_yolo_mode = yolo_mode;
-
-                    let session_working_dir = session_group
-                        .and_then(|sg| sg.working_dir.clone())
-                        .or_else(|| working_dir.clone());
-
-                    let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-                    let sid = create_session(
+                let batch = take_ready_batch(&mut work_queue, &graph, parallelism);
+                let mut jobs = Vec::new();
+                for element_id in &batch {
+                    let hit = hit_counts.entry(element_id.clone()).or_default();
+                    *hit += 1;
+                    if *hit > 1000 {
+                        anyhow::bail!("Safety limit: element {} executed >1000 times", element_id);
+                    }
+                    state.write().unwrap().set_element_running(element_id);
+                    let iteration = loop_counters.entry(element_id.clone()).or_default();
+                    *iteration += 1;
+                    jobs.push(Self::run_element(
+                        &execution_id,
+                        element_id,
+                        &graph,
+                        &resolved,
+                        *iteration,
                         &node_id,
                         &agent_short_name,
-                        yolo_mode,
-                        session_working_dir,
-                        prompt_timeout_secs,
+                        &working_dir,
+                        &initial_input,
+                        &config,
                         &rabbitmq_channel,
+                        &broadcast_channel,
                         &acp_node_proxy,
-                    )
-                    .await
-                    .context("Failed to create session for session group")?;
-                    *active_session_snapshot.lock().unwrap() = Some((node_id.clone(), sid.clone()));
-                    active_session = Some(sid);
-                    common::log_info!("Created session for session group {}", group_id);
+                        &database,
+                        &state,
+                        &run_token,
+                        &active_sessions,
+                        &toolkit_manager,
+                    ));
                 }
 
-                current_session_group_id = element_session_group_id.clone();
-            }
+                //
+                // Commit a wave in queue order, not completion order. Joins see
+                // a complete wave and merge inputs in authored connection order.
+                // Loop feedback can invalidate only settled work from this wave.
+                //
 
-            let is_first_in_session = if let Some(ref gid) = element_session_group_id {
-                if let Some((_, member_ids)) = graph.session_groups.get(gid) {
-                    !member_ids
-                        .iter()
-                        .any(|mid| mid != &element_id && resolved.contains_key(mid))
-                } else {
-                    true
+                if !is_implicit_chain(&chain.id) {
+                    let (status, elements, outputs, ended_at) = {
+                        let current = state.read().unwrap();
+                        (
+                            current.status.clone(),
+                            current.elements.clone(),
+                            current.outputs.clone(),
+                            current.ended_at,
+                        )
+                    };
+                    database
+                        .update_chain_execution(
+                            &execution_id,
+                            status,
+                            &elements,
+                            &outputs,
+                            ended_at,
+                        )
+                        .await?;
                 }
-            } else {
-                false
-            };
-
-            let merged_input = if let Some(initial) = initial_inputs.get(&element_id) {
-                initial.clone()
-            } else {
-                let inputs: Vec<String> = graph
-                    .incoming_connections(&element_id)
-                    .iter()
-                    .filter_map(|conn| {
-                        if let Some((output, success, active_port)) =
-                            resolved.get(&conn.from_element)
-                        {
-                            if connection_fires(conn, success, *active_port) {
-                                Some(output.clone())
-                            } else {
-                                None
+                let outcomes = join_all(jobs).await;
+                for (element_id, (result, active_port, semantic_success)) in
+                    batch.iter().zip(outcomes)
+                {
+                    let (output, success) = match result {
+                        Ok(output) => (output, Some(true)),
+                        Err(error) => {
+                            if crate::semantic_ops::is_cancelled(&error) {
+                                return Err(error);
                             }
-                        } else {
-                            None
+                            (error.to_string(), Some(false))
                         }
-                    })
-                    .collect();
-                let input = inputs.join("\n\n---\n\n");
-                initial_inputs.insert(element_id.clone(), input.clone());
-                input
+                    };
+                    let edge_success = semantic_success.or(success);
+                    resolved.insert(
+                        element_id.clone(),
+                        (output.clone(), edge_success, active_port),
+                    );
+                    if graph.outgoing_connections(element_id).is_empty()
+                        && edge_success == Some(true)
+                    {
+                        state
+                            .write()
+                            .unwrap()
+                            .add_output(element_id.clone(), output);
+                    }
+                }
+                for element_id in &batch {
+                    schedule_dependents(
+                        element_id,
+                        &graph,
+                        &mut resolved,
+                        &mut loop_counters,
+                        &mut work_queue,
+                    );
+                }
+                enqueue_ready_elements(&chain, &graph, &resolved, &mut work_queue);
+                let (status, elements, outputs, ended_at, update) = {
+                    let current = state.read().unwrap();
+                    (
+                        current.status.clone(),
+                        current.elements.clone(),
+                        current.outputs.clone(),
+                        current.ended_at,
+                        current.to_update(),
+                    )
+                };
+                if !is_implicit_chain(&chain.id) {
+                    database
+                        .update_chain_execution(
+                            &execution_id,
+                            status,
+                            &elements,
+                            &outputs,
+                            ended_at,
+                        )
+                        .await?;
+                }
+                Self::broadcast_update(
+                    &broadcast_channel,
+                    ClientBroadcastMessage::ChainExecutionUpdate(update),
+                )
+                .await;
+            }
+            for id in graph.nodes.keys() {
+                if !resolved.contains_key(id) {
+                    state.write().unwrap().set_element_skipped(id);
+                }
+            }
+            let termination = chain
+                .elements
+                .iter()
+                .find(|element| matches!(element, ChainElement::Termination { .. }));
+            if termination.is_some_and(|element| !resolved.contains_key(element.id())) {
+                anyhow::bail!("Chain failed: Termination element was not reached");
+            }
+            Ok(())
+        };
+        let result = cancellable_timeout(&run_token, chain.timeout, run).await;
+        run_token.cancel();
+        close_tracked_sessions(&active_sessions, &rabbitmq_channel, &acp_node_proxy);
+        if result.is_err() {
+            let mut current = state.write().unwrap();
+            for element in current.elements.values_mut() {
+                if matches!(element.status, common::ElementExecutionStatus::Running) {
+                    element.status = common::ElementExecutionStatus::Failed {
+                        error: "Execution interrupted; side effects may have occurred. Review before retrying.".to_string(),
+                    };
+                    element.completed_at = Some(Utc::now());
+                }
+            }
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_element(
+        execution_id: &str,
+        element_id: &str,
+        graph: &ExecutionGraph,
+        resolved: &HashMap<String, ResolvedElement>,
+        iteration: u32,
+        node_id: &str,
+        agent_short_name: &str,
+        working_dir: &Option<String>,
+        initial_input: &Option<String>,
+        config: &Arc<TokioRwLock<ServiceConfig>>,
+        rabbitmq_channel: &Channel,
+        broadcast_channel: &Channel,
+        acp_node_proxy: &Arc<AcpNodeProxy>,
+        database: &Arc<Database>,
+        state: &Arc<std::sync::RwLock<ChainExecutionState>>,
+        cancel_token: &CancellationToken,
+        active_sessions: &ActiveSessions,
+        toolkit_manager: &Option<Arc<ToolkitManager>>,
+    ) -> (Result<String>, Option<u32>, Option<bool>) {
+        let node = &graph.nodes[element_id];
+        let block_config = node.element.block_config();
+        let group = node.element.session_group();
+        let group_id = graph.get_session_group_id(&element_id.to_string());
+        let session_key = group_id
+            .as_ref()
+            .map(|id| format!("group:{id}"))
+            .unwrap_or_else(|| format!("element:{element_id}"));
+        let working_dir = block_config
+            .and_then(|bc| bc.working_dir.clone())
+            .or_else(|| group.and_then(|group| group.working_dir.clone()))
+            .or_else(|| working_dir.clone());
+        let yolo_mode = block_config
+            .and_then(|bc| bc.yolo_mode)
+            .unwrap_or_else(|| group.is_some_and(|group| group.yolo_mode));
+        let merged_input = collect_merged_input(element_id, graph, resolved);
+        let element_token = cancel_token.child_token();
+        let run = async {
+            let yolo_mode = if block_config.and_then(|bc| bc.yolo_mode).is_none() && group.is_none()
+            {
+                if let ChainElement::Operation { operation_name, .. } = &node.element {
+                    database
+                        .get_operation_definition(operation_name)
+                        .await?
+                        .map(|operation| operation.yolo_mode)
+                        .unwrap_or(yolo_mode)
+                } else {
+                    yolo_mode
+                }
+            } else {
+                yolo_mode
             };
+            let needs_session = matches!(
+                node.element,
+                ChainElement::Operation { .. } | ChainElement::GenericPrompt { .. }
+            );
+            let mut active_session = None;
+            let mut is_first_in_session = true;
+            if needs_session {
+                let existing = active_sessions.lock().unwrap().get(&session_key).cloned();
+                if let Some(existing) = existing {
+                    if existing.working_dir != working_dir || existing.yolo_mode != yolo_mode {
+                        anyhow::bail!(
+                            "Conflicting working directory or permissions in session group; use a separate group"
+                        );
+                    }
+                    active_session = Some(existing.session_id);
+                    is_first_in_session = false;
+                } else {
+                    let prompt_timeout = Some(config.read().await.get_prompt_timeout_secs());
+                    let sessions = active_sessions.clone();
+                    let key = session_key.clone();
+                    let channel = rabbitmq_channel.clone();
+                    let proxy = acp_node_proxy.clone();
+                    let node_id = node_id.to_string();
+                    let agent = agent_short_name.to_string();
+                    let cwd = working_dir.clone();
+                    let token = element_token.clone();
 
-            let block_yolo = node.element.block_config().and_then(|bc| bc.yolo_mode);
-            let yolo_mode = block_yolo.unwrap_or(current_session_yolo_mode);
+                    //
+                    // Session creation outlives a cancelled caller long enough
+                    // to close a late response, avoiding an orphaned session.
+                    // No session-map lock is held across a network operation.
+                    //
 
+                    let creator = tokio::spawn(async move {
+                        let sid = create_session(
+                            &node_id,
+                            &agent,
+                            yolo_mode,
+                            cwd.clone(),
+                            prompt_timeout,
+                            &channel,
+                            &proxy,
+                        )
+                        .await?;
+                        let mut sessions = sessions.lock().unwrap();
+                        if token.is_cancelled() {
+                            close_session_in_background(node_id, sid, channel, proxy);
+                            return Err(anyhow::Error::new(crate::semantic_ops::Cancelled));
+                        }
+                        sessions.insert(
+                            key,
+                            TrackedSession {
+                                node_id,
+                                session_id: sid.clone(),
+                                working_dir: cwd,
+                                yolo_mode,
+                            },
+                        );
+                        Ok::<_, anyhow::Error>(sid)
+                    });
+                    active_session = Some(creator.await.context("Session creation task failed")??);
+                }
+            }
             let (elem_config, elem_context) = match &node.element {
                 ChainElement::Trigger { .. } => (
                     ElementConfig::Trigger,
@@ -780,38 +1018,17 @@ impl ChainExecutor {
                 ),
             };
 
-            let element_type_name = match &node.element {
-                ChainElement::Trigger { .. } => "Trigger",
-                ChainElement::Operation { operation_name, .. } => operation_name.as_str(),
-                ChainElement::Transform { .. } => "Transform",
-                ChainElement::GenericPrompt { .. } => "GenericPrompt",
-                ChainElement::Memory { key, .. } => key.as_str(),
-                ChainElement::Loop { .. } => "Loop",
-                ChainElement::Tool { tool_name, .. } => tool_name.as_str(),
-                ChainElement::Payload { .. } => "Payload",
-                ChainElement::Termination { .. } => "Termination",
-            };
-            let eid_short = common::short_id(&element_id);
-
-            {
-                let mut s = state.write().unwrap();
-                s.set_element_running_with_context(&element_id, elem_config, elem_context);
-            }
+            state.write().unwrap().set_element_running_with_context(
+                element_id,
+                elem_config,
+                elem_context,
+            );
             let update = state.read().unwrap().to_update();
             Self::broadcast_update(
-                &broadcast_channel,
+                broadcast_channel,
                 ClientBroadcastMessage::ChainExecutionUpdate(update),
             )
             .await;
-
-            common::log_debug!(
-                "[chain {}] START {} ({}) | input: {} bytes",
-                &execution_id[..8],
-                element_type_name,
-                eid_short,
-                merged_input.len()
-            );
-
             let (result, active_port, semantic_success): (
                 Result<String>,
                 Option<u32>,
@@ -821,93 +1038,70 @@ impl ChainExecutor {
                     let trigger_output = initial_input.clone().unwrap_or_default();
                     (Ok(trigger_output), None, None)
                 }
-                ChainElement::Loop { max_iterations, .. } => {
-                    let counter = loop_counters.entry(element_id.clone()).or_insert(0);
-                    *counter += 1;
-                    (
-                        Ok(merged_input.clone()),
-                        Some(loop_active_port(*counter, *max_iterations)),
-                        None,
-                    )
-                }
+                ChainElement::Loop { max_iterations, .. } => (
+                    Ok(merged_input.clone()),
+                    Some(loop_active_port(iteration, *max_iterations)),
+                    None,
+                ),
                 ChainElement::Operation {
                     operation_name,
                     model_ref,
                     ..
                 } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        op_result = Self::execute_operation(
-                            &execution_id,
-                            &element_id,
-                            operation_name,
-                            model_ref,
-                            &merged_input,
-                            is_first_in_session,
-                            yolo_mode,
-                            &active_session,
-                            &working_dir,
-                            &node_id,
-                            &agent_short_name,
-                            &config,
-                            &rabbitmq_channel,
-                            &acp_node_proxy,
-                            database.clone(),
-                        ) => {
-                            match op_result {
-                                Ok((output, sem_success)) => (Ok(output), None, sem_success),
-                                Err(e) => (Err(e), None, None),
-                            }
-                        }
+                    match Self::execute_operation(
+                        execution_id,
+                        element_id,
+                        operation_name,
+                        model_ref,
+                        &merged_input,
+                        is_first_in_session,
+                        yolo_mode,
+                        &active_session,
+                        &working_dir,
+                        node_id,
+                        agent_short_name,
+                        config,
+                        rabbitmq_channel,
+                        acp_node_proxy,
+                        database.clone(),
+                    )
+                    .await
+                    {
+                        Ok((output, success)) => (Ok(output), None, success),
+                        Err(error) => (Err(error), None, None),
                     }
                 }
                 ChainElement::Transform {
                     prompt, model_ref, ..
-                } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = Self::execute_transform(
-                            prompt,
-                            model_ref,
-                            &merged_input,
-                            &config,
-                        ) => {
-                            (result, None, None)
-                        }
-                    }
-                }
+                } => (
+                    Self::execute_transform(prompt, model_ref, &merged_input, config).await,
+                    None,
+                    None,
+                ),
                 ChainElement::GenericPrompt {
                     prompt,
                     session_group,
                     ..
-                } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = Self::execute_generic_prompt(
-                            prompt,
-                            session_group,
-                            &merged_input,
-                            is_first_in_session,
-                            &active_session,
-                            yolo_mode,
-                            &working_dir,
-                            &node_id,
-                            &agent_short_name,
-                            &rabbitmq_channel,
-                            &acp_node_proxy,
-                            database.clone(),
-                            &config,
-                        ) => {
-                            (result, None, None)
-                        }
-                    }
-                }
+                } => (
+                    Self::execute_generic_prompt(
+                        prompt,
+                        session_group,
+                        &merged_input,
+                        is_first_in_session,
+                        &active_session,
+                        yolo_mode,
+                        &working_dir,
+                        node_id,
+                        agent_short_name,
+                        rabbitmq_channel,
+                        acp_node_proxy,
+                        database.clone(),
+                        config,
+                    )
+                    .await,
+                    None,
+                    None,
+                ),
                 ChainElement::Memory { key, mode, .. } => {
                     let mem_result = match mode {
                         crate::database::MemoryMode::Store => database
@@ -931,7 +1125,7 @@ impl ChainExecutor {
                     ..
                 } => {
                     let tool_future = async {
-                        if let Some(ref tm) = toolkit_manager {
+                        if let Some(tm) = toolkit_manager {
                             if let Some(tool) = tm.get_chain_tool(tool_name) {
                                 tool.execute_chain(&merged_input, tool_params).await
                             } else {
@@ -941,14 +1135,7 @@ impl ChainExecutor {
                             Err(anyhow::anyhow!("ToolkitManager not available"))
                         }
                     };
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = tool_future => {
-                            (result, None, None)
-                        }
-                    }
+                    (tool_future.await, None, None)
                 }
                 ChainElement::Payload { payload_id, .. } => {
                     let result = match database.get_payload(payload_id).await {
@@ -961,126 +1148,42 @@ impl ChainExecutor {
                 ChainElement::Termination { .. } => (Ok(merged_input.clone()), None, None),
             };
 
-            let (output, success) = match result {
-                Ok(output) => {
-                    common::log_debug!(
-                        "[chain {}] END   {} ({}) | ok | output: {} bytes",
-                        &execution_id[..8],
-                        element_type_name,
-                        eid_short,
-                        output.len()
-                    );
-                    let success = Some(true);
-                    {
-                        let mut s = state.write().unwrap();
-                        s.set_element_completed(&element_id, output.clone(), success);
-                    }
-                    (output, success)
-                }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    common::log_debug!(
-                        "[chain {}] END   {} ({}) | FAILED | {}",
-                        &execution_id[..8],
-                        element_type_name,
-                        eid_short,
-                        &error_msg[..200.min(error_msg.len())]
-                    );
-                    let output = error_msg.clone();
-                    let success = Some(false);
-                    {
-                        let mut s = state.write().unwrap();
-                        s.set_element_failed(&element_id, error_msg);
-                    }
-                    (output, success)
-                }
-            };
-
-            let edge_success = semantic_success.map(Some).unwrap_or(success);
-
-            resolved.insert(
-                element_id.clone(),
-                (output.clone(), edge_success, active_port),
-            );
-
-            if graph.outgoing_connections(&element_id).is_empty() {
-                if edge_success == Some(true) {
-                    state
-                        .write()
-                        .unwrap()
-                        .add_output(element_id.clone(), output.clone());
-                }
-            }
-
-            for conn in graph.outgoing_connections(&element_id) {
-                //
-                // Port-gated elements (currently just Loop) fan out only
-                // along the port they activated. A Loop with no edge on
-                // that port simply ends the path, which is what happens
-                // when a chain is authored without an exit branch.
-                //
-                if !connection_fires(conn, &edge_success, active_port) {
-                    continue;
-                }
-                if is_target_ready(&conn.to_element, &graph, &resolved) {
-                    work_queue.push_back(conn.to_element.clone());
-                }
-            }
-
-            if work_queue.is_empty() {
-                for (id, node) in &graph.nodes {
-                    if resolved.contains_key(id) {
-                        continue;
-                    }
-                    let allows_partial = node
-                        .element
-                        .block_config()
-                        .and_then(|bc| bc.require_all_inputs)
-                        .map(|v| !v)
-                        .unwrap_or(false);
-                    if allows_partial && has_any_fired_input(id, &graph, &resolved) {
-                        work_queue.push_back(id.clone());
-                    }
-                }
-            }
-
-            let update = state.read().unwrap().to_update();
-            Self::broadcast_update(
-                &broadcast_channel,
-                ClientBroadcastMessage::ChainExecutionUpdate(update),
-            )
-            .await;
-        }
-
-        for (id, _) in &graph.nodes {
-            if !resolved.contains_key(id) {
-                state.write().unwrap().set_element_skipped(id);
-            }
-        }
-
-        close_if_active(
-            &mut active_session,
-            &active_session_snapshot,
-            &rabbitmq_channel,
-            &acp_node_proxy,
-            &node_id,
+            result.map(|output| (output, active_port, semantic_success))
+        };
+        let outcome = cancellable_timeout(
+            &element_token,
+            block_config.and_then(|bc| bc.max_runtime),
+            run,
         )
         .await;
-
-        let termination_id = chain
-            .elements
-            .iter()
-            .find(|e| matches!(e, ChainElement::Termination { .. }))
-            .map(|e| e.id().clone());
-        if let Some(ref tid) = termination_id {
-            if !resolved.contains_key(tid) {
-                return Err(anyhow::anyhow!(
-                    "Chain failed: Termination element was not reached"
-                ));
+        match &outcome {
+            Ok((output, _, _)) => {
+                state
+                    .write()
+                    .unwrap()
+                    .set_element_completed(element_id, output.clone(), Some(true))
+            }
+            Err(error) => state
+                .write()
+                .unwrap()
+                .set_element_failed(element_id, error.to_string()),
+        }
+        element_token.cancel();
+        if group_id.is_none() || outcome.is_err() {
+            let session = active_sessions.lock().unwrap().remove(&session_key);
+            if let Some(session) = session {
+                close_session_in_background(
+                    session.node_id,
+                    session.session_id,
+                    rabbitmq_channel.clone(),
+                    acp_node_proxy.clone(),
+                );
             }
         }
-
-        Ok(())
+        match outcome {
+            Ok((output, port, success)) => (Ok(output), port, success),
+            Err(error) => (Err(error), None, None),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1154,6 +1257,11 @@ impl ChainExecutor {
             )),
             chain_execution_id: Some(execution_id.to_string()),
         };
+        let mut record_guard = OperationRecordGuard {
+            operation_id: op_id.clone(),
+            database: database.clone(),
+            finished: false,
+        };
         if let Err(e) = database.insert_operation(&op_record).await {
             common::log_warn!("Failed to record chain operation to database: {}", e);
         }
@@ -1216,6 +1324,7 @@ impl ChainExecutor {
             }
         }
 
+        record_guard.finished = true;
         op_result.map(|(summary, _result)| (summary, semantic_success))
     }
 
@@ -1265,7 +1374,7 @@ impl ChainExecutor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_generic_prompt(
         prompt: &str,
-        session_group: &Option<SessionGroup>,
+        _session_group: &Option<SessionGroup>,
         merged_input: &str,
         is_first_in_session: bool,
         active_session: &Option<String>,
@@ -1302,10 +1411,7 @@ impl ChainExecutor {
             operation_prompt: prompt_to_send,
             mode: "one-shot".to_string(),
             agent_iterations: 1,
-            yolo_mode: session_group
-                .as_ref()
-                .map(|sg| sg.yolo_mode)
-                .unwrap_or(yolo_mode),
+            yolo_mode,
             model_ref: None,
         };
 
@@ -1336,6 +1442,144 @@ impl ChainExecutor {
     }
 }
 
+fn schedule_dependents(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &mut HashMap<String, ResolvedElement>,
+    loop_counters: &mut HashMap<String, u32>,
+    work_queue: &mut VecDeque<String>,
+) {
+    let (_, success, active_port) = resolved[element_id].clone();
+    let outgoing = graph.outgoing_connections(&element_id.to_string());
+    let fired: Vec<_> = outgoing
+        .into_iter()
+        .filter(|conn| connection_fires(conn, &success, active_port))
+        .collect();
+
+    if active_port == Some(LOOP_PORT_RETRY) {
+        //
+        // A new pass must wait for its own branches, without seeing stale
+        // results from the previous pass. Stop at this Loop so its fresh
+        // feedback and the exit branch remain outside the invalidation.
+        //
+        let mut body = HashSet::new();
+        let mut pending: Vec<_> = fired.iter().map(|conn| conn.to_element.clone()).collect();
+        while let Some(id) = pending.pop() {
+            if id == element_id || !body.insert(id.clone()) {
+                continue;
+            }
+            pending.extend(
+                graph
+                    .outgoing_connections(&id)
+                    .iter()
+                    .map(|conn| conn.to_element.clone()),
+            );
+        }
+        for id in &body {
+            resolved.remove(id);
+            loop_counters.remove(id);
+        }
+        work_queue.retain(|id| !body.contains(id));
+    }
+
+    for conn in fired {
+        let is_loop = graph
+            .nodes
+            .get(&conn.to_element)
+            .is_some_and(|node| matches!(node.element, ChainElement::Loop { .. }));
+        if (!resolved.contains_key(&conn.to_element) || is_loop)
+            && is_target_ready(&conn.to_element, graph, resolved)
+            && !work_queue.contains(&conn.to_element)
+        {
+            work_queue.push_back(conn.to_element.clone());
+        }
+    }
+}
+
+fn enqueue_ready_elements(
+    chain: &ChainDefinition,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, ResolvedElement>,
+    work_queue: &mut VecDeque<String>,
+) {
+    //
+    // An ancestor resolving a condition can make an unexecuted branch
+    // inactive. Revisit joins even when no direct predecessor just ran.
+    // Authored order gives independent ready branches a stable priority.
+    //
+
+    for element in &chain.elements {
+        let id = element.id();
+        if !resolved.contains_key(id)
+            && !work_queue.contains(id)
+            && is_target_ready(id, graph, resolved)
+        {
+            work_queue.push_back(id.clone());
+        }
+    }
+}
+
+fn is_loop_back_edge(conn: &crate::database::ChainConnection, graph: &ExecutionGraph) -> bool {
+    conn.from_port == LOOP_PORT_RETRY
+        && graph
+            .nodes
+            .get(&conn.from_element)
+            .is_some_and(|node| matches!(node.element, ChainElement::Loop { .. }))
+        && graph.is_reachable(&conn.to_element, &conn.from_element)
+}
+
+//
+// An unresolved branch is inactive only when all its inputs are inactive.
+// Pending work and cycles are not considered inactive, so a join still waits
+// for every branch that can produce a result during the current pass.
+//
+
+fn is_inactive_branch(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, ResolvedElement>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    if element_id == graph.trigger_id || !visiting.insert(element_id.to_string()) {
+        return false;
+    }
+    let incoming = graph.incoming_connections(&element_id.to_string());
+    let inactive = !incoming.is_empty()
+        && incoming.iter().all(|conn| {
+            if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+                !connection_fires(conn, success, *active_port)
+            } else if is_loop_back_edge(conn, graph) {
+                true
+            } else {
+                is_inactive_branch(&conn.from_element, graph, resolved, visiting)
+            }
+        });
+    visiting.remove(element_id);
+    inactive
+}
+
+//
+// Rebuild inputs on every visit so a repeated body consumes the previous
+// pass's output and the Loop exit carries the final pass's output. Other
+// incoming edges retain their latest values as context, as with any merge.
+//
+
+fn collect_merged_input(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, ResolvedElement>,
+) -> String {
+    graph
+        .incoming_connections(&element_id.to_string())
+        .iter()
+        .filter_map(|conn| {
+            let (output, success, active_port) = resolved.get(&conn.from_element)?;
+            connection_fires(conn, success, *active_port).then_some(output.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 //
 // Check whether a connection fires based on its condition, source element's
 // success, and (when the source is port-gated) the selected output port.
@@ -1357,11 +1601,9 @@ fn connection_fires(
 
 //
 // Check if a target element is ready to execute (all forward-edge sources
-// resolved, at least one fires). On first execution of a target (not yet
-// resolved), back-edge sources are skipped. A back-edge is a connection
-// from a source that the target can reach via forward traversal (i.e. they
-// form a cycle). This prevents deadlock in loop structures like
-// Op → Loop → (port 0) → Op.
+// resolved or inactive, at least one fires). Unresolved Loop repeat edges
+// are skipped so the body can run its first pass before reaching the Loop.
+// Other edges in the same cycle still need their current pass's result.
 //
 
 fn is_target_ready(
@@ -1369,7 +1611,6 @@ fn is_target_ready(
     graph: &ExecutionGraph,
     resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
-    let first_execution = !resolved.contains_key(target_id);
     let incoming = graph.incoming_connections(&target_id.to_string());
     let mut all_required_resolved = true;
     let mut any_fires = false;
@@ -1380,14 +1621,22 @@ fn is_target_ready(
                 any_fires = true;
             }
         } else {
-            if first_execution && graph.is_reachable(target_id, &conn.from_element) {
+            if is_loop_back_edge(conn, graph)
+                || is_inactive_branch(&conn.from_element, graph, resolved, &mut HashSet::new())
+            {
                 continue;
             }
             all_required_resolved = false;
         }
     }
 
-    all_required_resolved && any_fires
+    let allows_partial = graph
+        .nodes
+        .get(target_id)
+        .and_then(|node| node.element.block_config())
+        .and_then(|config| config.require_all_inputs)
+        == Some(false);
+    (all_required_resolved || allows_partial) && any_fires
 }
 
 //
@@ -1395,6 +1644,7 @@ fn is_target_ready(
 // fires, regardless of whether all sources are resolved.
 //
 
+#[cfg(test)]
 fn has_any_fired_input(
     target_id: &str,
     graph: &ExecutionGraph,
@@ -1414,6 +1664,179 @@ fn has_any_fired_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn independent_ready_elements_run_concurrently_with_a_bound() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "a", 0),
+            port_connection("trigger", "b", 0),
+            port_connection("trigger", "c", 0),
+        ]);
+        let mut queue = VecDeque::from(["a".into(), "b".into(), "c".into()]);
+        let batch = take_ready_batch(&mut queue, &graph, 2);
+        assert_eq!(batch, ["a", "b"]);
+        assert_eq!(queue, ["c"]);
+        let barrier = tokio::sync::Barrier::new(2);
+        let jobs = batch.iter().map(|id| async {
+            barrier.wait().await;
+            id.clone()
+        });
+        let results = tokio::time::timeout(std::time::Duration::from_secs(1), join_all(jobs))
+            .await
+            .unwrap();
+        assert_eq!(results, ["a", "b"]);
+    }
+
+    #[test]
+    fn shared_sessions_and_memory_keys_are_serialized_without_blocking_other_groups() {
+        let mut graph = loop_graph(vec![
+            port_connection("trigger", "a", 0),
+            port_connection("trigger", "b", 0),
+            port_connection("trigger", "c", 0),
+            port_connection("trigger", "store", 0),
+            port_connection("trigger", "read", 0),
+        ]);
+        let group = SessionGroup {
+            id: "shared".into(),
+            color: "blue".into(),
+            yolo_mode: false,
+            working_dir: None,
+        };
+        for id in ["a", "b"] {
+            graph.nodes.get_mut(id).unwrap().element = ChainElement::GenericPrompt {
+                id: id.into(),
+                prompt: id.into(),
+                session_group: Some(group.clone()),
+                block_config: None,
+            };
+        }
+        graph
+            .session_groups
+            .insert("shared".into(), (group, vec!["a".into(), "b".into()]));
+        for id in ["store", "read"] {
+            graph.nodes.get_mut(id).unwrap().element = ChainElement::Memory {
+                id: id.into(),
+                key: "shared-value".into(),
+                mode: crate::database::MemoryMode::Store,
+            };
+        }
+        let mut queue = VecDeque::from([
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "store".into(),
+            "read".into(),
+        ]);
+        assert_eq!(take_ready_batch(&mut queue, &graph, 4), ["a", "c", "store"]);
+        assert_eq!(take_ready_batch(&mut queue, &graph, 4), ["b", "read"]);
+    }
+
+    #[test]
+    fn loops_run_between_waves_and_never_alongside_unsettled_branches() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "a", 0),
+            port_connection("a", "loop", 0),
+            port_connection("trigger", "b", 0),
+        ]);
+        let mut queue = VecDeque::from(["a".into(), "loop".into(), "b".into()]);
+        assert_eq!(take_ready_batch(&mut queue, &graph, 4), ["a"]);
+        assert_eq!(take_ready_batch(&mut queue, &graph, 4), ["loop"]);
+        assert_eq!(take_ready_batch(&mut queue, &graph, 4), ["b"]);
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_an_unresponsive_dependency() {
+        let token = CancellationToken::new();
+        let wait = cancellable_timeout(&token, None, std::future::pending::<Result<()>>());
+        let cancel = async {
+            tokio::task::yield_now().await;
+            token.cancel();
+        };
+        let (result, _) = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            tokio::join!(wait, cancel)
+        })
+        .await
+        .unwrap();
+        assert!(crate::semantic_ops::is_cancelled(&result.unwrap_err()));
+    }
+
+    #[tokio::test]
+    async fn a_block_deadline_bounds_an_unresponsive_dependency() {
+        let result = cancellable_timeout(
+            &CancellationToken::new(),
+            Some(0),
+            std::future::pending::<Result<()>>(),
+        )
+        .await;
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn joins_unblock_when_a_late_ancestor_disables_the_other_branch() {
+        let mut conditional = port_connection("decision", "unused", 0);
+        conditional.condition = Some(crate::database::ConnectionCondition::OnSuccess);
+        let graph = loop_graph(vec![
+            port_connection("trigger", "decision", 0),
+            port_connection("trigger", "fast", 0),
+            conditional,
+            port_connection("unused", "join", 0),
+            port_connection("fast", "join", 0),
+        ]);
+        let mut resolved = HashMap::from([
+            ("trigger".into(), (String::new(), Some(true), None)),
+            ("fast".into(), ("fast output".into(), Some(true), None)),
+        ]);
+        assert!(!is_target_ready("join", &graph, &resolved));
+        resolved.insert("decision".into(), (String::new(), Some(false), None));
+        let chain = ChainDefinition {
+            id: "test".into(),
+            name: "test".into(),
+            description: String::new(),
+            category: String::new(),
+            elements: graph
+                .nodes
+                .values()
+                .map(|node| node.element.clone())
+                .collect(),
+            connections: graph.connections.clone(),
+            disabled: false,
+            timeout: None,
+            positions: HashMap::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let mut queue = VecDeque::new();
+        enqueue_ready_elements(&chain, &graph, &resolved, &mut queue);
+        assert_eq!(queue, ["join"]);
+        assert_eq!(
+            collect_merged_input("join", &graph, &resolved),
+            "fast output"
+        );
+    }
+
+    #[test]
+    fn a_completed_partial_join_is_not_dispatched_again() {
+        let mut graph = loop_graph(vec![
+            port_connection("trigger", "a", 0),
+            port_connection("trigger", "b", 0),
+            port_connection("a", "join", 0),
+            port_connection("b", "join", 0),
+        ]);
+        graph.nodes.get_mut("join").unwrap().element = ChainElement::Termination {
+            id: "join".into(),
+            block_config: Some(crate::database::BlockConfig {
+                require_all_inputs: Some(false),
+                ..Default::default()
+            }),
+        };
+        let mut resolved = HashMap::from([("a".into(), ("first".into(), Some(true), None))]);
+        assert!(is_target_ready("join", &graph, &resolved));
+        resolved.insert("join".into(), ("first".into(), Some(true), None));
+        resolved.insert("b".into(), ("second".into(), Some(true), None));
+        let mut queue = VecDeque::new();
+        schedule_dependents("b", &graph, &mut resolved, &mut HashMap::new(), &mut queue);
+        assert!(queue.is_empty());
+    }
 
     fn port_connection(
         from_element: &str,
@@ -1440,8 +1863,8 @@ mod tests {
     }
 
     #[test]
-    fn loop_retries_until_max_iterations() {
-        for iteration in 1..=3 {
+    fn loop_repeats_before_max_iterations() {
+        for iteration in 1..3 {
             assert_eq!(
                 loop_active_port(iteration, 3),
                 LOOP_PORT_RETRY,
@@ -1452,19 +1875,19 @@ mod tests {
 
     #[test]
     fn loop_exits_once_iterations_are_exhausted() {
-        assert_eq!(loop_active_port(4, 3), LOOP_PORT_EXIT);
+        assert_eq!(loop_active_port(3, 3), LOOP_PORT_EXIT);
         assert_eq!(loop_active_port(100, 3), LOOP_PORT_EXIT);
     }
 
     //
     // max_iterations = 1 is the smallest value the graph validator accepts
     // (0 is rejected with "max_iterations must be >= 1"), so this is the
-    // real boundary: retry once, then exit.
+    // real boundary: the initial body pass is the only pass.
     //
 
     #[test]
-    fn loop_with_single_iteration_retries_once_then_exits() {
-        assert_eq!(loop_active_port(1, 1), LOOP_PORT_RETRY);
+    fn loop_with_single_iteration_exits_after_initial_pass() {
+        assert_eq!(loop_active_port(1, 1), LOOP_PORT_EXIT);
         assert_eq!(loop_active_port(2, 1), LOOP_PORT_EXIT);
     }
 
@@ -1483,6 +1906,228 @@ mod tests {
                 "iteration {iteration} activated undrawable port {port}"
             );
         }
+    }
+
+    fn loop_graph(connections: Vec<crate::database::ChainConnection>) -> ExecutionGraph {
+        let mut nodes = HashMap::new();
+        for id in connections
+            .iter()
+            .flat_map(|conn| [&conn.from_element, &conn.to_element])
+        {
+            let element = if id == "loop" {
+                ChainElement::Loop {
+                    id: id.clone(),
+                    max_iterations: 3,
+                }
+            } else {
+                ChainElement::Memory {
+                    id: id.clone(),
+                    key: id.clone(),
+                    mode: crate::database::MemoryMode::Store,
+                }
+            };
+            nodes.insert(
+                id.clone(),
+                super::super::graph::ExecutionNode {
+                    element,
+                    dependencies: Vec::new(),
+                    dependents: Vec::new(),
+                },
+            );
+        }
+        ExecutionGraph {
+            nodes,
+            trigger_id: "trigger".to_string(),
+            connections,
+            session_groups: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn scheduler_waits_for_both_diamond_branches_on_every_pass() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            port_connection("head", "left", 0),
+            port_connection("head", "right", 0),
+            port_connection("right", "slow", 0),
+            port_connection("left", "join", 0),
+            port_connection("slow", "join", 0),
+            port_connection("join", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::new();
+        let mut counters = HashMap::new();
+        let mut queue = VecDeque::from(["trigger".to_string()]);
+        let mut visits: HashMap<String, u32> = HashMap::new();
+        while let Some(id) = queue.pop_front() {
+            let visit = visits.entry(id.clone()).or_default();
+            *visit += 1;
+            assert!(*visit <= 3, "unexpected extra visit to {id}");
+            let input = collect_merged_input(&id, &graph, &resolved);
+            if id == "head" {
+                let expected = if *visit == 1 {
+                    "trigger-1".to_string()
+                } else {
+                    format!("trigger-1\n\n---\n\njoin-{}", *visit - 1)
+                };
+                assert_eq!(input, expected);
+            }
+            if id == "join" {
+                assert_eq!(input, format!("left-{visit}\n\n---\n\nslow-{visit}"));
+            }
+            let (output, port) = if id == "loop" {
+                let counter = counters.entry(id.clone()).or_default();
+                *counter += 1;
+                (input, Some(loop_active_port(*counter, 3)))
+            } else if id == "exit" {
+                assert_eq!(input, "join-3");
+                (input, None)
+            } else {
+                (format!("{id}-{visit}"), None)
+            };
+            resolved.insert(id.clone(), (output, Some(true), port));
+            schedule_dependents(&id, &graph, &mut resolved, &mut counters, &mut queue);
+        }
+        for id in ["head", "left", "right", "slow", "join", "loop"] {
+            assert_eq!(visits[id], 3, "wrong pass count for {id}");
+        }
+        assert_eq!(visits["exit"], 1);
+    }
+
+    #[test]
+    fn scheduler_drops_previous_pass_results_when_branch_changes() {
+        let mut left = port_connection("head", "left", 0);
+        left.condition = Some(crate::database::ConnectionCondition::OnSuccess);
+        let mut right = port_connection("head", "right", 0);
+        right.condition = Some(crate::database::ConnectionCondition::OnFailure);
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            left,
+            right,
+            port_connection("left", "join", 0),
+            port_connection("right", "join", 0),
+            port_connection("join", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::new();
+        let mut counters = HashMap::new();
+        let mut queue = VecDeque::from(["trigger".to_string()]);
+        let mut pass = 0;
+        let mut joined = Vec::new();
+        while let Some(id) = queue.pop_front() {
+            let input = collect_merged_input(&id, &graph, &resolved);
+            if id == "head" {
+                pass += 1;
+                assert!(pass <= 2);
+            }
+            if id == "join" {
+                joined.push(input.clone());
+            }
+            let (output, port) = if id == "loop" {
+                let counter = counters.entry(id.clone()).or_default();
+                *counter += 1;
+                (input, Some(loop_active_port(*counter, 2)))
+            } else if id == "join" || id == "exit" {
+                (input, None)
+            } else {
+                (format!("{id}-{pass}"), None)
+            };
+            let success = Some(id != "head" || pass == 1);
+            resolved.insert(id.clone(), (output, success, port));
+            schedule_dependents(&id, &graph, &mut resolved, &mut counters, &mut queue);
+        }
+        assert_eq!(joined, ["left-1", "right-2"]);
+        assert_eq!(resolved["exit"].0, "right-2");
+        assert!(!resolved.contains_key("left"));
+    }
+
+    #[test]
+    fn loop_body_feeds_forward_and_exit_receives_final_pass() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            port_connection("head", "tail", 0),
+            port_connection("tail", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::from([(
+            "trigger".to_string(),
+            ("seed".to_string(), Some(true), None),
+        )]);
+        let mut previous_output = String::new();
+        let mut body_passes = 0;
+
+        loop {
+            assert!(is_target_ready("head", &graph, &resolved));
+            let head_input = collect_merged_input("head", &graph, &resolved);
+            let expected = if body_passes == 0 {
+                "seed".to_string()
+            } else {
+                format!("seed\n\n---\n\n{previous_output}")
+            };
+            assert_eq!(head_input, expected);
+            let head_output = format!("head({head_input})");
+            resolved.insert("head".to_string(), (head_output.clone(), Some(true), None));
+
+            assert_eq!(collect_merged_input("tail", &graph, &resolved), head_output);
+            previous_output = format!("tail({head_output})");
+            resolved.insert(
+                "tail".to_string(),
+                (previous_output.clone(), Some(true), None),
+            );
+            body_passes += 1;
+            assert!(body_passes <= 3, "Loop exceeded its configured pass count");
+
+            let loop_input = collect_merged_input("loop", &graph, &resolved);
+            assert_eq!(loop_input, previous_output);
+            let port = loop_active_port(body_passes, 3);
+            resolved.insert("loop".to_string(), (loop_input, Some(true), Some(port)));
+            if port == LOOP_PORT_EXIT {
+                break;
+            }
+            assert!(!is_target_ready("exit", &graph, &resolved));
+            assert_eq!(collect_merged_input("exit", &graph, &resolved), "");
+        }
+
+        assert_eq!(body_passes, 3);
+        assert!(is_target_ready("exit", &graph, &resolved));
+        assert_eq!(
+            collect_merged_input("exit", &graph, &resolved),
+            previous_output
+        );
+        assert_eq!(collect_merged_input("head", &graph, &resolved), "seed");
+    }
+
+    #[test]
+    fn merged_input_uses_latest_condition_and_output() {
+        let mut connection = port_connection("body", "next", 0);
+        connection.condition = Some(crate::database::ConnectionCondition::OnSuccess);
+        let graph = graph_with_connection(connection);
+        let mut resolved = HashMap::from([(
+            "body".to_string(),
+            ("first pass".to_string(), Some(true), None),
+        )]);
+        assert_eq!(
+            collect_merged_input("next", &graph, &resolved),
+            "first pass"
+        );
+
+        resolved.insert(
+            "body".to_string(),
+            ("failed pass".to_string(), Some(false), None),
+        );
+        assert_eq!(collect_merged_input("next", &graph, &resolved), "");
+
+        resolved.insert(
+            "body".to_string(),
+            ("final pass".to_string(), Some(true), None),
+        );
+        assert_eq!(
+            collect_merged_input("next", &graph, &resolved),
+            "final pass"
+        );
     }
 
     #[test]
