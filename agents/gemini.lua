@@ -111,30 +111,6 @@ local function discover_sessions_for_home(home)
   return sessions
 end
 
-local function find_latest_session_id_from_storage(working_dir)
-  if type(working_dir) ~= "string" or working_dir == "" then
-    return nil
-  end
-
-  local project_hash = praxis.sha256_hex(working_dir)
-  local home = praxis.extract_user_home(working_dir)
-  if not home then
-    return nil
-  end
-
-  local chats_dir = praxis.path_join({ home, ".gemini", "tmp", project_hash, "chats" })
-  local best = helpers.find_latest_session_file(chats_dir, { suffix = ".json" })
-  if not best then
-    return nil
-  end
-
-  local parsed = helpers.parse_json(praxis.read_file(best) or "")
-  if parsed ~= nil and type(parsed.sessionId) == "string" then
-    return parsed.sessionId
-  end
-  return nil
-end
-
 --
 -- Collect system-wide configuration (system defaults and system settings).
 -- These apply to all users on the machine.
@@ -197,41 +173,9 @@ local function collect_system_config()
   return result
 end
 
-local session_fns = helpers.subprocess_session({
+local session_fns = helpers.acp_session({
   home_dir = ".gemini",
-  error_label = "Gemini command failed",
-  initial_state = function(_ctx)
-    return { external_session_id = nil }
-  end,
-  on_response = function(state, _prompt, _stdout)
-    if state.external_session_id == nil or state.external_session_id == "" then
-      local discovered = find_latest_session_id_from_storage(state.working_dir)
-      if discovered ~= nil then
-        state.external_session_id = discovered
-      end
-    end
-  end,
-  build_invocation = function(state, prompt)
-    local args = {}
-    if state.yolo_mode then
-      table.insert(args, "-y")
-    end
-    if state.external_session_id ~= nil and state.external_session_id ~= "" then
-      table.insert(args, "-r")
-      table.insert(args, state.external_session_id)
-    end
-    return { args = args, stdin = prompt }
-  end,
-  close = function(state)
-    if state.external_session_id ~= nil and state.external_session_id ~= "" then
-      pcall(praxis.command_run, {
-        program = state.process_path,
-        args = { "--delete-session", state.external_session_id },
-        cwd = state.working_dir,
-        timeout_secs = 10,
-      })
-    end
-  end,
+  args = { "--acp" },
 })
 
 --
@@ -384,36 +328,14 @@ return {
   end,
 
   create_session = function(ctx)
-    local pp = ctx.process_path
-    local working_dir = helpers.resolve_working_dir(ctx, ".gemini")
-
-    local acp_handle = praxis.acp_start({
-      program = pp,
-      args = { "--acp" },
-      cwd = working_dir or "",
-    })
-
-    local session_id = praxis.acp_create_session(acp_handle, working_dir or "")
-
-    return {
-      acp_handle = acp_handle,
-      acp_session_id = session_id,
-      process_path = pp,
-      working_dir = working_dir,
-      yolo_mode = ctx.yolo_mode == true,
-      interactive = ctx.interactive == true,
-      prompt_timeout_secs = ctx.prompt_timeout_secs,
-    }
+    return session_fns.create(ctx)
   end,
 
   session_transact = function(_ctx, state, prompt)
-    local response = praxis.acp_prompt(state.acp_handle, prompt, state.yolo_mode or false, state.interactive or false)
-    return { response = response, state = state }
+    return session_fns.transact(state, prompt)
   end,
 
   session_close = function(_ctx, state)
-    if state.acp_handle then
-      praxis.acp_close(state.acp_handle)
-    end
+    session_fns.close(state)
   end,
 }

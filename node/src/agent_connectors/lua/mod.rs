@@ -372,6 +372,226 @@ mod tests {
 
         fs::remove_dir_all(root).expect("test files should be removed");
     }
+
+    //
+    // Run a connector's recon against a throwaway user home populated with
+    // the given files (paths relative to the home).
+    //
+
+    fn recon_fixture(short_name: &str, files: &[(&str, &str)]) -> common::ReconResult {
+        let marker = format!("AGENT_SHORT_NAME = \"{}\"", short_name);
+        let script = EMBEDDED_LUA_SCRIPTS
+            .iter()
+            .find(|script| script.contains(&marker))
+            .unwrap_or_else(|| panic!("no embedded connector '{}'", short_name));
+        let home = std::env::temp_dir().join(format!("praxis-lua-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&home).expect("fixture home should be created");
+        for (rel, content) in files {
+            let path = home.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).expect("fixture dir should be created");
+            fs::write(&path, content).expect("fixture should be written");
+        }
+
+        let lua = runtime::create_vm(script).expect("connector should load");
+        let home_json = serde_json::to_string(&home.to_string_lossy().replace('\\', "/"))
+            .expect("home path should serialize");
+        lua.load(format!(
+            "praxis.user_homes = function() return {{ {} }} end",
+            home_json
+        ))
+        .exec()
+        .expect("test home override should load");
+        let recon = runtime::vm_recon(&lua, false, None).expect("recon should complete");
+        fs::remove_dir_all(home).expect("test files should be removed");
+        recon
+    }
+
+    fn mcp_summary(recon: &common::ReconResult) -> Vec<(String, Option<String>, Option<String>)> {
+        let mut out: Vec<_> = recon
+            .tools
+            .mcp_servers
+            .iter()
+            .map(|s| (s.name.clone(), s.command.clone(), s.address.clone()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn acp_harnesses_recon_on_empty_home() {
+        for short_name in [
+            "auggie",
+            "cline",
+            "codebuddy",
+            "copilot",
+            "devin",
+            "gemini",
+            "goose",
+            "grok",
+            "junie",
+            "kilo",
+            "kimi",
+            "kiro",
+            "opencode",
+            "qoder",
+            "qwen",
+            "vibe",
+        ] {
+            let recon = recon_fixture(short_name, &[]);
+            assert!(recon.tools.mcp_servers.is_empty(), "{}", short_name);
+            assert!(recon.sessions.items.is_empty(), "{}", short_name);
+        }
+    }
+
+    #[test]
+    fn goose_recon_parses_yaml_extensions() {
+        let config = "\
+GOOSE_PROVIDER: anthropic
+extensions:
+  developer:
+    bundled: true
+    enabled: true
+    name: developer
+    type: builtin
+  github:
+    enabled: true
+    type: stdio
+    name: GitHub
+    cmd: npx
+    args:
+    - -y
+    - '@modelcontextprotocol/server-github'
+    envs: {}
+  flow:
+    enabled: true
+    type: stdio
+    cmd: uvx
+    args: [mcp-server-fetch, --verbose]
+  off:
+    enabled: false
+    type: stdio
+    cmd: nope
+  remote:
+    enabled: true
+    type: streamable_http
+    uri: https://example.com/mcp
+GOOSE_MODEL: claude
+";
+        let recon = recon_fixture("goose", &[(".config/goose/config.yaml", config)]);
+        assert_eq!(
+            mcp_summary(&recon),
+            vec![
+                (
+                    "flow".into(),
+                    Some("uvx mcp-server-fetch --verbose".into()),
+                    None
+                ),
+                (
+                    "github".into(),
+                    Some("npx -y @modelcontextprotocol/server-github".into()),
+                    None
+                ),
+                (
+                    "remote".into(),
+                    None,
+                    Some("https://example.com/mcp".into())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn opencode_recon_parses_mcp_key_from_jsonc() {
+        let config = r#"{
+  // comment
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "local": { "type": "local", "command": ["npx", "-y", "pkg"], "enabled": true },
+    "remote": { "type": "remote", "url": "https://h/mcp", },
+    "off": { "type": "local", "command": ["x"], "enabled": false },
+  },
+}"#;
+        let recon = recon_fixture(
+            "opencode",
+            &[
+                (".config/opencode/opencode.jsonc", config),
+                (".local/share/opencode/auth.json", "{}"),
+            ],
+        );
+        assert_eq!(
+            mcp_summary(&recon),
+            vec![
+                ("local".into(), Some("npx -y pkg".into()), None),
+                ("remote".into(), None, Some("https://h/mcp".into())),
+            ]
+        );
+    }
+
+    //
+    // Live end-to-end check of ACP harnesses against agents installed on the
+    // machine running the test: fingerprint, recon and a one-prompt YOLO
+    // session through the real connector script. Ignored by default because
+    // it needs installed, authenticated agents and network access. Run with:
+    //
+    //   PRAXIS_ACP_LIVE=copilot,opencode cargo test -p praxis_node \
+    //     acp_live -- --ignored --nocapture
+    //
+
+    #[test]
+    #[ignore]
+    fn acp_live_session() {
+        let wanted = std::env::var("PRAXIS_ACP_LIVE").unwrap_or_default();
+        let rt = tokio::runtime::Runtime::new().expect("runtime should build");
+        let working_dir = std::env::temp_dir().join(format!("praxis-acp-live-{}", Uuid::new_v4()));
+        fs::create_dir_all(&working_dir).expect("working dir should be created");
+
+        for short_name in wanted.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let marker = format!("AGENT_SHORT_NAME = \"{}\"", short_name);
+            let script = EMBEDDED_LUA_SCRIPTS
+                .iter()
+                .find(|script| script.contains(&marker))
+                .unwrap_or_else(|| panic!("no embedded connector '{}'", short_name));
+            let (agent, _) = super::create_agent_from_script(script, super::LuaSource::Embedded)
+                .expect("connector should load");
+
+            assert!(
+                rt.block_on(agent.do_fingerprint()),
+                "{} should fingerprint",
+                short_name
+            );
+            println!("[{}] version {:?}", short_name, agent.version());
+
+            let recon = rt
+                .block_on(agent.as_recon().expect("recon").perform_recon(false))
+                .expect("recon should complete");
+            println!(
+                "[{}] recon: {} config items, {} project paths, {} MCP servers, {} skills, {} sessions",
+                short_name,
+                recon.config.items.len(),
+                recon.config.project_paths.len(),
+                recon.tools.mcp_servers.len(),
+                recon.tools.skills.len(),
+                recon.sessions.items.len()
+            );
+
+            let context = common::SessionContext {
+                working_dir: Some(working_dir.to_string_lossy().to_string()),
+                yolo_mode: true,
+                prompt_timeout_secs: None,
+                interactive: false,
+            };
+            let session = agent
+                .create_session_with_id(&context, Uuid::new_v4())
+                .unwrap_or_else(|| panic!("{} session should start", short_name));
+            let reply = session.transact("Reply with the single word pong and nothing else.");
+            session.close();
+            let reply = reply.unwrap_or_else(|e| panic!("{} prompt failed: {}", short_name, e));
+            println!("[{}] reply: {}", short_name, reply.trim());
+            assert!(reply.to_lowercase().contains("pong"));
+        }
+
+        fs::remove_dir_all(working_dir).expect("working dir should be removed");
+    }
 }
 
 pub fn load_embedded_agents() -> Vec<(Arc<dyn Agent>, LuaRegisteredAgentInfo)> {

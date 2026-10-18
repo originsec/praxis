@@ -99,6 +99,47 @@ function M.parse_json(content)
   return parsed
 end
 
+--
+-- Parse JSON that may contain // and /* */ comments and trailing commas
+-- (JSONC, as used by several agents' settings files). Comments are only
+-- recognised outside string literals.
+--
+
+function M.parse_jsonc(content)
+  local strict = M.parse_json(content)
+  if strict ~= nil or content == nil then
+    return strict
+  end
+  local out = {}
+  local i, n = 1, #content
+  local in_string = false
+  while i <= n do
+    local c = content:sub(i, i)
+    if in_string then
+      table.insert(out, c)
+      if c == "\\" then
+        table.insert(out, content:sub(i + 1, i + 1))
+        i = i + 1
+      elseif c == '"' then
+        in_string = false
+      end
+    elseif c == '"' then
+      in_string = true
+      table.insert(out, c)
+    elseif content:sub(i, i + 1) == "//" then
+      local nl = content:find("\n", i, true)
+      i = (nl or n + 1) - 1
+    elseif content:sub(i, i + 1) == "/*" then
+      local close = content:find("*/", i + 2, true)
+      i = (close or n) + 1
+    elseif not (c == "," and content:find("^%s*[%]}]", i + 1)) then
+      table.insert(out, c)
+    end
+    i = i + 1
+  end
+  return M.parse_json(table.concat(out))
+end
+
 function M.parse_toml(content)
   if content == nil then
     return nil
@@ -271,8 +312,39 @@ end
 --   global_dirs (table?)   { default = {...}, windows = {...} }
 --   home_dirs   (table?)   same shape, directory templates with ${HOME} etc.
 --   glob_paths  (table?)   same shape, full glob patterns (name baked in)
+--   npm         (bool?)    also search the usual global npm/bun/volta/mise/nvm
+--                          install locations for `name`
 --   verify      (fn?)      fn(path) -> passed, version
 --
+
+local NPM_GLOBAL_DIRS = {
+  default = { "/usr/local/bin", "/opt/homebrew/bin" },
+  windows = {},
+}
+
+local NPM_HOME_DIRS = {
+  default = {
+    "${HOME}/.npm-global/bin",
+    "${HOME}/.volta/bin",
+    "${HOME}/.bun/bin",
+  },
+  windows = {
+    "${USERPROFILE}\\AppData\\Roaming\\npm",
+    "${USERPROFILE}\\.volta\\bin",
+    "${USERPROFILE}\\.npm-global",
+    "${USERPROFILE}\\.bun\\bin",
+  },
+}
+
+local NPM_GLOB_DIRS = {
+  default = {
+    "${HOME}/.local/share/mise/installs/node/*/bin/",
+    "${HOME}/.nvm/versions/node/*/bin/",
+  },
+  windows = {
+    "${APPDATA}\\nvm\\*\\",
+  },
+}
 
 function M.find_executable(cfg)
   local os_name = praxis.os_name()
@@ -281,9 +353,31 @@ function M.find_executable(cfg)
   local is_windows = os_name == "windows"
   local last_version = nil
 
-  local function resolve(tbl)
+  local function resolve_one(tbl)
     if not tbl then return {} end
     return tbl[os_name] or tbl.default or {}
+  end
+
+  local npm_extra = {
+    global_dirs = cfg.npm and resolve_one(NPM_GLOBAL_DIRS) or {},
+    home_dirs = cfg.npm and resolve_one(NPM_HOME_DIRS) or {},
+    glob_paths = {},
+  }
+  if cfg.npm then
+    for _, dir in ipairs(resolve_one(NPM_GLOB_DIRS)) do
+      table.insert(npm_extra.glob_paths, dir .. name .. (is_windows and ".cmd" or ""))
+    end
+  end
+
+  local function resolve(key)
+    local out = {}
+    for _, v in ipairs(resolve_one(cfg[key])) do
+      table.insert(out, v)
+    end
+    for _, v in ipairs(npm_extra[key]) do
+      table.insert(out, v)
+    end
+    return out
   end
 
   local function candidates(dir)
@@ -329,7 +423,7 @@ function M.find_executable(cfg)
   -- Phase 2: explicit global (absolute) directories.
   --
 
-  for _, dir in ipairs(resolve(cfg.global_dirs)) do
+  for _, dir in ipairs(resolve("global_dirs")) do
     for _, p in ipairs(candidates(dir)) do
       if check(p) then return p, last_version end
     end
@@ -340,7 +434,7 @@ function M.find_executable(cfg)
   --
 
   local homes = praxis.user_homes() or {}
-  for _, dir_template in ipairs(resolve(cfg.home_dirs)) do
+  for _, dir_template in ipairs(resolve("home_dirs")) do
     for _, home in ipairs(homes) do
       local dir = M.expand_path(dir_template, home)
       for _, p in ipairs(candidates(dir)) do
@@ -357,7 +451,7 @@ function M.find_executable(cfg)
   -- Phase 4: glob patterns (version manager installations).
   --
 
-  for _, template in ipairs(resolve(cfg.glob_paths)) do
+  for _, template in ipairs(resolve("glob_paths")) do
     local pattern = M.expand_path(template)
     local matches = praxis.glob_files(pattern) or {}
     for _, p in ipairs(matches) do
@@ -644,6 +738,160 @@ function M.subprocess_session(opts)
 end
 
 --
+-- Build a session triple (create/transact/close) for agents that speak the
+-- Agent Client Protocol over stdio. create spawns `<process_path> <args>`
+-- via praxis.acp_start (initialize) and opens a session (session/new);
+-- transact sends session/prompt, with session/update notifications streamed
+-- back to the caller and permission requests auto-allowed in YOLO sessions.
+-- The returned state carries acp_handle, which the node uses for streaming,
+-- abort and close.
+--
+-- opts:
+--   args     (table)   ACP launch arguments, e.g. { "--acp" } or { "acp" }
+--   home_dir (string?) agent dot-dir for resolve_working_dir
+--   env      (table?)  extra environment variables for the agent process
+--
+
+function M.acp_session(opts)
+  local args = opts.args or {}
+
+  local function create(ctx)
+    --
+    -- ACP requires an absolute cwd for session/new, so fall back to any
+    -- user home when neither the caller nor the agent dot-dir gives one.
+    --
+
+    local working_dir = M.resolve_working_dir(ctx, opts.home_dir)
+      or (praxis.user_homes() or {})[1]
+      or ""
+
+    local handle = praxis.acp_start({
+      program = ctx.process_path,
+      args = args,
+      env = opts.env,
+      cwd = working_dir,
+    })
+    local ok, session_id = pcall(praxis.acp_create_session, handle, working_dir)
+    if not ok then
+      praxis.acp_close(handle)
+      error(session_id)
+    end
+
+    return {
+      acp_handle = handle,
+      acp_session_id = session_id,
+      process_path = ctx.process_path,
+      working_dir = working_dir,
+      yolo_mode = ctx.yolo_mode == true,
+      interactive = ctx.interactive == true,
+      prompt_timeout_secs = ctx.prompt_timeout_secs,
+    }
+  end
+
+  local function transact(state, prompt)
+    local response = praxis.acp_prompt(state.acp_handle, prompt,
+      state.yolo_mode == true, state.interactive == true)
+    return { response = response, state = state }
+  end
+
+  local function close(state)
+    if state.acp_handle then
+      praxis.acp_close(state.acp_handle)
+    end
+  end
+
+  return {
+    create = create,
+    transact = transact,
+    close = close,
+  }
+end
+
+--
+-- Run a query whose single result column is a JSON document per row (e.g.
+-- built with json_object) and return the decoded rows. Returns an empty
+-- list when the database is missing, sqlite3 is unavailable or the schema
+-- does not match.
+--
+
+function M.sqlite_json_rows(db_path, sql)
+  local rows = {}
+  if type(db_path) ~= "string" or not praxis.path_exists(db_path) then
+    return rows
+  end
+  local out = praxis.sqlite_query(db_path, sql)
+  for line in string.gmatch(out or "", "[^\r\n]+") do
+    local row = M.parse_json(line)
+    if row ~= nil then
+      table.insert(rows, row)
+    end
+  end
+  return rows
+end
+
+--
+-- Working directories recorded in discovered sessions (their context_path)
+-- that still exist, excluding the user home itself. Lets connectors report
+-- projects the agent has been used in even without a project-level config.
+--
+
+function M.project_paths_from_sessions(sessions, home)
+  local projects = {}
+  for _, s in ipairs(sessions or {}) do
+    local p = s.context_path
+    if type(p) == "string" and p ~= "" and M.norm(p) ~= M.norm(home or "")
+        and praxis.path_is_dir(p) then
+      table.insert(projects, p)
+    end
+  end
+  return M.dedup(projects)
+end
+
+--
+-- OpenCode and its forks (e.g. Kilo) keep sessions in a SQLite database:
+-- one row per session in `session` (directory = cwd), messages in `message`
+-- and their content parts in `part`. Sub-agent sessions (parent_id set) are
+-- folded into their parent. session_file is the virtual path
+-- "<db>::<session id>", resolved by opencode_session_content.
+--
+
+function M.opencode_sessions(db_path)
+  local sessions = {}
+  for _, row in ipairs(M.sqlite_json_rows(db_path,
+    "SELECT json_object('id', s.id, 'directory', s.directory, 'updated', s.time_updated,"
+      .. " 'messages', (SELECT count(*) FROM message m WHERE m.session_id = s.id))"
+      .. " FROM session s WHERE s.parent_id IS NULL;")) do
+    table.insert(sessions, {
+      session_id = row.id,
+      context_path = row.directory or "",
+      session_file = db_path .. "::" .. row.id,
+      last_modified = type(row.updated) == "number"
+        and praxis.format_unix_timestamp(math.floor(row.updated / 1000)) or "",
+      message_count = row.messages or 0,
+    })
+  end
+  return sessions
+end
+
+--
+-- Render an OpenCode-family session as JSONL: one line per message with its
+-- role and its ordered content parts (text, tool, reasoning, ...) as the
+-- content array.
+--
+
+function M.opencode_session_content(session_file)
+  local db, id = string.match(session_file or "", "^(.+)::([%w_%-]+)$")
+  if not db then
+    return nil
+  end
+  return praxis.sqlite_query(db,
+    "SELECT json_object('role', json_extract(m.data, '$.role'), 'content',"
+      .. " (SELECT json_group_array(json(data)) FROM"
+      .. " (SELECT data FROM part p WHERE p.message_id = m.id ORDER BY p.id)))"
+      .. " FROM message m WHERE m.session_id = '" .. id .. "' ORDER BY m.time_created;")
+end
+
+--
 -- Add a config item if the file exists. Shared by all agent connectors.
 --
 
@@ -703,7 +951,7 @@ end
 
 function M.parse_mcp_from_json(content, context_path)
   local servers = {}
-  local json_obj = M.parse_json(content)
+  local json_obj = M.parse_jsonc(content)
   if json_obj == nil or type(json_obj.mcpServers) ~= "table" then
     return servers
   end
@@ -763,7 +1011,7 @@ end
 
 function M.parse_mcp_from_json_flexible(content, context_path)
   local servers = {}
-  local json_obj = M.parse_json(content)
+  local json_obj = M.parse_jsonc(content)
   if json_obj == nil then
     return servers
   end
@@ -813,6 +1061,44 @@ function M.parse_mcp_from_json_flexible(content, context_path)
     end
 
     ::continue::
+  end
+  return servers
+end
+
+--
+-- Parse MCP servers from an OpenCode-style config (OpenCode and its forks
+-- such as Kilo): servers live under the "mcp" key, local servers carry the
+-- command as an argv array and remote servers a url. Disabled servers are
+-- skipped.
+--
+
+function M.parse_mcp_from_opencode_json(content, context_path)
+  local servers = {}
+  local json_obj = M.parse_jsonc(content)
+  if json_obj == nil or type(json_obj.mcp) ~= "table" then
+    return servers
+  end
+
+  for server_name, cfg in pairs(json_obj.mcp) do
+    if type(cfg) == "table" and cfg.enabled ~= false then
+      local entry = { name = server_name, tools = {}, context_path = context_path }
+      if type(cfg.command) == "table" and #cfg.command > 0 then
+        local argv = {}
+        for _, a in ipairs(cfg.command) do
+          if type(a) == "string" then
+            table.insert(argv, a)
+          end
+        end
+        entry.transport = "Stdio"
+        entry.command = table.concat(argv, " ")
+      elseif type(cfg.url) == "string" then
+        entry.transport = "Sse"
+        entry.address = cfg.url
+      end
+      if entry.transport then
+        table.insert(servers, entry)
+      end
+    end
   end
   return servers
 end
@@ -1174,6 +1460,51 @@ function M.discover_skill_md_skills(base_path, opts)
           description = description,
           context_path = opts.context_path,
         })
+      end
+    end
+  end
+  return skills
+end
+
+--
+-- Discover SKILL.md skills and slash-command files in an agent's dot-dir at
+-- user scope (<home>/<dot_dir>) and project scope (<project>/<dot_dir>),
+-- the layout most CLI agents share.
+--
+-- opts: {
+--   dot_dir       = ".example",   -- required
+--   skills_dir    = "skills",     -- SKILL.md directories; false to skip
+--   commands_dir  = "commands",   -- slash-command files; nil to skip
+--   commands_pattern = "%.md$",
+--   commands_parse   = "markdown"|"toml",
+-- }
+--
+
+function M.discover_dot_dir_skills(home, project_paths, opts)
+  local skills = {}
+  local bases = { { path = praxis.path_join({ home, opts.dot_dir }) } }
+  for _, proj in ipairs(project_paths or {}) do
+    table.insert(bases, { path = praxis.path_join({ proj, opts.dot_dir }), context_path = proj })
+  end
+
+  for _, base in ipairs(bases) do
+    if opts.skills_dir ~= false then
+      for _, s in ipairs(M.discover_skill_md_skills(base.path, {
+        dir = opts.skills_dir or "skills",
+        context_path = base.context_path,
+      })) do
+        table.insert(skills, s)
+      end
+    end
+    if opts.commands_dir then
+      for _, s in ipairs(M.discover_command_skills(base.path, {
+        dir = opts.commands_dir,
+        pattern = opts.commands_pattern or "%.md$",
+        name_prefix = "/",
+        parse = opts.commands_parse or "markdown",
+        context_path = base.context_path,
+      })) do
+        table.insert(skills, s)
       end
     end
   end
