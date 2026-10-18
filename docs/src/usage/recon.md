@@ -14,11 +14,14 @@ The overlay is a hierarchical browser (similar to a connectors/MCP
 picker): group headers expand and collapse, leaf items open a detail
 pane on the right, and a filter bar narrows the tree.
 
-Three tabs:
+Four tabs:
 
 1. **Config** — config files grouped by type (settings, instructions, …)
 2. **Tools** — MCP servers (with nested tools), skills, and internal tools
 3. **Sessions** — conversation history grouped by project path
+4. **Posture** — managed policy, telemetry and sandbox settings for the
+   agent, plus host security products on the node (see
+   [Endpoint Posture](./posture.md))
 
 See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
 keybindings and mouse controls.
@@ -36,7 +39,10 @@ data is displayed instantly on re-open.
 - **Config:** groups by `config_type` (path suffixes like
   `project_instructions: /home/...` collapse under a single
   `project_instructions` node); expand a group to pick a file and view
-  contents (fetched on select).
+  contents (fetched on select). Managed policy files found by the
+  [posture](./posture.md) definitions are added as `managed_policy` (or
+  `system_defaults`) items and are readable even though they live outside
+  user home directories.
 - **Sessions:** groups by project `context_path`; session rows show
   message count and relative time (`2h ago`).
 
@@ -92,6 +98,8 @@ After running recon, the results are stored in the service database. You can que
 - `recon_session_read` - read session file content
 - `recon_config_grep` - grep config files with regex
 - `recon_session_grep` - grep session files with regex
+- `posture_get` - endpoint posture for a node (managed policy, telemetry,
+  sandbox, security products); see [Endpoint Posture](./posture.md)
 
 These are useful for quick lookups and for AI agents that need to browse specific recon data without triggering a full scan.
 

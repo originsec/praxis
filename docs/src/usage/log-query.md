@@ -41,6 +41,24 @@ Currently connected nodes (in-memory).
 | os_details | Operating system details |
 | intercept_active | Whether interception is active |
 
+### PostureLogs
+
+Latest [endpoint posture](./posture.md) per node, expanded to one row per
+detected security product, per-agent summary, enforced managed-policy key,
+and telemetry/sandbox setting.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the posture scan ran |
+| node_id | Node identifier |
+| agent_short_name | Agent short name (null for host rows) |
+| kind | `summary`, `policy`, `telemetry`, `sandbox`, or `security_product` |
+| name | Setting key, policy key, summary name (`managed_policy`, `telemetry_enabled`, `telemetry_endpoints`), or product name |
+| value | Sanitised value (endpoints as host only, secrets redacted), policy key summary, or product evidence |
+| scope | `managed`, `user`, `defaults`, or `process` (null for products and summaries) |
+| source | Source file, plist, registry key or `node process environment`; product category for products |
+| effective | Whether the value wins at precedence (for products: whether a signature process is running) |
+
 ### ReconLogs
 
 Summary of reconnaissance results per node+agent.
@@ -228,6 +246,15 @@ NodeLogs
 // Find available agents
 AgentLogs | where available == true
 
+// Agents whose user config is overridden by managed policy
+PostureLogs | where kind == "summary" and name == "managed_policy" and value == "true"
+
+// Where is agent telemetry going?
+PostureLogs | where kind == "telemetry" and effective == true | project node_id, agent_short_name, name, value, scope
+
+// Security products seen across nodes
+PostureLogs | where kind == "security_product" | project node_id, name, value, effective
+
 // Find all MCP tools across agents
 ReconToolLogs | where tool_type == "mcp" | project agent_short_name, server_name, tool_name
 
@@ -284,7 +311,7 @@ User-provided string values in LIKE patterns are escaped to prevent SQL wildcard
 
 If any expression in the leading where clauses cannot be translated to SQL (e.g. an unsupported function), the executor falls back to fetching all rows with just a LIMIT and applies all filtering in memory. Operators that appear after a non-pushable operator (like `project`, `extend`, `summarize`) always run in memory.
 
-In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (ReconLogs, ReconToolLogs, etc.) are always materialized fully and filtered in memory.
+In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (PostureLogs, ReconLogs, ReconToolLogs, etc.) are always materialized fully and filtered in memory.
 
 ### Result Limits
 

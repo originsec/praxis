@@ -59,19 +59,20 @@ sessions left alive from previous runs or other clients.
 
 The recon overlay opens as a full-screen modal from the Nodes detail
 pane. It is a hierarchical browser (expand/collapse groups, filter bar,
-detail pane) with three tabs: **Config**, **Tools**, and **Sessions**.
-See [Reconnaissance](./recon.md#running-recon) for the result contents
-and refresh behavior.
+detail pane) with four tabs: **Config**, **Tools**, **Sessions**, and
+**Posture**. See [Reconnaissance](./recon.md#running-recon) for the result
+contents and refresh behavior, and [Endpoint Posture](./posture.md) for the
+Posture tab.
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `1` `2` `3` | Switch tab (Config / Tools / Sessions) |
+| `Tab` / `1` `2` `3` `4` | Switch tab (Config / Tools / Sessions / Posture) |
 | `↑` / `↓` | Move among visible tree rows |
 | `←` / `→` | Collapse / expand or focus detail |
 | `Space` / `Enter` | Toggle expand on branches; open leaf detail |
 | `PgUp` / `PgDn` | Scroll detail pane |
 | `/` | Focus filter bar |
-| `r` | Static recon refresh |
+| `r` | Static recon refresh (Posture tab: re-scan posture) |
 | `Ctrl+U` | Semantic recon (Discover) |
 | `Ctrl+E` | Edit selected Config file in `$EDITOR` (Config tab only) |
 | `Esc` | Unfocus filter → clear filter → leave detail → close |
@@ -85,6 +86,12 @@ When opened, the TUI first checks the service cache for existing recon
 data. If none is cached, it sends an ACP `_praxis/recon` request to the
 node and polls `request_recon` roughly every 1.5 seconds for up to ~90
 seconds. Cached recon data appears instantly on re-open.
+
+The Posture tab loads the node's stored posture on first visit (scanning
+the node if nothing is stored) and groups it into **Managed Policy**,
+**Telemetry**, **Sandbox & Permissions** and **Host Security**. Setting
+rows are badged `[effective]` or `[overridden]`; selecting a policy file
+shows its enforced keys and raw contents.
 
 Press `Ctrl+E` on a Config leaf to open the selected file in
 `$VISUAL`/`$EDITOR`; on a clean exit with changes, the new contents are
@@ -176,7 +183,7 @@ one is exhausted.
 ## Log Query (`Ctrl+G`)
 
 KQL-style query interface over captured logs (intercepted traffic, event
-logs, recon results, operations history, and more — 12 virtual tables in
+logs, recon results, posture, operations history, and more — 13 virtual tables in
 total). See [Log Query](./log-query.md) for the full query reference.
 
 - Multi-line editor with basic KQL keyword highlighting
@@ -264,6 +271,8 @@ In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/�
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, feature assignment (orchestrator, documentation helper, semantic ops, semantic parser, traffic parser), and the Traffic Parser body limit
+- **Intercept** — intercept targets virtual file (TOML), edited in `$EDITOR`
+- **Posture** — security product signatures virtual file (TOML) used by [endpoint posture](./posture.md) scans, edited in `$EDITOR`; reset to defaults
 - **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, log query row limits, prompt timeout
 - **About** — connection info
 

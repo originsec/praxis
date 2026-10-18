@@ -80,6 +80,7 @@ All recon tools take a `node` prefix and an `agent` short-name.
 - `recon_session_read` — Read session file content (`node`, `agent`, optional `path`)
 - `recon_config_grep` — Grep config files with regex (`node`, `agent`, `pattern`, optional `paths`)
 - `recon_session_grep` — Grep session files with regex (`node`, `agent`, `pattern`, optional `paths`)
+- `posture_get` — [Endpoint posture](./posture.md) for a node: managed policy, telemetry destinations, sandbox/permission settings per agent, and host security products (`node`, optional `agent`, `refresh`, `include_raw`). Returns the stored result, scanning the node when none is stored or `refresh` is true; `include_raw` adds raw managed-policy contents.
 - `write_file` — Write file content
 
 ### Sessions

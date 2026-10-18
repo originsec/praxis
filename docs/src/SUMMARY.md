@@ -12,6 +12,7 @@
 
 - [Nodes & Agents](./usage/nodes-and-agents.md)
 - [Reconnaissance](./usage/recon.md)
+- [Endpoint Posture](./usage/posture.md)
 - [Sessions](./usage/sessions.md)
 - [Terminal](./usage/terminal.md)
 - [Interception](./usage/interception.md)

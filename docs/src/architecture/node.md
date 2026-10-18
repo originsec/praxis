@@ -265,8 +265,16 @@ advertised in `InitializeResponse._meta.extensions`:
   `ReconResult` with three categories: `config` (config items + project
   paths), `tools` (MCP servers + skills, plus internal/built-in tools
   when `is_semantic` is true), `sessions` (enumerated agent sessions).
+- `_praxis/posture` — endpoint posture (node-scoped). Params
+  `{ "agents"?: string[], "signatures": SecurityProductSignature[] }`;
+  returns a `PostureResult` (per-agent managed policy, telemetry and
+  sandbox settings evaluated from `node/src/posture/agents.toml`, plus
+  host security products matched against the supplied signatures). The
+  service fills both params; see [Endpoint Posture](../usage/posture.md).
 - `_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files` —
   agent-scoped file ops used by recon tooling and the orchestrator.
+  Config reads are limited to user home directories plus the known
+  managed-policy files from the posture definitions.
 - `_praxis/write_session_content` — writes agent-session content through
   the connector's `write_session_content` hook so agents with virtual
   session stores can intercept the write.

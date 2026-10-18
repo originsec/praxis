@@ -77,7 +77,17 @@ praxis session create --node abc123 --agent codex --yolo
 node list                          # List all connected nodes
 node select <prefix>               # Select node by ID prefix
 node reset <prefix>                # Reset a node
+node posture <prefix> [--agent <name>] [--refresh] [--json]
+                                   # Endpoint posture (stored; --refresh re-scans)
 ```
+
+`node posture` prints the [endpoint posture](./posture.md) for a node:
+detected security products, then per agent whether managed policy is
+present (and which keys it enforces), telemetry state and destinations,
+and every telemetry/sandbox setting with its scope and source (`*` marks
+the effective value). When nothing is stored yet the node is scanned
+automatically. `--json` prints the full result including raw
+managed-policy contents.
 
 **Agent Management:**
 ```bash

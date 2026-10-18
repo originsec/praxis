@@ -114,7 +114,8 @@ The service-side proxy (`service/src/acp_node_proxy.rs`) routes frames:
 - Service's internal orchestrator → node, using a `svc_*` pseudo-client-id
   so responses are consumed in-process instead of being forwarded.
 
-Recon is a custom ACP extension (`_praxis/recon`) plus four file-op
+Recon is a custom ACP extension (`_praxis/recon`), endpoint posture is
+another (`_praxis/posture`), plus four file-op
 extensions (`_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files`,
 `_praxis/write_session_content`). The node advertises them in
 `InitializeResponse._meta.extensions` along with the connector catalog.

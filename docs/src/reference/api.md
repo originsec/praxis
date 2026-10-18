@@ -253,6 +253,14 @@ pub enum ClientSignalMessage {
     InterceptTargetsSet { client_id, text: String },
     InterceptTargetsResetDefaults { client_id },
 
+    // Endpoint posture. With refresh, the service runs _praxis/posture on
+    // the node first and stores the result. Signatures are a TOML virtual
+    // file sent to nodes with each posture request.
+    PostureGet { client_id, node_id, refresh: bool },
+    PostureSignaturesGet { client_id },
+    PostureSignaturesSet { client_id, text: String },
+    PostureSignaturesResetDefaults { client_id },
+
     // LogQuery - KQL query interface over captured logs
     LogQuery { client_id, query: String },
 
@@ -387,6 +395,10 @@ pub enum ClientDirectMessage {
     // contents; `targets` is the parsed list (empty when `error` is set).
     InterceptTargetsState { text: String, targets: Vec<InterceptTargetConfig>, error: Option<String> },
 
+    // Endpoint posture
+    PostureGetResponse { node_id, posture: Option<PostureResult>, performed_at: Option<String>, error: Option<String> },
+    PostureSignaturesState { text: String, signatures: Vec<SecurityProductSignature>, error: Option<String> },
+
     // LogQuery
     LogQueryResponse { columns: Vec<String>, rows: Vec<Vec<serde_json::Value>>, total_count: usize },
     LogQueryError { message },
@@ -505,6 +517,14 @@ All extensions are advertised under `InitializeResponse._meta.extensions`.
   `{ "agent_short_name": string, "is_semantic": bool }`; result is a
   serialized `ReconResult`. Setting `is_semantic` to true asks the node
   to populate `tools.internal_tools` by interrogating the agent.
+- `_praxis/posture` — endpoint posture for the node. Params
+  `{ "agents"?: string[], "signatures": SecurityProductSignature[] }`
+  (`agents` defaults to every registered connector); result is a
+  serialized `PostureResult` (`host.security_products`,
+  `host.signatures_evaluated`, and per-agent `managed_policy`,
+  `policy_sources`, `settings`, `telemetry`, `notes`). Normally issued by
+  the service on `PostureGet { refresh: true }`, which supplies the
+  signatures and stores the result.
 - `_praxis/read_file` — read a file on the node. Params
   `{ "agent_short_name": string, "file_type": AgentFileType, "path": string,
   "line_start"?: number, "line_end"?: number }`, where `AgentFileType` is
