@@ -75,11 +75,62 @@ Static reconnaissance discovers:
   Code plugins
 - Server names, commands, and endpoints
 
-**Plugins**
-- Active plugins are read from `~/.claude/plugins/installed_plugins.json` and
-  the scope-specific `enabledPlugins` setting.
+**Plugins and Marketplaces**
+- Every installation in `~/.claude/plugins/installed_plugins.json` is listed
+  with its version, marketplace, scope and whether the scope-specific
+  `enabledPlugins` setting enables it.
 - Plugin commands and skills are discovered from the active plugin's cached
   installation path and shown with Claude Code's `/plugin:component` name.
+- Marketplaces come from `~/.claude/plugins/known_marketplaces.json`,
+  `known_marketplaces_claudeai.json`, and `extraKnownMarketplaces` in user,
+  project and local settings (`github:owner/repo`, `git:<url>`, …).
+
+**Hooks**
+- `hooks` in `~/.claude/settings.json` (user), `<project>/.claude/settings.json`
+  (project) and `<project>/.claude/settings.local.json` (local).
+- Managed settings: `/etc/claude-code/managed-settings.json` (Linux),
+  `/Library/Application Support/ClaudeCode/managed-settings.json` (macOS),
+  `C:\Program Files\ClaudeCode\managed-settings.json` (Windows), plus the
+  `managed-settings.d/*.json` drop-ins next to it. Only hooks are read from
+  these files.
+- Enabled plugins' `hooks/hooks.json` and any `hooks` declared in
+  `.claude-plugin/plugin.json` (scope `plugin`).
+
+**Skills**
+- `~/.claude/skills/*/SKILL.md`, skills synced from claude.ai
+  (`~/.claude/skills/synced/<account>_<org>/`), `<project>/.claude/skills`,
+  managed skills (`<managed dir>/.claude/skills`), plugin skills, and legacy
+  `commands/*.md`. Claude Code does not read `~/.agents/skills` natively, so
+  the shared dir is not attributed to it.
+
+**Memory**
+- Auto memory: `~/.claude/projects/<encoded-project>/memory/*.md`
+  (`MEMORY.md` index plus one file per memory), type `auto_memory`.
+- Subagent memory: `~/.claude/agent-memory/<agent>/MEMORY.md` and
+  `<project>/.claude/agent-memory/<agent>/MEMORY.md`.
+
+**Instructions**
+- `~/.claude/CLAUDE.md`, `~/.claude/rules/**/*.md`, managed `CLAUDE.md` in the
+  managed dir above.
+- Per project: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`,
+  `.claude/rules/**/*.md`, and `AGENTS.md` / `.claude/AGENTS.md` only when the
+  project has no `CLAUDE.md` (matching Claude Code's fallback).
+- `@path` imports are followed up to four hops.
+- Projects come from marker files, every directory in `~/.claude.json`
+  `projects`, and the `cwd` recorded in session transcripts.
+
+**Credentials (metadata only)**
+- `~/.claude/.credentials.json` (OAuth): subscription type, rate-limit tier,
+  token and refresh-token expiry, and which tokens are present.
+- `~/.claude.json`: `oauthAccount` email, account UUID, organization, role and
+  billing type; flags `primaryApiKey` presence. Legacy `~/.claude/config.json`
+  is checked for `primaryApiKey` too.
+- `~/.claude/settings.json` when it carries `apiKeyHelper` or an
+  `env.ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN`.
+- macOS keychain references `Claude Code-credentials` and `Claude Code`.
+- Credential env vars (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_FOUNDRY_API_KEY`,
+  `AWS_BEARER_TOKEN_BEDROCK`) — names only.
 
 **Sessions**
 - Project directories under `~/.claude/projects/`

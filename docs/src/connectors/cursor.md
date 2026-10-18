@@ -58,14 +58,57 @@ Paths without valid authentication are filtered out during reconnaissance. This 
 Reconnaissance discovers:
 
 **Configuration**
-- Global settings and MCP servers from `.cursor/cli-config.json`
+- Global settings and MCP servers from `~/.config/cursor/cli-config.json`
+  (the XDG config dir the CLI uses on Linux) and `~/.cursor/cli-config.json`
 - Project settings and MCP servers from `.cursor/cli.json` and `.cursor/mcp.json`
 
 **Trusted Workspaces**
-- Project paths are discovered via `.workspace-trusted` files under `~/.cursor/projects/<hash>/`
+- Project paths are discovered via `.workspace-trusted` files under
+  `~/.cursor/projects/<hash>/` and the `cwd` in
+  `~/.config/cursor/acp-sessions/*/meta.json`
 
-**Command Skills**
-- Discovered from `.cursor/commands/*.md` at both user (global) and project scope
+**Hooks**
+- `~/.cursor/hooks.json` (user), `<project>/.cursor/hooks.json` (project),
+  team hooks synced to `~/.cursor/managed/active-team-hooks/hooks.json`,
+  enterprise `/etc/cursor/hooks.json` (macOS
+  `/Library/Application Support/Cursor/hooks.json`, Windows
+  `C:\ProgramData\Cursor\hooks.json`), and plugin `hooks/hooks.json`.
+- Claude Code hooks from `~/.claude/settings.json` and
+  `<project>/.claude/settings{,.local}.json`, which Cursor runs when
+  third-party extensibility is on (the default), are reported with scope
+  `claude-compat`.
+
+**Instructions**
+- `~/.cursor/rules/*.mdc`, `<project>/.cursor/rules/**/*.mdc`, legacy
+  `.cursorrules`, `AGENTS.md`, and `CLAUDE.md` / `CLAUDE.local.md`
+  (third-party extensibility)
+
+**Memory**
+- Cursor Memories are cloud-side; the local conversation notes scratchpad
+  (`~/.cursor/projects/*/agent-notes/*.md`) is listed as memory.
+
+**Command Skills and Skills**
+- Commands from `.cursor/commands/*.md` at both user (global) and project scope
+- `SKILL.md` skills from `.cursor/skills`, `.agents/skills`, `.claude/skills`
+  and `.codex/skills` at user and project scope, plus the built-in
+  `~/.cursor/skills-cursor/`
+
+**Plugins and Marketplaces**
+- Plugins under `~/.cursor/plugins/local/` and `~/.cursor/plugins/cache/`
+  (`.cursor-plugin/plugin.json` or `.claude-plugin/plugin.json`). Cursor keeps
+  no local enabled flag for marketplace plugins, so installed plugins are
+  reported as enabled. Claude Code plugins Cursor can import are not
+  duplicated here.
+- Marketplaces from `~/.cursor/plugins/local-marketplaces.json`
+
+**Credentials (metadata only)**
+- `auth.json` (`~/.config/cursor/` on Linux, `~/.cursor/` on macOS,
+  `%APPDATA%\Cursor\` on Windows): which of `accessToken`, `refreshToken`,
+  `apiKey`, `bedrockCredentials` are present
+- `cli-config.json` `authInfo` email, display name, user id and privacy mode
+- macOS keychain references (`cursor-access-token`, `cursor-refresh-token`,
+  `cursor-api-key`) and the `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`,
+  `CURSOR_IDENTITY_TOKEN` env vars (names only)
 
 ## Session Management
 

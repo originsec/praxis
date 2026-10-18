@@ -57,9 +57,36 @@ Static reconnaissance discovers:
 
 **Configuration**
 - Global settings (`~/.pi/agent/settings.json`)
-- Authentication credentials (`~/.pi/agent/auth.json`)
 - Per-provider model preferences (`~/.pi/agent/models.json`)
 - Project-level settings (`.pi/settings.json`)
+
+**Instructions**
+- `~/.pi/agent/{AGENTS.md,AGENTS.override.md,CLAUDE.md}` and per project
+  `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`
+- System prompt overrides: `SYSTEM.md` / `APPEND_SYSTEM.md` in `~/.pi/agent/`
+  and `<project>/.pi/`
+
+**Extensions, Packages and Hooks**
+- Pi has no declarative hooks file. Extensions (`~/.pi/agent/extensions/*.ts|js`,
+  `*/index.ts`, and `<project>/.pi/extensions/`) are reported as plugins, and
+  each `pi.on("<event>")` subscription in them is reported as a hook (type
+  `extension`, command = extension name).
+- Packages from `settings.json` `packages` (`npm:`, `git:` or path specs) are
+  reported as plugins.
+
+**Skills**
+- `SKILL.md` skills from `~/.pi/agent/skills`, `~/.agents/skills`,
+  `<project>/.pi/skills` and `<project>/.agents/skills`
+- Prompt templates (`~/.pi/agent/prompts/*.md`, `<project>/.pi/prompts/*.md`)
+  as slash commands
+
+**Credentials (metadata only)**
+- `~/.pi/agent/auth.json`: provider names, credential type (`oauth` /
+  `api_key`), OAuth expiry, and whether an API key is resolved by a `!command`.
+  It is no longer listed as a readable config item.
+- MCP OAuth stores (`mcp-auth.json`, legacy `mcp-oauth/`)
+- Provider API key env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …), names only
 
 **Sessions**
 - Session JSONL files under `~/.pi/agent/sessions/<encoded-cwd>/`
@@ -68,7 +95,9 @@ Static reconnaissance discovers:
 - The `subagent-artifacts` subdirectory is skipped
 
 **Project Paths**
-- Discovered via the `/.pi/settings.json` project marker
+- Discovered via the `/.pi/settings.json` project marker, the `cwd` in the
+  newest session header per session directory, and trusted paths in
+  `~/.pi/agent/trust.json`
 
 ### Semantic Recon
 

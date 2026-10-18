@@ -77,6 +77,15 @@ Config discovery from `%APPDATA%\Claude`:
 - `developer_settings.json` — Developer settings
 - `logs/*.log` — Log files
 
+Desktop extensions (`.mcpb`, formerly `.dxt`) under `Claude Extensions/<id>/`
+are listed as plugins using their `manifest.json` name and version; an
+explicit `isEnabled: false` in `Claude Extensions Settings/<id>.json` marks
+one disabled. That settings shape comes from community reverse engineering
+and is not verified.
+
+Credential metadata reports whether `config.json` holds the OAuth token cache
+(`oauth:tokenCacheV2`, an Electron safeStorage blob), without reading it.
+
 ## Known Issues
 
 - **Session creation is slow** (~15-20s) due to UIA menu navigation, Inspector dialog dismissal, and CDP connection handshake

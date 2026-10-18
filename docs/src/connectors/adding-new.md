@@ -129,9 +129,53 @@ local recon_config = {
 }
 ```
 
+Deeper recon (hooks, memory, plugins, cross-agent skills, instruction
+imports, credential metadata) is also declarative:
+
+```lua
+local recon_config = {
+  -- ...as above...
+  home_configs = {
+    -- `hooks = true` parses the file's top-level `hooks` key; "root"
+    -- treats the whole document (JSON or TOML) as the event map.
+    { path = ".exampleai/settings.json", type = "global_settings", mcp = true, hooks = true },
+    -- Memory files are config items whose type ends in "memory".
+    { path = ".exampleai/memory/*.md", type = "global_memory" },
+    { path = ".exampleai/AGENTS.md", type = "global_instructions" },
+  },
+  -- Hooks in files outside user homes (managed settings), per OS.
+  managed_hooks = {
+    linux = { { path = "/etc/exampleai/managed-settings.json", scope = "managed" } },
+  },
+  -- Agent Skills standard SKILL.md dirs, agent-specific + shared.
+  skill_dirs = {
+    home = { ".exampleai/skills", helpers.SHARED_SKILL_DIRS },
+    project = { ".exampleai/skills", helpers.SHARED_SKILL_DIRS },
+  },
+  -- Follow `@path` imports in *instructions files.
+  instruction_imports = true,
+  -- Credential stores: metadata only. `fields` copies allow-listed
+  -- non-secret scalars; `presence` records `<leaf>_present` flags without
+  -- reading the value. `require_any` drops the entry unless a presence
+  -- path is set (API key embedded in a general config file).
+  credentials = {
+    { path = ".exampleai/auth.json", kind = "oauth_token_file",
+      fields = { email = "account.email", expires_at = "expiresAt" },
+      presence = { "access_token", "refresh_token" } },
+  },
+  credential_env_vars = { "EXAMPLEAI_API_KEY" },
+  credential_discovery = function(home) return {} end, -- e.g. keychain refs
+  -- Installed plugins / marketplaces / plugin-provided hooks.
+  plugin_discovery = function(home, project_paths)
+    return { plugins = {}, marketplaces = {}, hooks = {} }
+  end,
+}
+```
+
 Key points:
 - `recon` receives a context object: `recon = function(ctx) ... end`
-- The result must be shaped as `{ config = { items, project_paths }, tools = { mcp_servers, skills, internal_tools }, sessions = { items } }`. `helpers.run_standard_recon` handles this for the standard pipeline
+- The result must be shaped as `{ config = { items, project_paths, credentials }, tools = { mcp_servers, skills, internal_tools, hooks, plugins, marketplaces }, sessions = { items } }`. `helpers.run_standard_recon` handles this for the standard pipeline
+- **Never put secret values in recon output.** Credential entries carry metadata only; the node additionally runs `CredentialItem::redact` (drops secret-named keys such as `*token`, `*key`, `*secret`, masks secret-looking values) before the result leaves the node. Do not list credential files as `home_configs` — config items are readable through `recon_config_read`
 - Semantic recon (driven by `ctx.is_semantic`) populates `tools.internal_tools` by interrogating the agent through `config.session_fns`
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 - **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
@@ -179,7 +223,7 @@ OS resolution: `tbl[os_name] or tbl.default or {}` where `os_name` is `"linux"`,
 
 The `praxis` global provides:
 
-- **Filesystem**: `path_exists`, `path_join`, `path_is_dir`, `path_parent`, `read_file`, `read_dir`, `write_file`, `remove_dir`, `walk_files`, `glob_files`, `count_file_lines`, `extract_user_home`
+- **Filesystem**: `path_exists`, `path_join`, `path_is_dir`, `path_stat` (`{ is_dir, size, modified_unix, mode }` or nil), `path_parent`, `read_file`, `read_dir`, `write_file`, `remove_dir`, `walk_files`, `glob_files`, `count_file_lines`, `extract_user_home`
 - **Commands**: `command_run`, `command_run_handle`, `command_abort_handle`
 - **ACP**: `acp_start`, `acp_create_session`, `acp_prompt`, `acp_cancel`, `acp_is_alive`, `acp_close`
 - **Environment**: `os_name`, `user_homes`, `env_get`, `expand_path`
@@ -190,7 +234,7 @@ The `praxis` global provides:
 
 This list is not exhaustive — see `node/src/agent_connectors/lua/runtime.rs` for every registered function.
 
-The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, recon-depth helpers (`parse_hooks`, `collect_file_hooks`, `discover_skill_dirs`, `collect_instruction_imports`, `collect_credentials`, `credential_from_file`, `credential_env_vars`, `credential_keychain`, `get_path`, `parse_config_document`, `for_os`), and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
 
 The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol, plus a `renderer_ops` backend for Electron apps whose renderer DOM isn't reachable from the main-process CDP connection. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 

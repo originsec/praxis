@@ -25,7 +25,35 @@ Static reconnaissance discovers the documented Agy configuration surface:
 - Additional workspace roots found by walking each home directory (up to 7 levels deep) for `.agents/mcp_config.json` or `.agents/hooks.json` marker files
 - Workspace MCP and hook definitions under `.agents/`
 - Global `~/.gemini/GEMINI.md` plus `GEMINI.md` and `AGENTS.md` instruction files at those workspace roots
-- Global skills from `~/.gemini/antigravity-cli/skills/` and workspace skills from `.agents/skills/`
+- More instruction and rules files: global `~/.gemini/AGENTS.md`,
+  `~/.gemini/config/{GEMINI,AGENTS}.md`, `~/.gemini/config/rules/*.md` and
+  `~/.gemini/antigravity-cli/rules/*.md`, and per workspace
+  `.agents/{GEMINI,AGENTS}.md`, `.agents/rules/*.md` and legacy
+  `.agent/rules/*.md`
+- Workspaces registered in `~/.gemini/config/projects/*.json` (git folder URIs)
+  and the `workspace` recorded in `~/.gemini/antigravity-cli/history.jsonl`
+- **Hooks** from `~/.gemini/config/hooks.json`, `hooks` in
+  `~/.gemini/antigravity-cli/settings.json`, workspace `.agents/hooks.json`
+  and plugin `hooks.json`. These files map hook names to definitions
+  (`{"name": {"enabled": true, "PreToolUse": [...]}}`); disabled
+  definitions are skipped.
+- **Skills** (`SKILL.md` folders) from `~/.gemini/antigravity-cli/skills/`,
+  `~/.gemini/config/skills/`, `~/.gemini/antigravity/skills/`, workspace
+  `.agents/skills/` (legacy `.agent/skills/`) and plugins; legacy workflows
+  from `~/.gemini/config/workflows/` and `.agents/workflows/`
+- **Plugins** from `~/.gemini/config/plugins/`,
+  `~/.gemini/antigravity-cli/plugins/` and `.agents/plugins/` (manifest
+  `plugin.json`, `.antigravity-plugin/plugin.json` or
+  `.gemini-plugin/plugin.json`)
+- **Memory**: knowledge items (`knowledge/*/metadata.json` under
+  `~/.gemini/antigravity-cli/` and `~/.gemini/antigravity/`)
+- **Credentials (metadata only)**: Agy keeps tokens in the OS keyring; recon
+  reports a `keychain:gemini` reference. That service name is inferred from a
+  local Secret Service entry, not from vendor documentation. Also the
+  `GEMINI_API_KEY` env var, by name only.
+
+Several of these locations (plugins, `config/projects`) come from Agy 1.4
+documentation and are absent on 1.0 installs.
 
 Recon never recursively treats a generic `GEMINI.md` or `AGENTS.md` as a new
 workspace. This prevents unrelated repositories, nested instruction files, and

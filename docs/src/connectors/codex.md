@@ -56,8 +56,48 @@ Static reconnaissance discovers:
 
 **Configuration**
 - Global config file (`~/.codex/config.toml`)
-- Authentication credentials (`~/.codex/auth.json`)
 - Project-level config (`.codex/config.toml`)
+
+**Hooks**
+- `~/.codex/hooks.json` and `<project>/.codex/hooks.json` (`{"hooks": {...}}`)
+  plus inline `[[hooks.<Event>]]` tables in the matching `config.toml`.
+  `[hooks.state]` trust records are ignored — they can outlive the hooks they
+  refer to.
+- Managed: `/etc/codex/hooks.json` and `/etc/codex/config.toml`
+  (`%ProgramData%\OpenAI\Codex\` on Windows).
+- Enabled plugins' `hooks/hooks.json`, hook paths listed in `plugin.json`, and
+  inline `hooks` objects. `mcp_tool` handlers show as `mcp:<server>/<tool>`.
+
+**Plugins and Marketplaces**
+- Installed plugins from `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/.codex-plugin/plugin.json`,
+  enabled per `[plugins."<plugin>@<marketplace>"] enabled` in `config.toml`
+  (config entries without a cached install are listed too).
+- Marketplaces from `[marketplaces.<name>]` (`source_type:source`).
+
+**Skills**
+- `SKILL.md` skills from `~/.codex/skills`, the bundled `~/.codex/skills/.system`,
+  the shared `~/.agents/skills`, `/etc/codex/skills`, `<project>/.codex/skills`,
+  `<project>/.agents/skills`, and enabled plugins' `skills/`.
+- Legacy `~/.codex/prompts/*.md` custom prompts (older Codex versions).
+
+**Memory**
+- `~/.codex/memories/*.md` (`MEMORY.md`, `memory_summary.md`,
+  `raw_memories.md`) and `memories/rollout_summaries/*.md`, written when the
+  `memories` feature is enabled.
+
+**Instructions**
+- `~/.codex/AGENTS.md` / `AGENTS.override.md`, and per project `AGENTS.md`,
+  `AGENTS.override.md` and any `project_doc_fallback_filenames`.
+
+**Credentials (metadata only)**
+- `~/.codex/auth.json`: `auth_mode`, `last_refresh`, `tokens.account_id`, and
+  which of `OPENAI_API_KEY`, the access / refresh / id tokens, personal access
+  token and Bedrock key are present. It is no longer listed as a readable
+  config item.
+- `~/.codex/.credentials.json` (MCP OAuth file fallback), keychain references
+  `Codex Auth` / `Codex MCP Credentials` when `cli_auth_credentials_store` /
+  `mcp_oauth_credentials_store` is `keyring` or `auto`, and the
+  `OPENAI_API_KEY` / `CODEX_API_KEY` env vars (names only).
 
 **MCP Servers**
 - From `[mcp_servers.<name>]` sections in config.toml
@@ -70,7 +110,9 @@ Static reconnaissance discovers:
 - Separate, unstructured history log at `~/.codex/history.jsonl`
 
 **Project Paths**
-- Extracted from `[projects."<path>"]` sections in config.toml
+- Extracted from `[projects."<path>"]` sections in config.toml and from the
+  `cwd` in each rollout's `session_meta` line (`~/.codex/sessions/**`,
+  `~/.codex/archived_sessions/**`)
 - Used for working directory selection
 
 ### Semantic Recon

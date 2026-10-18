@@ -16,8 +16,10 @@ pane on the right, and a filter bar narrows the tree.
 
 Three tabs:
 
-1. **Config** — config files grouped by type (settings, instructions, …)
-2. **Tools** — MCP servers (with nested tools), skills, and internal tools
+1. **Config** — config files grouped by type (settings, instructions,
+   memory, …) plus a metadata-only **credentials** group
+2. **Tools** — MCP servers (with nested tools), skills, hooks, plugins,
+   marketplaces, and internal tools
 3. **Sessions** — conversation history grouped by project path
 
 See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
@@ -30,13 +32,19 @@ data is displayed instantly on re-open.
 
 ### Tree layout
 
-- **Tools:** `MCP Servers` → server → tools; peer sections for `Skills`
-  and `Internal`. Servers show transport, tool count, and a status badge
-  (`[ok]` / `[empty]`).
+- **Tools:** `MCP Servers` → server → tools; peer sections for `Skills`,
+  `Hooks`, `Plugins`, `Marketplaces` and `Internal`. Servers show
+  transport, tool count, and a status badge (`[ok]` / `[empty]`). Hook
+  rows read `Event [matcher]` with the scope on the right; the detail
+  pane shows the handler type, command, scope and source file. Plugin
+  rows show their scope (or `disabled`).
 - **Config:** groups by `config_type` (path suffixes like
   `project_instructions: /home/...` collapse under a single
   `project_instructions` node); expand a group to pick a file and view
-  contents (fetched on select).
+  contents (fetched on select). The trailing `credentials` group lists
+  credential stores with a `[present]` / `[keychain]` badge; selecting
+  one shows its kind, last-modified time, file mode and non-secret
+  metadata — there is no file content behind these rows.
 - **Sessions:** groups by project `context_path`; session rows show
   message count and relative time (`2h ago`).
 
@@ -49,6 +57,55 @@ Tools are the capabilities available to the agent. This includes MCP servers (ex
 ### Configuration
 
 Config files reveal how the agent is set up. This includes settings files (model preferences, permissions, API configurations), tool/server definitions, and instruction files like CLAUDE.md or similar that influence agent behavior. Recon identifies these files and makes their contents viewable and often editable.
+
+### Hooks
+
+Lifecycle hooks are commands the agent runs on its own events (before a
+tool call, on session start, on stop, …). Recon lists each hook's
+event, matcher, handler type and command, along with the scope it was
+declared in (`user`, `project`, `local`, `managed`, `plugin`,
+`extension`) and the file it came from. Hooks are a persistence and
+interception surface, so they are worth checking before running
+operations against an agent.
+
+### Plugins and Marketplaces
+
+Installed plugins/extensions (name, version, source marketplace, enabled
+flag, scope, install path) and the marketplace sources an agent is
+configured to install from. Plugins can contribute skills, MCP servers
+and hooks; those are surfaced in their own sections.
+
+### Skills
+
+Slash commands plus [Agent Skills](https://agentskills.io) (`SKILL.md`
+directories). Recon scans each agent's own skill dirs and the shared
+cross-agent locations it reads (for example `~/.agents/skills` and
+`<project>/.agents/skills`), parsing the frontmatter `name` and
+`description`.
+
+### Memory and Instructions
+
+Persistent memory stores (for example Claude Code auto-memory, Codex
+memories, Gemini `save_memory` targets) and instruction files
+(`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, rules) appear as Config items, so
+their contents are viewable like any other config. Instruction files are
+collected globally and for every project known from the agent's session
+history, and `@path` imports in them are followed.
+
+### Credentials (metadata only)
+
+For exposure assessment, recon reports which credential stores an agent
+uses and whether they exist: the path (or `env:VAR` / `keychain:service`),
+the kind (`oauth_token_file`, `api_key_in_config`, `encrypted_store`,
+`os_keychain`, `env_var`), last-modified time, Unix file mode, and
+non-secret metadata such as account email, plan, auth mode, expiry and
+which secret fields are present (`refresh_token_present = true`).
+
+Secret values — tokens, API keys, refresh tokens — are never collected.
+Connectors copy only allow-listed fields, and the node redacts anything
+that is secret-named or secret-looking before the recon result leaves
+the machine. Credential stores are not config items, so
+`recon_config_read` cannot be used to read them.
 
 ### Sessions
 
@@ -87,7 +144,7 @@ Semantic recon requires the **Semantic Parser** LLM to be configured. Choose a m
 After running recon, the results are stored in the service database. You can query specific sections without re-running recon:
 
 **MCP tools:**
-- `recon_list` - list stored recon data (section: all/sessions/tools/projects/configs)
+- `recon_list` - list stored recon data (section: all/sessions/tools/projects/configs/hooks/plugins/credentials/memory/instructions)
 - `recon_config_read` - read config file content
 - `recon_session_read` - read session file content
 - `recon_config_grep` - grep config files with regex
