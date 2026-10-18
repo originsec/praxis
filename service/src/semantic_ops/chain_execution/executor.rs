@@ -45,6 +45,82 @@ const LOOP_PORT_EXIT: u32 = 1;
 
 type ResolvedElement = (String, Option<bool>, Option<u32>);
 
+#[derive(Default)]
+struct FailureTracker {
+    carried: HashMap<String, HashSet<String>>,
+    unresolved: HashSet<String>,
+}
+
+impl FailureTracker {
+    fn record(
+        &mut self,
+        element_id: &str,
+        success: Option<bool>,
+        graph: &ExecutionGraph,
+        resolved: &HashMap<String, ResolvedElement>,
+    ) {
+        let mut carried = HashSet::new();
+        let mut recovered = HashSet::new();
+        for connection in graph.incoming_connections(&element_id.to_string()) {
+            let Some((_, source_success, port)) = resolved.get(&connection.from_element) else {
+                continue;
+            };
+            if !connection_fires(connection, source_success, *port) {
+                continue;
+            }
+            let Some(failures) = self.carried.get(&connection.from_element) else {
+                continue;
+            };
+            if success == Some(true)
+                && matches!(
+                    connection.condition,
+                    Some(crate::database::ConnectionCondition::OnFailure)
+                )
+            {
+                recovered.extend(failures.iter().cloned());
+            } else {
+                carried.extend(failures.iter().cloned());
+            }
+        }
+        if success == Some(false) {
+            carried.insert(element_id.to_string());
+            self.unresolved.insert(element_id.to_string());
+        } else if success == Some(true) {
+            //
+            // A successful retry clears this element's prior failure. Recovery
+            // only consumes failures on explicit OnFailure inputs; ordinary
+            // processing must not turn upstream errors into chain success.
+            //
+            carried.remove(element_id);
+            self.unresolved.remove(element_id);
+            for failure in recovered {
+                self.unresolved.remove(&failure);
+            }
+        }
+        self.carried.insert(element_id.to_string(), carried);
+    }
+
+    fn remaining(
+        &self,
+        graph: &ExecutionGraph,
+        resolved: &HashMap<String, ResolvedElement>,
+    ) -> Vec<String> {
+        let mut failures = self.unresolved.clone();
+        for (id, (_, success, port)) in resolved {
+            let consumed = graph.outgoing_connections(id).iter().any(|connection| {
+                resolved.contains_key(&connection.to_element)
+                    && connection_fires(connection, success, *port)
+            });
+            if !consumed && let Some(carried) = self.carried.get(id) {
+                failures.extend(carried.iter().cloned());
+            }
+        }
+        let mut failures: Vec<_> = failures.into_iter().collect();
+        failures.sort();
+        failures
+    }
+}
+
 //
 // Pick the output port a Loop element activates for a given visit.
 // `iteration` counts completed body passes, including the initial pass.
@@ -623,6 +699,7 @@ impl ChainExecutor {
         let run = async {
             let mut work_queue = VecDeque::from([graph.trigger_id.clone()]);
             let mut resolved = HashMap::new();
+            let mut failures = FailureTracker::default();
             let mut loop_counters: HashMap<String, u32> = HashMap::new();
             let mut hit_counts: HashMap<String, u32> = HashMap::new();
 
@@ -690,6 +767,7 @@ impl ChainExecutor {
                         .await?;
                 }
                 let outcomes = join_all(jobs).await;
+                let mut resolutions = Vec::new();
                 for (element_id, (result, active_port, semantic_success)) in
                     batch.iter().zip(outcomes)
                 {
@@ -703,6 +781,10 @@ impl ChainExecutor {
                         }
                     };
                     let edge_success = semantic_success.or(success);
+                    failures.record(element_id, edge_success, &graph, &resolved);
+                    resolutions.push((element_id, output, edge_success, active_port));
+                }
+                for (element_id, output, edge_success, active_port) in resolutions {
                     resolved.insert(
                         element_id.clone(),
                         (output.clone(), edge_success, active_port),
@@ -764,6 +846,19 @@ impl ChainExecutor {
                 .find(|element| matches!(element, ChainElement::Termination { .. }));
             if termination.is_some_and(|element| !resolved.contains_key(element.id())) {
                 anyhow::bail!("Chain failed: Termination element was not reached");
+            }
+            let remaining = failures.remaining(&graph, &resolved);
+            if !remaining.is_empty() {
+                let error = format!(
+                    "Chain failed: unresolved failures in {}",
+                    remaining.join(", ")
+                );
+                if let Some(termination) = termination {
+                    let mut current = state.write().unwrap();
+                    current.set_element_failed(termination.id(), error.clone());
+                    current.outputs.remove(termination.id());
+                }
+                anyhow::bail!(error);
             }
             Ok(())
         };
@@ -1664,6 +1759,133 @@ fn has_any_fired_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tracked_outcome(graph: &ExecutionGraph, outcomes: &[(&str, bool)]) -> Vec<String> {
+        let mut failures = FailureTracker::default();
+        let mut resolved = HashMap::new();
+        for &(id, success) in outcomes {
+            failures.record(id, Some(success), graph, &resolved);
+            resolved.insert(id.to_string(), (id.to_string(), Some(success), None));
+        }
+        failures.remaining(graph, &resolved)
+    }
+
+    #[test]
+    fn termination_does_not_hide_failed_parallel_branch_or_passthrough() {
+        let graph = loop_graph(vec![
+            port_connection("left", "termination", 0),
+            port_connection("review", "passthrough", 0),
+            port_connection("passthrough", "termination", 0),
+        ]);
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[
+                    ("left", true),
+                    ("review", false),
+                    ("passthrough", true),
+                    ("termination", true)
+                ]
+            ),
+            ["review"]
+        );
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[
+                    ("left", true),
+                    ("termination", true),
+                    ("review", false),
+                    ("passthrough", true)
+                ]
+            ),
+            ["review"],
+            "a partial join must not ignore failures that settle afterward"
+        );
+    }
+
+    #[test]
+    fn explicit_failure_recovery_must_succeed_and_does_not_cover_other_paths() {
+        let mut recovery = port_connection("review", "repair", 0);
+        recovery.condition = Some(crate::database::ConnectionCondition::OnFailure);
+        let mut graph = loop_graph(vec![recovery, port_connection("repair", "termination", 0)]);
+        assert!(
+            tracked_outcome(
+                &graph,
+                &[("review", false), ("repair", true), ("termination", true)]
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[("review", false), ("repair", false), ("termination", true)]
+            ),
+            ["repair", "review"]
+        );
+        graph
+            .connections
+            .push(port_connection("review", "termination", 0));
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[("review", false), ("repair", true), ("termination", true)]
+            ),
+            ["review"],
+            "the same failure still arriving on an unconditional path is not recovered"
+        );
+        graph.connections.pop();
+        graph
+            .connections
+            .push(port_connection("other", "termination", 0));
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[
+                    ("review", false),
+                    ("repair", true),
+                    ("other", false),
+                    ("termination", true)
+                ]
+            ),
+            ["other"]
+        );
+    }
+
+    #[test]
+    fn successful_retry_clears_previous_pass_failure() {
+        let graph = loop_graph(vec![
+            port_connection("review", "loop", 0),
+            port_connection("loop", "review", LOOP_PORT_RETRY),
+            port_connection("loop", "termination", LOOP_PORT_EXIT),
+        ]);
+        assert!(
+            tracked_outcome(
+                &graph,
+                &[
+                    ("review", false),
+                    ("loop", true),
+                    ("review", true),
+                    ("loop", true),
+                    ("termination", true)
+                ]
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            tracked_outcome(
+                &graph,
+                &[
+                    ("review", false),
+                    ("loop", true),
+                    ("review", false),
+                    ("loop", true),
+                    ("termination", true)
+                ]
+            ),
+            ["review"]
+        );
+    }
 
     #[tokio::test]
     async fn independent_ready_elements_run_concurrently_with_a_bound() {

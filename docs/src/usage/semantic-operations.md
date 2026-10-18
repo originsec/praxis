@@ -324,7 +324,9 @@ When running a chain:
 3. Elements sharing a session group or memory key run serially. Loop elements form a wave boundary so a new pass cannot consume an unfinished earlier pass.
 4. Results are committed in queue order. Join inputs retain the chain's authored connection order, independent of response timing.
 5. The executor schedules downstream elements when their active dependencies finish. Inactive conditional branches do not block joins. A block with `require_all_inputs: false` can run when any input fires and runs once per pass.
-6. Execution continues until no work remains; reaching Termination is required for success.
+6. Execution continues until no work remains; reaching Termination with no unresolved failures is required for success.
+
+Unconditional connections carry failures through downstream blocks, including Termination. A successful block reached through an explicit **On Failure** connection can recover that failure; a successful retry also clears that block's earlier failure. Other failed branches still fail the chain, including branches that finish after a partial join. Reaching Termination alone does not turn an upstream error into success.
 
 Set `PRAXIS_CHAIN_MAX_PARALLEL` on the service to a value from 1 to 64 to change the per-chain limit. Setting it to 1 gives sequential execution. Independent branches should use separate session groups; separate sessions still share their node's filesystem, so add explicit dependency edges when branches access the same files or other external state.
 
