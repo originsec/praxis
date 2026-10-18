@@ -299,10 +299,22 @@ impl AcpServer {
     }
 
     //
-    // Handle client responses to our agent requests (pushToolCall etc.).
+    // Handle client responses to our agent requests. The orchestrator's
+    // session/request_permission prompts are the only requests the local
+    // agent issues.
     //
 
-    async fn handle_client_response(&self, _client_id: &str, _msg: &Value) {}
+    async fn handle_client_response(&self, client_id: &str, msg: &Value) {
+        if !self
+            .orchestrator_manager
+            .resolve_client_response(client_id, msg)
+        {
+            common::log_debug!(
+                "ACP: unmatched client response from {}",
+                common::short_id(client_id)
+            );
+        }
+    }
 
     //
     // Handler methods matching the Agent trait signatures but as inherent

@@ -222,7 +222,7 @@ pub(super) async fn execute_tool_calls_concurrent<F, Fut>(
     mut execute_one: F,
 ) -> Option<Vec<(String, String, String, bool)>>
 where
-    F: FnMut(String, Value) -> Fut,
+    F: FnMut(String, String, Value) -> Fut,
     Fut: std::future::Future<Output = (String, bool)> + Send + 'static,
 {
     debug_assert_eq!(calls.len(), tool_ids.len());
@@ -246,7 +246,7 @@ where
             return None;
         }
         let tool_id = tool_id.clone();
-        let fut = execute_one(name, args);
+        let fut = execute_one(tool_id.clone(), name, args);
         join_set.spawn(async move {
             let (result, is_error) = fut.await;
             (i, tool_id, result, is_error)
@@ -314,7 +314,7 @@ mod tests {
 
         let start = Instant::now();
         let results =
-            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |_id, name, _| async move {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 (format!("ok-{name}"), false)
             })
@@ -350,7 +350,7 @@ mod tests {
         let ids = vec!["id-slow".to_string(), "id-fast".to_string()];
 
         let results =
-            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |_id, name, _| async move {
                 if name == "slow" {
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 } else {
@@ -386,7 +386,7 @@ mod tests {
 
         let start = Instant::now();
         let results =
-            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |_name, _| async move {
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |_id, _name, _| async move {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 ("done".to_string(), false)
             })
@@ -409,13 +409,18 @@ mod tests {
         ];
         let ids = vec!["uuid-1".to_string(), "uuid-2".to_string()];
 
-        let results =
-            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, args| async move {
+        let results = execute_tool_calls_concurrent(
+            calls,
+            ids,
+            &cancel,
+            &stop,
+            |_id, name, args| async move {
                 let tag = args.get("a").and_then(|v| v.as_i64()).unwrap_or(0);
                 (format!("{name}-{tag}"), false)
-            })
-            .await
-            .expect("batch should complete");
+            },
+        )
+        .await
+        .expect("batch should complete");
 
         assert_eq!(results[0].0, "uuid-1");
         assert_eq!(results[1].0, "uuid-2");

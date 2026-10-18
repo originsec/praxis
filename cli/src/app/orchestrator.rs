@@ -77,6 +77,11 @@ pub struct OrchestratorSessionState {
     pub tools_expanded: bool,
     pub tools_full: bool,
     pub max_scroll: Cell<u16>,
+    //
+    // Operator approval the service is waiting on (a mutating tool call).
+    // Answered with a/l/d; Ctrl+C cancels it along with the turn.
+    //
+    pub pending_permission: Option<PendingPermission>,
 }
 
 impl OrchestratorSessionState {
@@ -101,6 +106,7 @@ impl OrchestratorSessionState {
             tools_expanded: false,
             tools_full: false,
             max_scroll: Cell::new(0),
+            pending_permission: None,
         }
     }
 }
@@ -457,6 +463,10 @@ impl App {
     }
 
     pub(crate) async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
+        if self.handle_orchestrator_permission_key(key) {
+            return;
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -694,6 +704,59 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    //
+    // While the service waits on an approval, a/l/d answer it (allow once,
+    // always allow this tool for the session, deny). Ctrl+C cancels the
+    // approval and falls through to cancelling the turn.
+    //
+    fn handle_orchestrator_permission_key(&mut self, key: KeyEvent) -> bool {
+        let Some(session) = self.orchestrator.active_session_mut() else {
+            return false;
+        };
+        if session.pending_permission.is_none() {
+            return false;
+        }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('c')
+                && let Some(perm) = session.pending_permission.take()
+            {
+                self.acp.resolve_permission(
+                    &perm.permission_id,
+                    agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                );
+            }
+            return false;
+        }
+
+        let decision = match key.code {
+            KeyCode::Char('a') | KeyCode::Char('A') => common::PermissionDecision::Allow,
+            KeyCode::Char('l') | KeyCode::Char('L') => common::PermissionDecision::AllowAlways,
+            KeyCode::Char('d') | KeyCode::Char('D') => common::PermissionDecision::Deny,
+            _ => return false,
+        };
+        if let Some(perm) = session.pending_permission.take() {
+            let outcome = super::nodes::decision_to_outcome(&perm.options, decision);
+            self.acp.resolve_permission(&perm.permission_id, outcome);
+        }
+        true
+    }
+
+    //
+    // Release any approval still pending on orchestrator sessions so the
+    // ACP bridge does not hold the request open after the turn ended.
+    //
+    fn cancel_orchestrator_permissions(&mut self) {
+        for session in &mut self.orchestrator.sessions {
+            if let Some(perm) = session.pending_permission.take() {
+                self.acp.resolve_permission(
+                    &perm.permission_id,
+                    agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                );
+            }
         }
     }
 
@@ -1035,6 +1098,7 @@ impl App {
             }
 
             AcpNotification::PromptComplete { .. } => {
+                self.cancel_orchestrator_permissions();
                 //
                 // A turn completed, so any prior session-loss recovery
                 // succeeded — clear the guard.
@@ -1093,17 +1157,29 @@ impl App {
                     .sessions
                     .iter_mut()
                     .find(|(_, s)| s.session_id.as_deref() == Some(session_id.as_str()));
+                let permission = PendingPermission {
+                    permission_id,
+                    tool_name,
+                    tool_input,
+                    options,
+                };
                 if let Some((_, session)) = target {
-                    session.pending_permission = Some(PendingPermission {
-                        permission_id,
-                        tool_name,
-                        tool_input,
-                        options,
-                    });
+                    session.pending_permission = Some(permission);
+                } else if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    //
+                    // The orchestrator's approval gate for a mutating tool.
+                    //
+                    session.pending_permission = Some(permission);
+                } else {
+                    self.acp.resolve_permission(
+                        &permission.permission_id,
+                        agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                    );
                 }
             }
 
             AcpNotification::Error { message } => {
+                self.cancel_orchestrator_permissions();
                 //
                 // Create failures also arrive here; release the in-flight
                 // guard so the user can retry (or /clear again).

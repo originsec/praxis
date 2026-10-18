@@ -1,3 +1,4 @@
+mod approval;
 mod compaction;
 mod engine;
 mod markers;
@@ -20,11 +21,12 @@ use rmcp::{ServiceExt, transport::StreamableHttpClientTransport};
 use crate::acp_server::{acp_error_response, acp_response, session_update_user_text};
 use crate::config::ServiceConfig;
 use crate::config::service_config::{
-    LLM_ORCHESTRATOR_CONTEXT_BUDGET, LLM_ORCHESTRATOR_EFFORT, LLM_ORCHESTRATOR_MAX_TOKENS,
-    LLM_ORCHESTRATOR_THINKING, LLM_ORCHESTRATOR_TOOL_MODE,
+    LLM_ORCHESTRATOR_APPROVAL_GATE, LLM_ORCHESTRATOR_CONTEXT_BUDGET, LLM_ORCHESTRATOR_EFFORT,
+    LLM_ORCHESTRATOR_MAX_TOKENS, LLM_ORCHESTRATOR_THINKING, LLM_ORCHESTRATOR_TOOL_MODE,
 };
 use crate::messaging::send_to_client;
 
+use approval::{ApprovalGate, PermissionRegistry};
 use compaction::{CompactionOutcome, maybe_compact};
 use engine::{AiSettings, LoopOutcome, SessionCtx, run_loop};
 use tools::{convert_mcp_tools, get_local_tool_definitions};
@@ -91,6 +93,7 @@ impl OrchestratorSession {
 pub struct OrchestratorManager {
     sessions: RwLock<HashMap<String, OrchestratorSession>>,
     shared_mcp: RwLock<Option<SharedMcp>>,
+    permissions: Arc<PermissionRegistry>,
 }
 
 impl OrchestratorManager {
@@ -98,7 +101,16 @@ impl OrchestratorManager {
         Self {
             sessions: RwLock::new(HashMap::new()),
             shared_mcp: RwLock::new(None),
+            permissions: Arc::new(PermissionRegistry::default()),
         }
+    }
+
+    //
+    // A JSON-RPC response from a client. Returns true when it answered one
+    // of our session/request_permission requests.
+    //
+    pub fn resolve_client_response(&self, client_id: &str, response: &Value) -> bool {
+        self.permissions.resolve(client_id, response)
     }
 
     //
@@ -246,6 +258,8 @@ impl OrchestratorManager {
                     .filter(|e| !e.is_empty()),
             });
 
+        let approval_gate = config.get_bool(LLM_ORCHESTRATOR_APPROVAL_GATE, true);
+
         let context_budget: usize = config
             .get(LLM_ORCHESTRATOR_CONTEXT_BUDGET)
             .and_then(|s| s.trim().parse().ok())
@@ -344,6 +358,8 @@ impl OrchestratorManager {
             cancel: Arc::clone(&cancel_flag),
             stop: Arc::clone(&stop_flag),
             last_prompt_tokens: AtomicU64::new(0),
+            gate: ApprovalGate::new(approval_gate),
+            permissions: Arc::clone(&self.permissions),
         });
 
         //

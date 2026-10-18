@@ -308,10 +308,14 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
         }
     }
 
+    if let Some(ref perm) = session.pending_permission {
+        lines.extend(build_permission_prompt(perm));
+    }
+
     //
     // Show active tool or waiting spinner.
     //
-    if session.is_streaming {
+    if session.is_streaming && session.pending_permission.is_none() {
         if session.active_tool.is_some() {
             //
             // Pending tool already renders as the in-flight Tool
@@ -402,6 +406,45 @@ fn render_welcome(f: &mut Frame, area: Rect) {
     let paragraph = Paragraph::new(Text::from(lines)).alignment(ratatui::layout::Alignment::Center);
 
     f.render_widget(paragraph, area);
+}
+
+//
+// Approval prompt for a gated tool call: tool name, its input, and the
+// a/l/d choices.
+//
+
+fn build_permission_prompt(perm: &crate::app::PendingPermission) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+            Span::styled("  \u{25b3} Approve ", Style::default().fg(SECONDARY)),
+            Span::styled(
+                perm.tool_name.clone(),
+                Style::default()
+                    .fg(SECONDARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("?", Style::default().fg(SECONDARY)),
+        ]),
+    ];
+    for line in compact_multiline(&perm.tool_input, 6, 160) {
+        lines.push(Line::from(vec![
+            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+            Span::styled(format!("    {}", line), Style::default().fg(DIM)),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+        Span::raw("    "),
+        chrome::pill("a", ACCENT),
+        Span::styled(" allow   ", Style::default().fg(MUTED)),
+        chrome::pill("l", ACCENT),
+        Span::styled(" always (this session)   ", Style::default().fg(MUTED)),
+        chrome::pill("d", ERROR_FG),
+        Span::styled(" deny", Style::default().fg(MUTED)),
+    ]));
+    lines
 }
 
 enum ThinkSegment {

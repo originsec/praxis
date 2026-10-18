@@ -12,6 +12,7 @@ use common::ai::{
     ReasoningConfig, Role, StreamEvent, Tool, Usage, parse_manual_tool_calls,
 };
 
+use super::approval::{ApprovalGate, Decision, PermissionRegistry, denied_result};
 use super::markers::ManualTextFilter;
 use super::tools::{
     execute_local_tool, execute_mcp_tool, execute_tool_calls_concurrent, result_is_error,
@@ -68,6 +69,8 @@ pub(super) struct SessionCtx {
     // the compaction trigger alongside the local estimate.
     //
     pub last_prompt_tokens: AtomicU64,
+    pub gate: ApprovalGate,
+    pub permissions: Arc<PermissionRegistry>,
 }
 
 impl SessionCtx {
@@ -290,9 +293,9 @@ async fn run_tool_batch(
         calls.iter().map(|c| c.display_id.clone()).collect(),
         &ctx.cancel,
         &ctx.stop,
-        |name, args| {
+        |display_id, name, args| {
             let ctx = Arc::clone(ctx);
-            async move { execute_tool(&ctx, &name, &args).await }
+            async move { execute_tool(&ctx, &display_id, &name, &args).await }
         },
     )
     .await?;
@@ -319,7 +322,12 @@ async fn run_tool_batch(
     Some(results)
 }
 
-async fn execute_tool(ctx: &Arc<SessionCtx>, name: &str, args: &Value) -> (String, bool) {
+async fn execute_tool(
+    ctx: &Arc<SessionCtx>,
+    display_id: &str,
+    name: &str,
+    args: &Value,
+) -> (String, bool) {
     if let Some(raw) = args.get(INVALID_TOOL_ARGUMENTS_KEY) {
         let payload = json!({
             "status": "error",
@@ -333,11 +341,34 @@ async fn execute_tool(ctx: &Arc<SessionCtx>, name: &str, args: &Value) -> (Strin
         return (payload.to_string(), true);
     }
 
+    if ctx.gate.needs_approval(name, args) {
+        match ctx
+            .gate
+            .request(ctx, &ctx.permissions, display_id, name, args)
+            .await
+        {
+            Decision::Allow => {}
+            Decision::Deny => {
+                common::log_info!("Operator denied orchestrator tool {}", name);
+                return (denied_result(name), true);
+            }
+            Decision::Interrupted => {
+                return (
+                    json!({"status": "error", "message": "Cancelled", "display": "Cancelled"})
+                        .to_string(),
+                    true,
+                );
+            }
+        }
+    }
+
     if let Some(local_result) = execute_local_tool(name, args).await {
         let err = result_is_error(&local_result);
         return (local_result, err);
     }
-    execute_mcp_tool(&ctx.peer, name, args).await
+    let (result, is_error) = execute_mcp_tool(&ctx.peer, name, args).await;
+    ctx.gate.note_result(name, args, &result, is_error);
+    (result, is_error)
 }
 
 fn results_message(native: bool, calls: &[PendingCall], results: &[(String, bool)]) -> Message {

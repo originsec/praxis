@@ -38,6 +38,10 @@ pub const LLM_ORCHESTRATOR_EFFORT: &str = "llm_orchestrator_effort";
 /// turns are summarized into a single message (default 100000).
 pub const LLM_ORCHESTRATOR_CONTEXT_BUDGET: &str = "llm_orchestrator_context_budget";
 
+/// Require operator approval (ACP session/request_permission) before the
+/// Orchestrator runs mutating tools. Default on.
+pub const LLM_ORCHESTRATOR_APPROVAL_GATE: &str = "llm_orchestrator_approval_gate";
+
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
@@ -87,6 +91,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_ORCHESTRATOR_THINKING,
     LLM_ORCHESTRATOR_EFFORT,
     LLM_ORCHESTRATOR_CONTEXT_BUDGET,
+    LLM_ORCHESTRATOR_APPROVAL_GATE,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
