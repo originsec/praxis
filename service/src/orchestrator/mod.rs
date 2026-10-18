@@ -1,5 +1,6 @@
 mod approval;
 mod compaction;
+mod delegate;
 mod engine;
 mod markers;
 mod playbooks;
@@ -30,7 +31,7 @@ use crate::messaging::send_to_client;
 
 use approval::{ApprovalGate, PermissionRegistry};
 use compaction::{CompactionOutcome, maybe_compact};
-use engine::{AiSettings, LoopOutcome, SessionCtx, run_loop};
+use engine::{AiSettings, LoopOutcome, Scope, SessionCtx, run_loop};
 
 pub use playbooks::seed_builtin_playbooks;
 use tools::{convert_mcp_tools, get_local_tool_definitions};
@@ -315,6 +316,7 @@ impl OrchestratorManager {
             .collect();
         tools.extend(get_local_tool_definitions());
         tools.push(playbooks::tool_definition());
+        tools.push(delegate::tool_definition());
 
         //
         // Session-specific context appended to the base prompt. Built once
@@ -376,6 +378,7 @@ impl OrchestratorManager {
                 reasoning,
                 context_budget,
                 native: AtomicBool::new(native),
+                base_prompt,
                 native_system,
                 manual_system,
             },
@@ -436,8 +439,9 @@ impl OrchestratorManager {
                 }
                 let turn_start = conversation_history.len() - 1;
 
-                match run_loop(&ctx, &mut conversation_history).await {
-                    LoopOutcome::Completed => {
+                let scope = Scope::top_level(&ctx);
+                match run_loop(&ctx, &mut conversation_history, &scope).await {
+                    LoopOutcome::Completed | LoopOutcome::TurnLimit => {
                         if !ctx.interrupted() {
                             ctx.send(acp_response(
                                 prompt_id_to_json_rpc_id(&prompt_id),

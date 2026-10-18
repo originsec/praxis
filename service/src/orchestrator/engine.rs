@@ -13,6 +13,7 @@ use common::ai::{
 };
 
 use super::approval::{ApprovalGate, Decision, PermissionRegistry, denied_result};
+use super::delegate::{self, DELEGATE_TOOL};
 use super::markers::ManualTextFilter;
 use super::playbooks::{LOAD_PLAYBOOK_TOOL, load_playbook};
 use super::tools::{
@@ -38,6 +39,11 @@ pub(super) struct AiSettings {
     pub reasoning: Option<ReasoningConfig>,
     pub context_budget: usize,
     pub native: AtomicBool,
+    //
+    // Base instructions (orchestrator prompt + playbook list) and the
+    // top-level system prompts derived from it for each tool mode.
+    //
+    pub base_prompt: String,
     pub native_system: String,
     pub manual_system: String,
 }
@@ -100,6 +106,36 @@ pub(super) enum LoopOutcome {
     Completed,
     Interrupted,
     Failed(String),
+    //
+    // A bounded (sub-orchestrator) loop used all its model turns while the
+    // model still wanted to call tools.
+    //
+    TurnLimit,
+}
+
+//
+// What a loop may do: the top-level orchestrator, or a sub-orchestrator
+// started by `delegate` with its own label, a reduced tool set and a turn
+// bound. Sub-orchestrators do not stream text to the operator; only their
+// tool calls are shown, prefixed with the label.
+//
+
+pub(super) struct Scope {
+    pub label: Option<String>,
+    pub tools: Vec<Tool>,
+    pub manual_system: String,
+    pub max_turns: Option<usize>,
+}
+
+impl Scope {
+    pub(super) fn top_level(ctx: &SessionCtx) -> Self {
+        Self {
+            label: None,
+            tools: ctx.tools.clone(),
+            manual_system: ctx.ai.manual_system.clone(),
+            max_turns: None,
+        }
+    }
 }
 
 //
@@ -123,24 +159,33 @@ struct PendingCall {
 // tool_result.
 //
 
-pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) -> LoopOutcome {
+pub(super) async fn run_loop(
+    ctx: &Arc<SessionCtx>,
+    history: &mut Vec<Message>,
+    scope: &Scope,
+) -> LoopOutcome {
+    let mut turns = 0usize;
     loop {
         if ctx.interrupted() {
             return LoopOutcome::Interrupted;
         }
+        if scope.max_turns.is_some_and(|max| turns >= max) {
+            return LoopOutcome::TurnLimit;
+        }
+        turns += 1;
 
         let native = ctx.ai.native.load(Ordering::SeqCst);
         let mut request = ChatCompletionRequest::new(ctx.ai.model.clone(), history.clone())
             .with_max_tokens(ctx.ai.max_tokens);
         if native {
-            request = request.with_tools(ctx.tools.clone());
+            request = request.with_tools(scope.tools.clone());
         }
         if let Some(reasoning) = &ctx.ai.reasoning {
             request = request.with_reasoning(reasoning.clone());
         }
 
         let mut stream = ctx.ai.client.chat_completion_events(request);
-        let mut display = Display::new(native);
+        let mut display = Display::new(native, scope.label.is_some());
         let mut full_text = String::new();
         let mut completed = None;
         let mut received_any = false;
@@ -168,7 +213,8 @@ pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) 
                     let message = e.to_string();
                     if native && !received_any && looks_like_tools_unsupported(&message) {
                         drop(stream);
-                        fall_back_to_manual(ctx, history);
+                        fall_back_to_manual(ctx, history, &scope.manual_system);
+                        turns -= 1;
                         break;
                     }
                     let err_msg = format!("AI request failed: {}", message);
@@ -251,7 +297,7 @@ pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) 
             return LoopOutcome::Interrupted;
         }
 
-        let Some(results) = run_tool_batch(ctx, &calls).await else {
+        let Some(results) = run_tool_batch(ctx, &calls, scope.label.as_deref()).await else {
             //
             // Cancelled or stopped mid-batch — do not feed partial tool
             // results back into the model.
@@ -272,21 +318,27 @@ pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) 
 async fn run_tool_batch(
     ctx: &Arc<SessionCtx>,
     calls: &[PendingCall],
+    label: Option<&str>,
 ) -> Option<Vec<(String, bool)>> {
+    let display_name = |name: &str| match label {
+        Some(label) => format!("{} \u{203a} {}", label, name),
+        None => name.to_string(),
+    };
     for call in calls {
         common::log_info!(
             "Orchestrator queuing tool {} ({})",
-            call.name,
+            display_name(&call.name),
             common::short_id(&call.display_id)
         );
         ctx.send(session_update_tool_call(
             &ctx.session_id,
             &call.display_id,
-            &call.name,
+            &display_name(&call.name),
             Some(call.args.clone()),
         ))
         .await;
     }
+    let child = label.is_some();
 
     let batch = execute_tool_calls_concurrent(
         calls
@@ -298,7 +350,7 @@ async fn run_tool_batch(
         &ctx.stop,
         |display_id, name, args| {
             let ctx = Arc::clone(ctx);
-            async move { execute_tool(&ctx, &display_id, &name, &args).await }
+            async move { execute_tool(&ctx, &display_id, &name, &args, child).await }
         },
     )
     .await?;
@@ -310,7 +362,7 @@ async fn run_tool_batch(
             name,
             common::truncate_str(&result, 100)
         );
-        if name == "report_plan" {
+        if name == "report_plan" && !child {
             send_plan(ctx, &result).await;
         }
         ctx.send(session_update_tool_result(
@@ -330,6 +382,7 @@ async fn execute_tool(
     display_id: &str,
     name: &str,
     args: &Value,
+    child: bool,
 ) -> (String, bool) {
     if let Some(raw) = args.get(INVALID_TOOL_ARGUMENTS_KEY) {
         let payload = json!({
@@ -367,6 +420,21 @@ async fn execute_tool(
 
     if name == LOAD_PLAYBOOK_TOOL {
         return load_playbook(&ctx.db, args).await;
+    }
+
+    if name == DELEGATE_TOOL {
+        if child {
+            return (
+                json!({
+                    "status": "error",
+                    "message": "Sub-orchestrators cannot delegate further; do the work directly.",
+                    "display": "Error: nested delegation"
+                })
+                .to_string(),
+                true,
+            );
+        }
+        return delegate::run(ctx, args).await;
     }
 
     if let Some(local_result) = execute_local_tool(name, args).await {
@@ -448,7 +516,7 @@ fn looks_like_tools_unsupported(message: &str) -> bool {
 // into the textual form the manual parser understands.
 //
 
-fn fall_back_to_manual(ctx: &SessionCtx, history: &mut [Message]) {
+fn fall_back_to_manual(ctx: &SessionCtx, history: &mut [Message], manual_system: &str) {
     common::log_warn!(
         "Orchestrator: model {} rejected native tool calling; falling back to prompt-based tool calls for this session",
         ctx.ai.model
@@ -456,7 +524,7 @@ fn fall_back_to_manual(ctx: &SessionCtx, history: &mut [Message]) {
     ctx.ai.native.store(false, Ordering::SeqCst);
     for message in history.iter_mut() {
         *message = if message.role == Role::System {
-            Message::system(&ctx.ai.manual_system)
+            Message::system(manual_system)
         } else {
             to_manual_message(message)
         };
@@ -503,14 +571,16 @@ struct Display {
     manual: Option<ManualTextFilter>,
     pending: String,
     pending_thought: String,
+    quiet: bool,
 }
 
 impl Display {
-    fn new(native: bool) -> Self {
+    fn new(native: bool, quiet: bool) -> Self {
         Self {
             manual: (!native).then(ManualTextFilter::default),
             pending: String::new(),
             pending_thought: String::new(),
+            quiet,
         }
     }
 
@@ -519,6 +589,9 @@ impl Display {
     // flushed before switching between them so ordering is preserved.
     //
     async fn thought(&mut self, ctx: &SessionCtx, delta: &str) {
+        if self.quiet {
+            return;
+        }
         self.flush_text(ctx).await;
         self.pending_thought.push_str(delta);
         if self.pending_thought.len() >= 80 || delta.contains('\n') {
@@ -542,6 +615,9 @@ impl Display {
     }
 
     async fn text(&mut self, ctx: &SessionCtx, delta: &str) {
+        if self.quiet {
+            return;
+        }
         self.flush_thought(ctx).await;
         if let Some(filter) = self.manual.as_mut() {
             for chunk in filter.push(delta) {
@@ -556,6 +632,9 @@ impl Display {
     }
 
     async fn finish(&mut self, ctx: &SessionCtx, full_text: &str, has_calls: bool) {
+        if self.quiet {
+            return;
+        }
         self.flush_thought(ctx).await;
         if let Some(filter) = self.manual.as_mut() {
             if let Some(chunk) = filter.finish() {

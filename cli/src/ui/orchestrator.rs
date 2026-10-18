@@ -526,13 +526,29 @@ fn build_tool_entry(
         ),
     };
 
+    //
+    // Sub-orchestrator tool calls arrive as "<label> › <tool>"; render them
+    // as compact, indented status lines under the delegate call.
+    //
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
-        Span::styled(name.to_string(), name_style),
-    ]));
+    match name.split_once(" \u{203a} ") {
+        Some((label, tool)) => {
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                Span::styled(format!("{} \u{203a} ", label), Style::default().fg(DIM)),
+                Span::styled(tool.to_string(), name_style),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                Span::styled(name.to_string(), name_style),
+            ]));
+        }
+    }
 
     if !expanded {
         return lines;
