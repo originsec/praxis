@@ -84,14 +84,46 @@ impl App {
         mouse: MouseEvent,
         action: MouseAction,
     ) -> bool {
+        if self.active_window == Window::Missions
+            && self.missions.form.is_some()
+            && !matches!(action, MouseAction::MissionKey(_) | MouseAction::MissionField(_))
+        {
+            return true;
+        }
         if Self::is_overlay_action(&action) {
             return self.dispatch_overlay_action(mouse, action).await;
         }
 
         match action {
+            MouseAction::MissionKey(key) => {
+                self.handle_missions_key(key);
+                true
+            }
+            MouseAction::MissionRow(id) => {
+                let requests = self.missions.select_id(&id);
+                self.dispatch_mission_requests(requests);
+                true
+            }
+            MouseAction::MissionField(index) => {
+                if let Some(form) = self.missions.form.as_mut() {
+                    if index < form.fields.len() {
+                        form.focused = index;
+                    }
+                }
+                true
+            }
+            MouseAction::MissionFocus(focus) => {
+                self.missions.focus = focus;
+                true
+            }
+            MouseAction::MissionTab(tab) => {
+                self.missions.set_tab(tab);
+                true
+            }
             MouseAction::SwitchWindow(win) => {
                 self.active_window = win;
                 match win {
+                    Window::Missions => self.refresh_missions(),
                     Window::Nodes => self.refresh_node_sessions(),
                     Window::Operations => self.refresh_operations(),
                     Window::Intercept => self.enter_intercept().await,

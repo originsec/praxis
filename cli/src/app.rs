@@ -5,6 +5,7 @@ pub mod help;
 mod input;
 pub mod intercept;
 pub mod log_query;
+pub mod missions;
 mod mouse;
 mod mouse_overlay;
 mod nodes;
@@ -42,6 +43,7 @@ use tokio::sync::mpsc;
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
     Orchestrator,
+    Missions,
     Nodes,
     Intercept,
     LogQuery,
@@ -52,6 +54,7 @@ pub enum Window {
 pub struct App {
     pub active_window: Window,
     pub orchestrator: OrchestratorState,
+    pub missions: missions::MissionsState,
     pub help: help::HelpState,
     pub nodes: NodesState,
     pub intercept: InterceptState,
@@ -430,6 +433,7 @@ impl App {
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
+            missions: missions::MissionsState::default(),
             help: help::HelpState::default(),
             nodes: NodesState::default(),
             intercept: InterceptState::default(),
@@ -535,6 +539,18 @@ impl App {
             }
             AppEvent::AcpNotification(notif) => {
                 self.handle_acp_notification(notif).await;
+                true
+            }
+            AppEvent::MissionWorkspace { request_id, result } => {
+                let requests = self.missions.apply_result(request_id, result);
+                self.dispatch_mission_requests(requests);
+                self.active_window == Window::Missions
+            }
+            AppEvent::Terminal(Event::Paste(text))
+                if self.active_window == Window::Missions && !self.help.open =>
+            {
+                let requests = self.missions.paste(&text);
+                self.dispatch_mission_requests(requests);
                 true
             }
             AppEvent::MissionOutput { watch_id, result } => {
@@ -1001,6 +1017,9 @@ impl App {
                     self.refresh_execution_lists_after(Duration::ZERO, false);
                 }
 
+                if self.active_window == Window::Missions && count % 24 == 0 {
+                    self.refresh_missions();
+                }
                 let mut redraw = self.is_animating();
                 if self.should_redraw_live_execution_durations() {
                     redraw = true;
@@ -1199,6 +1218,14 @@ impl App {
         // Terminal mode intercepts all keys except ^q when Nodes window active.
         // ^y toggles the terminal closed from inside the PTY view.
         //
+        if self.active_window == Window::Missions && self.missions.form.is_some() {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
+                self.should_quit = true;
+            } else {
+                self.handle_missions_key(key);
+            }
+            return;
+        }
         if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
                 self.should_quit = true;
@@ -1326,10 +1353,20 @@ impl App {
             }
         }
 
+        if key.code == KeyCode::F(6) {
+            self.active_window = Window::Missions;
+            self.refresh_missions();
+            return;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('q') => {
                     self.should_quit = true;
+                    return;
+                }
+                KeyCode::Char('b') => {
+                    self.active_window = Window::Missions;
+                    self.refresh_missions();
                     return;
                 }
                 KeyCode::Char('o') => {
@@ -1370,12 +1407,47 @@ impl App {
 
         match self.active_window {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
+            Window::Missions => self.handle_missions_key(key),
             Window::Nodes => self.handle_nodes_key(key).await,
             Window::Intercept => self.handle_intercept_key(key).await,
             Window::LogQuery => self.handle_log_query_key(key).await,
             Window::Operations => self.handle_operations_key(key).await,
             Window::Settings => self.handle_settings_key(key).await,
         }
+    }
+
+    pub(crate) fn dispatch_mission_requests(&mut self, requests: Vec<missions::MissionUiRequest>) {
+        let Some(tx) = self.event_tx.clone() else {
+            return;
+        };
+        for request in requests {
+            let client = self.client.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let result = match tokio::time::timeout(
+                    Duration::from_secs(20),
+                    client.mission(request.command),
+                ).await {
+                    Ok(result) => result.map_err(|error| error.to_string()),
+                    Err(_) => Err("Service response timed out. The request may have completed; refresh and inspect the mission before retrying.".into()),
+                };
+                let _ = tx.send(AppEvent::MissionWorkspace {
+                    request_id: request.id,
+                    result,
+                });
+            });
+        }
+    }
+
+    pub(crate) fn refresh_missions(&mut self) {
+        let requests = self.missions.refresh();
+        self.dispatch_mission_requests(requests);
+    }
+
+    pub(crate) fn handle_missions_key(&mut self, key: KeyEvent) {
+        let requests = self.missions
+            .handle_key(key, &self.orchestrator.configured_model);
+        self.dispatch_mission_requests(requests);
     }
 
     fn is_double_click(&mut self, row: u16, col: u16) -> bool {
@@ -2249,6 +2321,9 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 match self.active_window {
+                    Window::Missions => {
+                        self.handle_missions_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+                    }
                     Window::Orchestrator => {
                         if let Some(session) = self.orchestrator.active_session_mut() {
                             session.scroll_offset = session.scroll_offset.saturating_add(3);
@@ -2334,6 +2409,9 @@ impl App {
             }
             MouseEventKind::ScrollDown => {
                 match self.active_window {
+                    Window::Missions => {
+                        self.handle_missions_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+                    }
                     Window::Orchestrator => {
                         if let Some(session) = self.orchestrator.active_session_mut() {
                             session.scroll_offset = session.scroll_offset.saturating_sub(3);

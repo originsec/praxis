@@ -2,7 +2,7 @@
 // Single source of truth for TUI keybinding labels and grammar.
 //
 // Layers:
-//   0 Global   — window switch + quit (^o ^l ^p ^t ^g ^s ^q)
+//   0 Global   — window switch + quit (^o ^b ^l ^p ^t ^g ^s ^q)
 //   1 Chrome   — tabs, filter, list/detail navigation
 //   2 CRUD     — always Ctrl (^n ^e ^d ^s); ^r = run/execute
 //   3 Domain   — bare keys for view toggles (r refresh, p pause, …)
@@ -16,6 +16,7 @@ pub mod global {
     pub const QUIT: &str = "^q";
     pub const HELP: &str = "^h";
     pub const ORCHESTRATOR: &str = "^o";
+    pub const MISSIONS: &str = "^b";
     pub const NODES: &str = "^l";
     pub const OPERATIONS: &str = "^p";
     pub const INTERCEPT: &str = "^t";

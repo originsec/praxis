@@ -13,6 +13,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
+    MissionWorkspace {
+        request_id: u64,
+        result: Result<common::missions::MissionResponse, String>,
+    },
     MissionOutput {
         watch_id: Option<String>,
         result: Result<String, String>,

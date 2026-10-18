@@ -9,6 +9,15 @@ Configure the Orchestrator model and enable the MCP server before starting.
 Missions use the same configured providers and tools as ordinary Orchestrator
 chat. They do not recursively create other missions.
 
+## Missions, operations and chains
+
+A **semantic operation** defines one task to run against an agent. A **chain**
+defines a workflow of operations and other blocks with explicit dependencies,
+branches and loops. A **mission** owns a persistent objective: the Orchestrator
+chooses steps, can invoke operations or chains, collects evidence, and tracks
+budgets and checkpoints. Missions are the layer for supervising ongoing work;
+chains remain the layer for repeatable, explicitly designed workflows.
+
 ## Start and inspect
 
 ```bash
@@ -27,8 +36,9 @@ are returned in pages of up to 500; pass the last sequence as `--after` to fetch
 the next page. Watch drains pages automatically. `--json` provides structured
 responses; watch produces newline-delimited JSON. Ctrl+C while watching detaches.
 
-The TUI accepts the same commands in the Orchestrator input with a `/mission`
-prefix. `/mission attach <id>` follows events and `/mission detach` stops watching.
+The TUI has a dedicated **Missions** workspace (`Ctrl+B` or `F6`) with a live
+list, creation and lifecycle forms, and Overview/Evidence/Events tabs. It also
+accepts the same commands in the Orchestrator input with a `/mission` prefix. `/mission attach <id>` follows events and `/mission detach` stops watching.
 The MCP `mission` tool exposes the same lifecycle. See [CLI](cli.md),
 [TUI](tui.md), and [MCP](mcp.md) for their controls.
 
