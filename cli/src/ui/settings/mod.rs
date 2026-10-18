@@ -3,6 +3,7 @@ mod agents;
 mod forms;
 mod intercept;
 mod llm;
+mod orchestrator;
 mod service;
 
 use crate::app::{App, SettingsState, SettingsTab};
@@ -59,6 +60,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     match state.tab {
         SettingsTab::Llm => llm::render_llm(f, content, state),
+        SettingsTab::Orchestrator => orchestrator::render_orchestrator(f, content, state),
         SettingsTab::Agents => agents::render_agents(f, content, state),
         SettingsTab::Intercept => intercept::render_intercept(f, content, state),
         SettingsTab::Service => service::render_service(f, content, state),
@@ -110,6 +112,9 @@ fn render_settings_hints(f: &mut Frame, area: Rect, state: &SettingsState) {
         SettingsTab::Llm => {
             items.push(HintItem::new(action::DELETE, "delete model"));
         }
+        SettingsTab::Orchestrator => {
+            items.push(HintItem::new(action::DELETE, "delete playbook"));
+        }
         SettingsTab::Agents => {
             items.push(HintItem::new(action::SPACE, "toggle script"));
             items.push(HintItem::new(action::DELETE, "delete script"));
@@ -122,6 +127,7 @@ fn render_settings_hints(f: &mut Frame, area: Rect, state: &SettingsState) {
 fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let pairs: &[(SettingsTab, &str)] = &[
         (SettingsTab::Llm, "LLM"),
+        (SettingsTab::Orchestrator, "Orchestrator"),
         (SettingsTab::Agents, "Agents"),
         (SettingsTab::Intercept, "Intercept"),
         (SettingsTab::Service, "Service"),

@@ -27,6 +27,11 @@ pub enum AcpNotification {
         session_id: String,
         provider: Option<String>,
         model: Option<String>,
+        //
+        // Engagement the service scoped the session's memory to (as
+        // normalized by the service).
+        //
+        engagement: Option<String>,
     },
     SessionClosed {
         session_id: String,
@@ -36,6 +41,14 @@ pub enum AcpNotification {
         text: String,
     },
     TextContent {
+        session_id: String,
+        text: String,
+    },
+    //
+    // Model reasoning (ACP agent_thought_chunk). Rendered as the dimmed
+    // thinking segment of the current assistant entry.
+    //
+    ThoughtContent {
         session_id: String,
         text: String,
     },
@@ -103,6 +116,7 @@ enum BridgeCommand {
     CreateSession {
         cwd: String,
         model_ref: Option<String>,
+        engagement: String,
         history: Vec<(String, String)>,
         reply: oneshot::Sender<acp::Result<NewSessionResponse>>,
     },
@@ -148,6 +162,7 @@ impl AcpBridgeHandle {
         &self,
         cwd: &str,
         model_ref: Option<&str>,
+        engagement: &str,
         history: Vec<(String, String)>,
     ) -> anyhow::Result<()> {
         let (tx, _rx) = oneshot::channel();
@@ -155,6 +170,7 @@ impl AcpBridgeHandle {
             .send(BridgeCommand::CreateSession {
                 cwd: cwd.to_string(),
                 model_ref: model_ref.map(String::from),
+                engagement: engagement.to_string(),
                 history,
                 reply: tx,
             })
@@ -266,6 +282,17 @@ fn session_update_to_event(notif: SessionNotification) -> Option<AcpNotification
         SessionUpdate::AgentMessageChunk(chunk) => {
             if let ContentBlock::Text(tc) = &chunk.content {
                 Some(AcpNotification::TextContent {
+                    session_id: sid,
+                    text: tc.text.clone(),
+                })
+            } else {
+                None
+            }
+        }
+
+        SessionUpdate::AgentThoughtChunk(chunk) => {
+            if let ContentBlock::Text(tc) = &chunk.content {
+                Some(AcpNotification::ThoughtContent {
                     session_id: sid,
                     text: tc.text.clone(),
                 })
@@ -580,6 +607,7 @@ async fn run_bridge(
                         BridgeCommand::CreateSession {
                             cwd,
                             model_ref,
+                            engagement,
                             history,
                             reply,
                         } => {
@@ -590,6 +618,10 @@ async fn run_bridge(
                                     serde_json::Value::String(mr.clone()),
                                 );
                             }
+                            meta_obj.insert(
+                                common::acp_ext::META_ENGAGEMENT.to_string(),
+                                serde_json::Value::String(engagement),
+                            );
                             if !history.is_empty() {
                                 let arr: Vec<serde_json::Value> = history
                                     .iter()
@@ -625,11 +657,19 @@ async fn run_bridge(
                                         })
                                         .unwrap_or((None, None));
 
+                                    let engagement = resp
+                                        .meta
+                                        .as_ref()
+                                        .and_then(|m| m.get(common::acp_ext::META_ENGAGEMENT))
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from);
+
                                     let _ = event_tx.send(AppEvent::AcpNotification(
                                         AcpNotification::SessionCreated {
                                             session_id: resp.session_id.to_string(),
                                             provider,
                                             model,
+                                            engagement,
                                         },
                                     ));
                                 }

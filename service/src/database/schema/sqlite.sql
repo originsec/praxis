@@ -295,3 +295,26 @@ CREATE TABLE IF NOT EXISTS toolkit_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_execution ON toolkit_actions(execution_id);
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_created_at ON toolkit_actions(created_at DESC);
+
+-- Orchestrator playbooks (Agent Skills SKILL.md documents)
+CREATE TABLE IF NOT EXISTS orchestrator_playbooks (
+    name TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    version TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Orchestrator memory, scoped by engagement
+CREATE TABLE IF NOT EXISTS orchestrator_memories (
+    id TEXT PRIMARY KEY,
+    engagement TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_memories_title ON orchestrator_memories(engagement, title);
+CREATE INDEX IF NOT EXISTS idx_orchestrator_memories_updated ON orchestrator_memories(engagement, updated_at DESC);

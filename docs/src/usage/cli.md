@@ -97,6 +97,19 @@ session prompt --node <prefix> <text>
 session close --node <prefix>
 ```
 
+**Orchestrator Playbooks:**
+```bash
+playbook list                      # List playbooks (built-ins are marked)
+playbook show <name>               # Print a playbook's SKILL.md
+playbook save <path>               # Create/replace from a SKILL.md file or a skill directory containing one
+playbook delete <name>             # Delete a playbook
+```
+
+`playbook save` validates the document locally (Agent Skills frontmatter:
+`name` and `description` required) before sending it; the playbook is stored
+under the frontmatter `name`. See
+[Orchestrator → Playbooks](./orchestrator.md#playbooks).
+
 **Traffic Interception:**
 ```bash
 intercept status [node-prefix]                    # Show interception state

@@ -308,10 +308,14 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
         }
     }
 
+    if let Some(ref perm) = session.pending_permission {
+        lines.extend(build_permission_prompt(perm));
+    }
+
     //
     // Show active tool or waiting spinner.
     //
-    if session.is_streaming {
+    if session.is_streaming && session.pending_permission.is_none() {
         if session.active_tool.is_some() {
             //
             // Pending tool already renders as the in-flight Tool
@@ -404,6 +408,45 @@ fn render_welcome(f: &mut Frame, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
+//
+// Approval prompt for a gated tool call: tool name, its input, and the
+// a/l/d choices.
+//
+
+fn build_permission_prompt(perm: &crate::app::PendingPermission) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+            Span::styled("  \u{25b3} Approve ", Style::default().fg(SECONDARY)),
+            Span::styled(
+                perm.tool_name.clone(),
+                Style::default()
+                    .fg(SECONDARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("?", Style::default().fg(SECONDARY)),
+        ]),
+    ];
+    for line in compact_multiline(&perm.tool_input, 6, 160) {
+        lines.push(Line::from(vec![
+            Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+            Span::styled(format!("    {}", line), Style::default().fg(DIM)),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+        Span::raw("    "),
+        chrome::pill("a", ACCENT),
+        Span::styled(" allow   ", Style::default().fg(MUTED)),
+        chrome::pill("l", ACCENT),
+        Span::styled(" always (this session)   ", Style::default().fg(MUTED)),
+        chrome::pill("d", ERROR_FG),
+        Span::styled(" deny", Style::default().fg(MUTED)),
+    ]));
+    lines
+}
+
 enum ThinkSegment {
     Thinking(String),
     Visible(String),
@@ -483,13 +526,29 @@ fn build_tool_entry(
         ),
     };
 
+    //
+    // Sub-orchestrator tool calls arrive as "<label> › <tool>"; render them
+    // as compact, indented status lines under the delegate call.
+    //
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
-        Span::styled(name.to_string(), name_style),
-    ]));
+    match name.split_once(" \u{203a} ") {
+        Some((label, tool)) => {
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                Span::styled(format!("{} \u{203a} ", label), Style::default().fg(DIM)),
+                Span::styled(tool.to_string(), name_style),
+            ]));
+        }
+        None => {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+                Span::styled(name.to_string(), name_style),
+            ]));
+        }
+    }
 
     if !expanded {
         return lines;
@@ -782,6 +841,16 @@ fn render_meta(f: &mut Frame, area: Rect, app: &App, state: &OrchestratorState) 
     let mut left_spans: Vec<Span> = Vec::new();
     if !model_text.is_empty() {
         left_spans.push(Span::styled(model_text, Style::default().fg(DIM)));
+    }
+
+    if state.engagement != common::acp_ext::DEFAULT_ENGAGEMENT {
+        if !left_spans.is_empty() {
+            left_spans.push(Span::raw("    "));
+        }
+        left_spans.push(Span::styled(
+            format!("engagement {}", state.engagement),
+            Style::default().fg(DIM),
+        ));
     }
 
     if let Some(s) = session {

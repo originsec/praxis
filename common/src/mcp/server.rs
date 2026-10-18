@@ -1391,6 +1391,73 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "message": if enabled { "Chain trigger enabled" } else { "Chain trigger disabled" }
         }))
     }
+
+    // ── Orchestrator Playbooks ───────────────────────────────────────────
+
+    #[tool(
+        description = "List orchestrator playbooks (Agent Skills SKILL.md documents): name, description and whether each is built in."
+    )]
+    async fn playbook_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let playbooks = super::ops::playbook_list(client).await.map_err(mcp_err)?;
+        let items: Vec<_> = playbooks
+            .iter()
+            .map(|p| json!({ "name": p.name, "description": p.description, "builtin": p.is_builtin }))
+            .collect();
+        json_result(json!({ "playbooks": items, "count": items.len() }))
+    }
+
+    #[tool(description = "Get the full SKILL.md document of an orchestrator playbook by name.")]
+    async fn playbook_get(
+        &self,
+        Parameters(params): Parameters<PlaybookNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let playbook = super::ops::playbook_get(client, &params.name)
+            .await
+            .map_err(mcp_err)?;
+        json_result(json!({
+            "name": playbook.name,
+            "description": playbook.description,
+            "builtin": playbook.is_builtin,
+            "updated_at": playbook.updated_at,
+            "content": playbook.content,
+        }))
+    }
+
+    #[tool(
+        description = "Create or replace an orchestrator playbook from a SKILL.md document (YAML frontmatter with name + description, then Markdown instructions)."
+    )]
+    async fn playbook_save(
+        &self,
+        Parameters(params): Parameters<PlaybookSaveParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let name = super::ops::playbook_save(client, params.content)
+            .await
+            .map_err(mcp_err)?;
+        json_result(json!({ "status": "success", "name": name, "message": "Playbook saved" }))
+    }
+
+    #[tool(description = "Delete an orchestrator playbook by name.")]
+    async fn playbook_delete(
+        &self,
+        Parameters(params): Parameters<PlaybookNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        super::ops::playbook_delete(client, &params.name)
+            .await
+            .map_err(mcp_err)?;
+        json_result(json!({ "status": "success", "name": params.name, "message": "Playbook deleted" }))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]

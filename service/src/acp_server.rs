@@ -299,10 +299,22 @@ impl AcpServer {
     }
 
     //
-    // Handle client responses to our agent requests (pushToolCall etc.).
+    // Handle client responses to our agent requests. The orchestrator's
+    // session/request_permission prompts are the only requests the local
+    // agent issues.
     //
 
-    async fn handle_client_response(&self, _client_id: &str, _msg: &Value) {}
+    async fn handle_client_response(&self, client_id: &str, msg: &Value) {
+        if !self
+            .orchestrator_manager
+            .resolve_client_response(client_id, msg)
+        {
+            common::log_debug!(
+                "ACP: unmatched client response from {}",
+                common::short_id(client_id)
+            );
+        }
+    }
 
     //
     // Handler methods matching the Agent trait signatures but as inherent
@@ -409,6 +421,16 @@ impl AcpServer {
             .map(String::from);
 
         //
+        // Engagement scoping the orchestrator's persistent memory.
+        //
+        let engagement = common::acp_ext::normalize_engagement(
+            meta_val
+                .get(common::acp_ext::META_ENGAGEMENT)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+        );
+
+        //
         // Optional client-supplied conversation history for resume. The
         // service holds no orchestrator state across sessions; callers
         // resuming from local storage pass prior turns here so the
@@ -448,6 +470,7 @@ impl AcpServer {
                 client_id,
                 &session_id,
                 model_ref.as_deref(),
+                &engagement,
                 history,
                 &self.service_config,
                 publish_channel,
@@ -470,7 +493,14 @@ impl AcpServer {
                     model_id.clone(),
                     vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
                 );
-                let resp = NewSessionResponse::new(session_id).models(model_state);
+                let resp = NewSessionResponse::new(session_id)
+                    .models(model_state)
+                    .meta(
+                        serde_json::from_value::<acp::schema::Meta>(json!({
+                            common::acp_ext::META_ENGAGEMENT: engagement,
+                        }))
+                        .unwrap(),
+                    );
                 let _ = send_to_client(
                     publish_channel,
                     client_id,
@@ -598,6 +628,20 @@ pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientD
     session_notification(
         session_id,
         acp::schema::SessionUpdate::AgentMessageChunk(chunk),
+    )
+}
+
+//
+// Model reasoning (thinking summaries / reasoning content) streamed as ACP
+// agent_thought_chunk updates.
+//
+pub fn session_update_thought(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
+    let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
+        acp::schema::TextContent::new(text),
+    ));
+    session_notification(
+        session_id,
+        acp::schema::SessionUpdate::AgentThoughtChunk(chunk),
     )
 }
 

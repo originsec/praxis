@@ -29,6 +29,7 @@ pub enum ConfirmKind {
     ClearAllExecutions,
     DeleteModel(usize),        // index into model_definitions
     DeleteAgentScript(String), // script_id
+    DeletePlaybook(String),    // playbook name
     ResetAgentScripts,
     ResetInterceptTargets,
     ResetNode(String),  // node_id
@@ -188,6 +189,9 @@ impl App {
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
             }
+            ConfirmKind::DeletePlaybook(name) => {
+                self.delete_playbook(&name).await;
+            }
             ConfirmKind::ResetAgentScripts => {
                 let _ = self.client.reset_lua_agent_script_defaults().await;
                 self.settings.agent_scripts_loaded = false;
@@ -332,6 +336,11 @@ impl App {
                 label: "model".to_string(),
                 value: "model".to_string(),
                 description: "Select orchestrator model".to_string(),
+            },
+            PopupItem {
+                label: "engagement".to_string(),
+                value: "engagement".to_string(),
+                description: "Show or switch the engagement (memory scope)".to_string(),
             },
         ];
 
@@ -494,7 +503,12 @@ impl App {
         self.orchestrator.create_in_flight = true;
         if let Err(e) = self
             .acp
-            .create_session(".", Some(model_name), Vec::new())
+            .create_session(
+                ".",
+                Some(model_name),
+                &self.orchestrator.engagement,
+                Vec::new(),
+            )
             .await
         {
             self.orchestrator.create_in_flight = false;

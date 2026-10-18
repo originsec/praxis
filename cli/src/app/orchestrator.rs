@@ -77,6 +77,11 @@ pub struct OrchestratorSessionState {
     pub tools_expanded: bool,
     pub tools_full: bool,
     pub max_scroll: Cell<u16>,
+    //
+    // Operator approval the service is waiting on (a mutating tool call).
+    // Answered with a/l/d; Ctrl+C cancels it along with the turn.
+    //
+    pub pending_permission: Option<PendingPermission>,
 }
 
 impl OrchestratorSessionState {
@@ -101,6 +106,7 @@ impl OrchestratorSessionState {
             tools_expanded: false,
             tools_full: false,
             max_scroll: Cell::new(0),
+            pending_permission: None,
         }
     }
 }
@@ -165,6 +171,11 @@ pub struct OrchestratorState {
     //
     pub plan_split_percent: u16,
     pub plan_dragging: bool,
+    //
+    // Engagement sent on session/new; scopes the orchestrator's persistent
+    // memory. Switched with /engagement <name>.
+    //
+    pub engagement: String,
 }
 
 //
@@ -216,6 +227,7 @@ impl Default for OrchestratorState {
             pending_model_selection: None,
             plan_split_percent: 67,
             plan_dragging: false,
+            engagement: common::acp_ext::DEFAULT_ENGAGEMENT.to_string(),
         }
     }
 }
@@ -266,6 +278,9 @@ impl App {
         self.orchestrator.sessions.push(session);
         self.orchestrator.active_session_index = Some(0);
 
+        if let Some(engagement) = stored.engagement.clone() {
+            self.orchestrator.engagement = engagement;
+        }
         self.orchestrator.pending_history = Some(history);
         self.orchestrator.stored = Some(stored);
     }
@@ -348,7 +363,12 @@ impl App {
 
         let history = self.orchestrator.pending_history.take().unwrap_or_default();
         self.orchestrator.create_in_flight = true;
-        if let Err(e) = self.acp.create_session(".", None, history).await {
+        let engagement = self.orchestrator.engagement.clone();
+        if let Err(e) = self
+            .acp
+            .create_session(".", None, &engagement, history)
+            .await
+        {
             self.orchestrator.create_in_flight = false;
             self.push_orchestrator_error(format!("Failed to create session: {e}"));
         }
@@ -457,6 +477,10 @@ impl App {
     }
 
     pub(crate) async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
+        if self.handle_orchestrator_permission_key(key) {
+            return;
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -697,8 +721,95 @@ impl App {
         }
     }
 
+    //
+    // While the service waits on an approval, a/l/d answer it (allow once,
+    // always allow this tool for the session, deny). Ctrl+C cancels the
+    // approval and falls through to cancelling the turn.
+    //
+    fn handle_orchestrator_permission_key(&mut self, key: KeyEvent) -> bool {
+        let Some(session) = self.orchestrator.active_session_mut() else {
+            return false;
+        };
+        if session.pending_permission.is_none() {
+            return false;
+        }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if key.code == KeyCode::Char('c')
+                && let Some(perm) = session.pending_permission.take()
+            {
+                self.acp.resolve_permission(
+                    &perm.permission_id,
+                    agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                );
+            }
+            return false;
+        }
+
+        let decision = match key.code {
+            KeyCode::Char('a') | KeyCode::Char('A') => common::PermissionDecision::Allow,
+            KeyCode::Char('l') | KeyCode::Char('L') => common::PermissionDecision::AllowAlways,
+            KeyCode::Char('d') | KeyCode::Char('D') => common::PermissionDecision::Deny,
+            _ => return false,
+        };
+        if let Some(perm) = session.pending_permission.take() {
+            let outcome = super::nodes::decision_to_outcome(&perm.options, decision);
+            self.acp.resolve_permission(&perm.permission_id, outcome);
+        }
+        true
+    }
+
+    //
+    // Release any approval still pending on orchestrator sessions so the
+    // ACP bridge does not hold the request open after the turn ended.
+    //
+    fn cancel_orchestrator_permissions(&mut self) {
+        for session in &mut self.orchestrator.sessions {
+            if let Some(perm) = session.pending_permission.take() {
+                self.acp.resolve_permission(
+                    &perm.permission_id,
+                    agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                );
+            }
+        }
+    }
+
+    //
+    // /engagement shows the current engagement; /engagement <name> switches
+    // to another one and starts a fresh session so the new engagement's
+    // memory is loaded.
+    //
+    async fn handle_engagement_command(&mut self, arg: &str) {
+        if arg.is_empty() {
+            let message = format!(
+                "Engagement: {} (orchestrator memory is scoped to it). Use /engagement <name> to switch; this starts a fresh session.",
+                self.orchestrator.engagement
+            );
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Info(message));
+            }
+            return;
+        }
+        let name = common::acp_ext::normalize_engagement(arg);
+        if name == self.orchestrator.engagement {
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Info(format!(
+                    "Already in engagement {}",
+                    name
+                )));
+            }
+            return;
+        }
+        self.orchestrator.engagement = name;
+        self.clear_orchestrator_session().await;
+    }
+
     pub(crate) async fn handle_slash_command(&mut self, input: &str) {
         let cmd = input.trim_start_matches('/').trim();
+        let (cmd, arg) = cmd
+            .split_once(char::is_whitespace)
+            .map(|(c, a)| (c, a.trim()))
+            .unwrap_or((cmd, ""));
 
         match cmd {
             "clear" => {
@@ -706,6 +817,9 @@ impl App {
             }
             "model" => {
                 self.open_model_select().await;
+            }
+            "engagement" => {
+                self.handle_engagement_command(arg).await;
             }
             _ => {
                 if let Some(session) = self.orchestrator.active_session_mut() {
@@ -724,7 +838,11 @@ impl App {
                 session_id,
                 provider,
                 model,
+                engagement,
             } => {
+                if let Some(engagement) = engagement {
+                    self.orchestrator.engagement = engagement;
+                }
                 //
                 // One orchestrator session per client. Drop any prior
                 // local session state and install the new one.
@@ -777,6 +895,7 @@ impl App {
                 stored.session_id = session_id.clone();
                 stored.provider = provider;
                 stored.model = model;
+                stored.engagement = Some(self.orchestrator.engagement.clone());
                 let _ = crate::session_store::save(&stored);
                 self.orchestrator.stored = Some(stored);
 
@@ -904,6 +1023,7 @@ impl App {
 
                     match session.messages.last_mut() {
                         Some(ConversationEntry::AssistantText(existing)) => {
+                            close_thought(existing);
                             existing.push_str(&text);
                         }
                         _ => {
@@ -916,6 +1036,35 @@ impl App {
                             session
                                 .messages
                                 .push(ConversationEntry::AssistantText(text));
+                        }
+                    }
+                }
+            }
+
+            AcpNotification::ThoughtContent { session_id, text } => {
+                //
+                // Node sessions do not render reasoning; keep their
+                // transcript unchanged.
+                //
+                if self
+                    .nodes
+                    .sessions
+                    .values()
+                    .any(|s| s.session_id.as_deref() == Some(session_id.as_str()))
+                {
+                    return;
+                }
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.active_tool = None;
+                    match session.messages.last_mut() {
+                        Some(ConversationEntry::AssistantText(existing)) => {
+                            append_thought(existing, &text);
+                        }
+                        _ => {
+                            session.revealed_chars = 0;
+                            let mut entry = String::new();
+                            append_thought(&mut entry, &text);
+                            session.messages.push(ConversationEntry::AssistantText(entry));
                         }
                     }
                 }
@@ -936,6 +1085,11 @@ impl App {
                     return;
                 }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    if let Some(ConversationEntry::AssistantText(existing)) =
+                        session.messages.last_mut()
+                    {
+                        close_thought(existing);
+                    }
                     if name != "report_plan" {
                         session.active_tool = Some(name.clone());
                         session.active_tool_input = raw_input.clone();
@@ -1000,6 +1154,7 @@ impl App {
             }
 
             AcpNotification::PromptComplete { .. } => {
+                self.cancel_orchestrator_permissions();
                 //
                 // A turn completed, so any prior session-loss recovery
                 // succeeded — clear the guard.
@@ -1029,7 +1184,14 @@ impl App {
                     }
                 }
                 if let Some(text) = last_assistant {
-                    self.persist_message("assistant", &text);
+                    //
+                    // Reasoning is display-only; resumed sessions only need
+                    // the visible answer.
+                    //
+                    let visible = strip_thoughts(&text);
+                    if !visible.trim().is_empty() {
+                        self.persist_message("assistant", visible.trim());
+                    }
                 }
             }
 
@@ -1051,17 +1213,29 @@ impl App {
                     .sessions
                     .iter_mut()
                     .find(|(_, s)| s.session_id.as_deref() == Some(session_id.as_str()));
+                let permission = PendingPermission {
+                    permission_id,
+                    tool_name,
+                    tool_input,
+                    options,
+                };
                 if let Some((_, session)) = target {
-                    session.pending_permission = Some(PendingPermission {
-                        permission_id,
-                        tool_name,
-                        tool_input,
-                        options,
-                    });
+                    session.pending_permission = Some(permission);
+                } else if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    //
+                    // The orchestrator's approval gate for a mutating tool.
+                    //
+                    session.pending_permission = Some(permission);
+                } else {
+                    self.acp.resolve_permission(
+                        &permission.permission_id,
+                        agent_client_protocol::schema::RequestPermissionOutcome::Cancelled,
+                    );
                 }
             }
 
             AcpNotification::Error { message } => {
+                self.cancel_orchestrator_permissions();
                 //
                 // Create failures also arrive here; release the in-flight
                 // guard so the user can retry (or /clear again).
@@ -1186,6 +1360,51 @@ impl App {
         }
     }
 
+}
+
+//
+// Reasoning is stored inline in AssistantText entries as `<think>` blocks so
+// it renders through the same thinking segment used for models that emit
+// literal think tags. A block stays open while thought chunks stream and is
+// closed when visible text or a tool call follows.
+//
+
+fn has_open_thought(entry: &str) -> bool {
+    match (entry.rfind("<think>"), entry.rfind("</think>")) {
+        (Some(open), Some(close)) => open > close,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn append_thought(entry: &mut String, text: &str) {
+    if !has_open_thought(entry) {
+        entry.push_str("<think>");
+    }
+    entry.push_str(text);
+}
+
+pub(crate) fn close_thought(entry: &mut String) {
+    if has_open_thought(entry) {
+        entry.push_str("</think>");
+    }
+}
+
+fn strip_thoughts(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<think>") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("</think>") {
+            Some(end) => rest = &rest[start + end + "</think>".len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 //
@@ -1367,6 +1586,22 @@ mod tests {
         assert_eq!(state.sessions.len(), 1);
         assert_eq!(state.sessions[0].session_id, "live-session");
         assert_eq!(state.active_session_index, Some(0));
+    }
+
+    #[test]
+    fn thought_chunks_open_and_close_think_block() {
+        let mut entry = String::new();
+        append_thought(&mut entry, "Let me ");
+        append_thought(&mut entry, "check.");
+        assert_eq!(entry, "<think>Let me check.");
+        close_thought(&mut entry);
+        entry.push_str("Done.");
+        assert_eq!(entry, "<think>Let me check.</think>Done.");
+        close_thought(&mut entry);
+        assert_eq!(entry, "<think>Let me check.</think>Done.");
+        append_thought(&mut entry, "More");
+        assert_eq!(entry, "<think>Let me check.</think>Done.<think>More");
+        assert_eq!(strip_thoughts(&entry), "Done.");
     }
 
     fn other_debug(entry: &ConversationEntry) -> String {

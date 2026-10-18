@@ -6,7 +6,7 @@ use super::*;
 // the agent didn't offer a matching kind — preserves intent without
 // guessing.
 //
-fn decision_to_outcome(
+pub(crate) fn decision_to_outcome(
     options: &[crate::acp::PermissionOption],
     decision: common::PermissionDecision,
 ) -> agent_client_protocol::schema::RequestPermissionOutcome {

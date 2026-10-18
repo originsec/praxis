@@ -13,6 +13,7 @@ mod lua_scripts;
 mod nodes;
 mod opdefs;
 mod payloads;
+mod playbooks;
 mod semantic_ops;
 mod toolkit;
 mod traffic;
@@ -28,6 +29,7 @@ use lua_scripts::*;
 use nodes::*;
 use opdefs::*;
 use payloads::*;
+use playbooks::*;
 use semantic_ops::*;
 use toolkit::*;
 use traffic::*;
@@ -424,6 +426,19 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             script_id,
             disabled,
         } => handle_lua_script_toggle_disabled(ctx, client_id, script_id, disabled).await,
+
+        //
+        // Orchestrator playbooks.
+        //
+        ClientSignalMessage::PlaybookList { client_id } => {
+            handle_playbook_list(ctx, client_id).await
+        }
+        ClientSignalMessage::PlaybookSave { client_id, content } => {
+            handle_playbook_save(ctx, client_id, content).await
+        }
+        ClientSignalMessage::PlaybookDelete { client_id, name } => {
+            handle_playbook_delete(ctx, client_id, name).await
+        }
 
         //
         // Intercept targets.

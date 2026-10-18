@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod intercept;
 pub mod node;
+pub mod playbook;
 pub mod session;
 
 //

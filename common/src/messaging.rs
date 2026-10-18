@@ -2073,6 +2073,23 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Orchestrator playbooks (SKILL.md documents stored on the service).
+    // Save creates or replaces the playbook named in the content's
+    // frontmatter.
+    //
+    PlaybookList {
+        client_id: String,
+    },
+    PlaybookSave {
+        client_id: String,
+        content: String,
+    },
+    PlaybookDelete {
+        client_id: String,
+        name: String,
+    },
+
+    //
     // Intercept targets virtual file (stored as TOML text in service_config,
     // parsed into InterceptTargetConfig list and pushed to nodes on change).
     //
@@ -2541,6 +2558,23 @@ pub enum ClientDirectMessage {
     LuaAgentScriptDisabledToggled {
         script_id: String,
         disabled: bool,
+    },
+
+    //
+    // Orchestrator playbook responses.
+    //
+    PlaybookListResponse {
+        playbooks: Vec<crate::PlaybookInfo>,
+    },
+    PlaybookSaved {
+        name: String,
+    },
+    PlaybookDeleted {
+        name: String,
+        success: bool,
+    },
+    PlaybookError {
+        message: String,
     },
 
     //

@@ -18,6 +18,30 @@ pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 pub const LLM_FEATURE_DOC_HELPER: &str = "llm_feature_doc_helper";
 
+/// Orchestrator model output cap (tokens per model response).
+pub const LLM_ORCHESTRATOR_MAX_TOKENS: &str = "llm_orchestrator_max_tokens";
+
+/// Orchestrator tool-calling mode: "auto" (provider default), "native"
+/// (provider function-calling API) or "manual" (prompt-based JSON calls).
+pub const LLM_ORCHESTRATOR_TOOL_MODE: &str = "llm_orchestrator_tool_mode";
+
+/// Request model reasoning (extended thinking) for the Orchestrator and
+/// show it in the client. Default on.
+pub const LLM_ORCHESTRATOR_THINKING: &str = "llm_orchestrator_thinking";
+
+/// Optional reasoning effort hint for the Orchestrator (low, medium, high,
+/// xhigh, max). Sent as Anthropic output_config.effort or OpenAI
+/// reasoning_effort; empty leaves the provider default.
+pub const LLM_ORCHESTRATOR_EFFORT: &str = "llm_orchestrator_effort";
+
+/// Orchestrator conversation budget in estimated tokens. Above it, older
+/// turns are summarized into a single message (default 100000).
+pub const LLM_ORCHESTRATOR_CONTEXT_BUDGET: &str = "llm_orchestrator_context_budget";
+
+/// Require operator approval (ACP session/request_permission) before the
+/// Orchestrator runs mutating tools. Default on.
+pub const LLM_ORCHESTRATOR_APPROVAL_GATE: &str = "llm_orchestrator_approval_gate";
+
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
@@ -62,6 +86,12 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
     LLM_FEATURE_DOC_HELPER,
+    LLM_ORCHESTRATOR_MAX_TOKENS,
+    LLM_ORCHESTRATOR_TOOL_MODE,
+    LLM_ORCHESTRATOR_THINKING,
+    LLM_ORCHESTRATOR_EFFORT,
+    LLM_ORCHESTRATOR_CONTEXT_BUDGET,
+    LLM_ORCHESTRATOR_APPROVAL_GATE,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,

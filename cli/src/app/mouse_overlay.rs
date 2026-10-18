@@ -668,6 +668,24 @@ impl App {
                     None
                 }
             }
+            SettingsTab::Orchestrator => {
+                //
+                // Mirrors ui::settings::orchestrator: settings rows start at
+                // row 2, playbook rows at row 12, then a blank row and the
+                // "New playbook" row.
+                //
+                let rows = super::settings::ORCHESTRATOR_SETTING_ROWS;
+                let pc = self.settings.playbooks.len();
+                if (2..2 + rows).contains(&rel_row) {
+                    Some(rel_row - 2)
+                } else if (12..12 + pc).contains(&rel_row) {
+                    Some(rows + rel_row - 12)
+                } else if rel_row == 13 + pc {
+                    Some(rows + pc)
+                } else {
+                    None
+                }
+            }
             SettingsTab::Agents => {
                 let sc = self.settings.agent_scripts.len();
                 if rel_row >= 2 && rel_row < 6 {

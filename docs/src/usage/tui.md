@@ -19,13 +19,17 @@ The terminal UI provides six main windows, switched with keyboard shortcuts:
 
 ## Orchestrator (`Ctrl+O`)
 
-LLM-powered conversation interface for coordinating operations across the Praxis network. Features:
+LLM-powered conversation interface for coordinating operations across the Praxis network (see [Orchestrator](./orchestrator.md)). Features:
 - Real-time streaming responses with tool execution display
+- Model reasoning shown as a dimmed thinking segment
 - Plan tracking with step visualization
+- Sub-orchestrator tool calls shown as indented `label › tool` lines under their `delegate` call
+- Inline approval prompts for mutating tools: `a` allow once, `l` always allow that tool this session, `d` deny
 - Token usage statistics
 - Command history and conversation scrolling
 - Single orchestrator session per TUI run — the conversation lifetime equals the TUI process lifetime. Use `praxis --continue` or `praxis --resume` on the next launch to bring it back. `Ctrl+Alt+W` exports the transcript to markdown.
-- `Ctrl+C` cancels the in-flight prompt
+- `Ctrl+C` cancels the in-flight prompt (and any pending approval)
+- `/clear` starts a fresh session, `/model` switches model, `/engagement [name]` shows or switches the engagement that scopes the orchestrator's memory (switching starts a fresh session; a non-default engagement is shown in the meta row)
 - `Ctrl+E` toggles the tools panel; `Ctrl+Alt+E` expands it fully
 - `Shift+Enter` (or `Alt+Enter`) inserts a newline in the prompt; bare
   `Enter` sends. Multi-line drafts grow the input box; `↑`/`↓` move
@@ -271,6 +275,7 @@ In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/�
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, feature assignment (orchestrator, documentation helper, semantic ops, semantic parser, traffic parser), and the Traffic Parser body limit
+- **Orchestrator** — approval gate, tool calling mode (auto/native/manual), reasoning on/off and effort, context budget for compaction, and the **Playbooks** list: `Enter` views/edits a playbook in `$EDITOR`, **+ New playbook** creates one from a template, `Ctrl+D` deletes (see [Orchestrator](./orchestrator.md#playbooks))
 - **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, log query row limits, prompt timeout
 - **About** — connection info
 

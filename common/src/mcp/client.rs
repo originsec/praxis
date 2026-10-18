@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainDefinitionInput, ChainExecutionUpdate,
-    ChainTriggerInfo, InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult,
+    ChainTriggerInfo, InterceptedTrafficEntry, OperationDefinitionInfo, PlaybookInfo, ReconResult,
     SemanticOpUpdate, SemanticOperationSpec, SystemState, TargetSpec, TrafficSearchFilters,
     TriggerConfig,
 };
@@ -159,4 +159,13 @@ pub trait McpClient: Send + Sync {
 
     /// Reset a node (cancel all operations, tear down state, re-register).
     async fn reset_node(&self, node_id: &str) -> Result<()>;
+
+    /// List orchestrator playbooks.
+    async fn list_playbooks(&self) -> Result<Vec<PlaybookInfo>>;
+
+    /// Create or replace a playbook from SKILL.md content. Returns its name.
+    async fn save_playbook(&self, content: String) -> Result<String>;
+
+    /// Delete a playbook by name. Returns whether it existed.
+    async fn delete_playbook(&self, name: &str) -> Result<bool>;
 }
