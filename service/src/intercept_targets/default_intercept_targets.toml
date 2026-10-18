@@ -18,6 +18,9 @@ url_pattern = "messages"
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
 
+[codex]
+domains = ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+
 [cursor]
 domains = ["agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
 

@@ -96,9 +96,8 @@ IMPORTANT: op_run behavior:
 - ALWAYS confirm the real short name with `node_list`/`agent_list` first;
   never guess one from the Operator's wording. In particular, the
   CLI-discovered Claude Code connector's short name is `claudecode` (no
-  hyphen); `claude-code` (hyphenated) is a different connector, the Claude
-  Code Bridge. These are easy to conflate and usually only one is what the
-  Operator actually means.
+  hyphen); `claude-bridge` is the inbound Claude Code Bridge connector.
+  Choose the connector the Operator actually means.
 - `trigger_create` returns a `warning` field when a requested short name
   doesn't match any currently connected agent. Don't ignore it: either it's a
   typo (fix and recreate the trigger) or it intentionally targets an agent

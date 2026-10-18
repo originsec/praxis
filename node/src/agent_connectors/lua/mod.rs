@@ -324,6 +324,178 @@ mod tests {
     }
 
     #[test]
+    fn m365_session_and_recon_launch_with_webview_switch() {
+        let lua = mlua::Lua::new();
+        lua.load(
+            r#"
+            calls = {}
+            closed = {}
+            praxis = {
+                os_name = function() return "windows" end,
+                kill_processes_by_name = function() end,
+                sleep_ms = function() end,
+                cdp_wait_for_element = function() return false end,
+                cdp_process_id = function() return nil end,
+                cdp_evaluate = function() return { hasWork = true, hasWeb = true } end,
+                release_desktop = function(handle) table.insert(closed, handle) end,
+                log_info = function() end,
+                log_warn = function() end,
+            }
+            package.preload["praxis.devtools"] = function()
+                return {
+                    connect = function(config)
+                        table.insert(calls, config)
+                        return "cdp", "desktop"
+                    end,
+                    close = function(handle) table.insert(closed, handle) end,
+                }
+            end
+        "#,
+        )
+        .exec()
+        .unwrap();
+        let connector: mlua::Table = lua
+            .load(include_str!("../../../../agents/m365copilot.lua"))
+            .eval()
+            .unwrap();
+        lua.globals().set("connector", connector).unwrap();
+        lua.load(r#"
+            local ctx = { process_path = "C:\\Program Files\\M365Copilot.exe", working_dir = "Work" }
+            local session = connector.create_session(ctx)
+            connector.session_close(ctx, session)
+            local recon = connector.recon(ctx)
+            assert(#calls == 2)
+            for _, config in ipairs(calls) do
+                assert(config.process_path == ctx.process_path)
+                assert(config.debug_port_cli_arg == "--edge-webview-switches=--remote-debugging-port={}")
+                assert(config.debug_port_env_var == nil)
+                assert(config.base_port == 9250 and config.port_range == 100)
+            end
+            assert(#recon.config.project_paths == 2)
+            assert(table.concat(closed, ",") == "cdp,desktop,cdp,desktop")
+        "#).exec().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "Opt-in real M365 session: closes existing Copilot, launches app, requires signed-in chat UI"]
+    async fn m365_real_session_connects_to_chat_input() -> anyhow::Result<()> {
+        use anyhow::{Context, ensure};
+        use common::SessionContext;
+        use mlua::{Function, Lua, Table};
+        use serde_json::Value;
+
+        let process_path = std::env::var("PRAXIS_TEST_M365_PATH").context(
+            "Set PRAXIS_TEST_M365_PATH to the installed M365Copilot.exe fingerprint path",
+        )?;
+        ensure!(
+            std::path::Path::new(&process_path).is_file(),
+            "M365 fingerprint executable does not exist"
+        );
+        ensure!(
+            std::env::var("PRAXIS_NOT_HIDDEN").as_deref() == Ok("1"),
+            "Set PRAXIS_NOT_HIDDEN=1 in the test process environment"
+        );
+        let script = EMBEDDED_LUA_SCRIPTS
+            .iter()
+            .find(|script| script.contains("AGENT_SHORT_NAME = \"m365copilot\""))
+            .context("M365 connector is not embedded")?;
+        let lua = runtime::create_vm(script)?;
+        let context = SessionContext {
+            working_dir: None,
+            yolo_mode: false,
+            prompt_timeout_secs: Some(30),
+            interactive: false,
+        };
+
+        //
+        // Production create_session closes existing Copilot instances. This
+        // opt-in test also kills remaining app trees after a failed launch,
+        // when Lua may not have returned a session handle for normal cleanup.
+        // The external validation script bounds the entire test process.
+        //
+
+        struct SessionCleanup<'a> {
+            lua: &'a Lua,
+            context: &'a SessionContext,
+            state: Option<Value>,
+            finished: bool,
+        }
+        impl SessionCleanup<'_> {
+            fn close(&mut self) -> anyhow::Result<()> {
+                if self.finished {
+                    return Ok(());
+                }
+                let result = if let Some(state) = self.state.take() {
+                    let result = runtime::vm_session_close(self.lua, self.context, &state);
+                    if let Some(handle) = state.get("cdp_handle").and_then(Value::as_str) {
+                        super::cdp::cleanup_connection(handle);
+                    }
+                    if let Some(desktop) = state.get("desktop_handle").and_then(Value::as_str) {
+                        runtime::release_desktop_handle(desktop);
+                    }
+                    result
+                } else {
+                    Ok(())
+                };
+                let processes = sysinfo::System::new_all();
+                for process in processes.processes_by_name(std::ffi::OsStr::new("M365Copilot.exe"))
+                {
+                    crate::utils::terminate_process_tree(process.pid().as_u32());
+                }
+                self.finished = true;
+                result
+            }
+        }
+        impl Drop for SessionCleanup<'_> {
+            fn drop(&mut self) {
+                if let Err(error) = self.close() {
+                    eprintln!("M365_SESSION_CLEANUP_FAILED: {error:#}");
+                }
+            }
+        }
+
+        let mut cleanup = SessionCleanup {
+            lua: &lua,
+            context: &context,
+            state: None,
+            finished: false,
+        };
+        let observed = (|| -> anyhow::Result<bool> {
+            let state = runtime::vm_create_session(&lua, &context, Some(process_path))
+                .context("M365_SESSION_CREATE_FAILED")?;
+            cleanup.state = Some(state);
+            let handle = cleanup
+                .state
+                .as_ref()
+                .and_then(|state| state.get("cdp_handle"))
+                .and_then(Value::as_str)
+                .filter(|handle| !handle.is_empty())
+                .context("M365_SESSION_HANDLE_MISSING")?;
+            println!("M365_SESSION_CREATED");
+            let praxis: Table = lua.globals().get("praxis")?;
+            let evaluate: Function = praxis.get("cdp_evaluate")?;
+            let has_input: bool = evaluate
+                .call((
+                    handle,
+                    "document.querySelector('#m365-chat-editor-target-element') !== null",
+                ))
+                .context("M365_SESSION_INPUT_QUERY_FAILED")?;
+            println!("M365_CHAT_INPUT_PRESENT={has_input}");
+            Ok(has_input)
+        })();
+        let closed = cleanup.close();
+        let has_input = observed?;
+        closed.context("M365_SESSION_CLEANUP_FAILED")?;
+        ensure!(
+            has_input,
+            "M365_SESSION_CREATED_CHAT_UI_MISSING: real CDP session connected, but the chat input is absent; sign-in or chat navigation may be required"
+        );
+        println!("M365_REAL_SESSION_VERIFIED");
+        Ok(())
+    }
+
+    #[test]
     fn claudecode_recon_uses_historical_session_cwds() {
         let script = EMBEDDED_LUA_SCRIPTS
             .iter()

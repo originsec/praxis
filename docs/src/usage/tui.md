@@ -90,6 +90,13 @@ Press `Ctrl+E` on a Config leaf to open the selected file in
 `$VISUAL`/`$EDITOR`; on a clean exit with changes, the new contents are
 written back to the node and the detail pane refreshes.
 
+On Windows, save to the opened temporary file, close the editor, then press
+Enter at the terminal prompt to apply your changes. This also applies to
+other external-editor actions (queries, scripts, prompts, and intercept
+targets). The prompt keeps the file available when Notepad hands it to an
+existing window and its launcher exits early. Do not use Save As to another
+path; the TUI reads back the file it opened.
+
 ## Intercept (`Ctrl+T`)
 
 Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch).
@@ -236,7 +243,7 @@ orthogonal line connectors between ports. It is mouse-first but fully usable
 from the keyboard for core authoring actions.
 
 - **Canvas** — drag a block by its body to move it (drag starts only after a small movement threshold so a plain click does not nudge the block); drag empty space to pan; the mouse wheel scrolls vertically. Block positions persist in `ChainDefinitionInput.positions` so each chain remembers its layout.
-- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Ports and connector segments hit-test with a multi-cell tolerance. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag. Loop outputs are labeled `r` (retry / port 0) and `x` (exit / port 1).
+- **Ports** — every block exposes filled circles `●` on its left (input) and right (output) edges. Ports and connector segments hit-test with a multi-cell tolerance. Click an output port and drag to an input port on another block to create a connection. A rubber-band line follows the cursor while you drag. Loop outputs are labeled `r` (repeat / port 0) and `x` (exit / port 1).
 - **Selection** — single-click a block or connector segment to select it. `Enter` or double-click opens the **properties modal** for that selection.
 - **Properties modal** — for blocks: click fields to edit inline; prompts and tool params accept multi-line input (`Shift+Enter` inserts a newline); pickers for operation / model / tool / payload / session group; kind cycler `◂ Kind ▸` only among body kinds (Trigger and Termination stay fixed); memory mode store/retrieve; session group + per-block config (max runtime, YOLO, working dir, require-all-inputs). For connections: condition cycler toggles `any` / `on success` / `on failure` (also shown as ✓/✗ glyphs on the edge); `c` cycles condition when a connection is selected.
 - **Header strip** — `Name`, `Category`, `Timeout`, and `Description` at the top; click to edit. Incomplete blocks show a `!` badge on the canvas; save rejects invalid graphs with a clear error list.
@@ -312,7 +319,10 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 | `Ctrl+Q` | Quit |
 
 Status bar short labels: `orchestrator · nodes · ops · intercept · logs ·
-settings · help · quit`.
+settings · help · quit`. Navigation hints and their click targets are hidden
+while recon, a modal form, a selection popup, or the terminal captures those
+keys. Close the pane to restore navigation. Other global hints are also
+hidden when their keys are captured; the terminal keeps Help and Quit.
 
 `Ctrl+W` is window-scoped: in Nodes it toggles the Active Sessions
 overlay (or pauses the current chat session).

@@ -144,7 +144,51 @@ cargo test
 
 ### Integration Tests
 
-Run the full stack and test manually. Automated integration tests are on the roadmap.
+Run the full stack for end-to-end checks of service, node, and TUI behavior.
+
+With Codex CLI installed, run the interception regressions explicitly:
+
+```bash
+cargo test -p praxis_node intercept::proxy::codex_tests -- --ignored
+```
+
+Set `PRAXIS_CODEX_BIN` to test a binary outside `PATH`. These tests launch Codex
+CLI and app-server with isolated temporary state and synthetic credentials.
+Local TLS fixtures exercise Praxis's HTTP and WebSocket relay, complete a
+device-login exchange, and verify that the CA must be trusted. They do not
+change system certificates, routes, or proxy settings. Host configuration and
+enable/disable behavior require separate platform checks.
+
+On Windows, these opt-in checks exercise installed applications. Run them from
+a normal console with output capture disabled:
+
+```powershell
+cargo test -p praxis_cli editor::tests::windows_console_handoff_restores_cooked_input -- --ignored --exact --nocapture --test-threads=1
+cargo test -p praxis_cli editor::tests::windows_notepad_roundtrip_manual -- --ignored --exact --nocapture --test-threads=1
+```
+
+The first check verifies console modes through two editor handoffs without user
+input. On Windows, mouse capture must be disabled before restoring line input,
+because disabling mouse capture restores a saved console mode.
+
+In Notepad, replace the file contents with `praxis-editor-ok`, save, and close
+the editor. Press Enter once at the terminal confirmation, then press `r` to
+verify that terminal input resumed. Ctrl+C cancels the check.
+
+To check M365 Copilot session creation, first sign in to the installed app:
+
+```powershell
+$package = Get-AppxPackage -Name Microsoft.MicrosoftOfficeHub | Select-Object -First 1
+$env:PRAXIS_TEST_M365_PATH = Join-Path $package.InstallLocation M365Copilot.exe
+$env:PRAXIS_NOT_HIDDEN = '1'
+cargo test -p praxis_node agent_connectors::lua::tests::m365_real_session_connects_to_chat_input -- --ignored --exact --nocapture --test-threads=1
+```
+
+This uses the production connector to close existing Copilot processes, launch
+the app, create a CDP session, and check for the chat input. It closes the test
+session afterward. It does not send a prompt or read account or chat contents.
+A connected session with no chat input is reported separately from a connection
+failure; check sign-in and chat navigation before retrying.
 
 ### Testing Connectors
 

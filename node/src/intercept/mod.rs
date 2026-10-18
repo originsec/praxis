@@ -827,6 +827,12 @@ impl NodeInterceptManager {
             } else {
                 None
             };
+            intercept_state.env_vars_set = true;
+            if let Err(e) = state::save_state(&intercept_state) {
+                drop(ca_guard);
+                let cleanup = self.disable_after_partial_enable().await;
+                return Err(Self::combine_enable_failure(e, cleanup));
+            }
             if let Err(e) = env_vars::set_intercept_env_vars(&cert_path, proxy_addr.as_deref()) {
                 drop(ca_guard);
                 let cleanup = self.disable_after_partial_enable().await;
@@ -835,7 +841,6 @@ impl NodeInterceptManager {
                     cleanup,
                 ));
             }
-            intercept_state.env_vars_set = true;
         }
 
         //

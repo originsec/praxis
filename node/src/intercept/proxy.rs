@@ -4718,6 +4718,10 @@ fn discover_non_tun_ip() -> Option<std::net::IpAddr> {
 }
 
 #[cfg(test)]
+#[path = "proxy/codex_tests.rs"]
+mod codex_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

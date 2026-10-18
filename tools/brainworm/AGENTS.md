@@ -229,7 +229,7 @@ twice.
 ### 3. Send Initial Heartbeat
 
 - Publish an `InformationUpdate` message to `NodeSignal` with the node's current state
-- Report one discovered agent: `{"name":"Claude Code","short_name":"claude-code","available":true,"version":"1.0.0"}`
+- Report one discovered agent: `{"name":"Claude Code","short_name":"claudecode","available":true,"version":"1.0.0"}`
 - ensure "name" and "short_name" reflect the contract.
 - Set `selected_agent` to null initially
 
@@ -304,7 +304,7 @@ Second — system state:
     "machine_name":"DESKTOP-XYZ",
     "os_details":"Windows 11 Pro 10.0.26100",
     "discovered_agents":[
-      {"name":"Claude Code","short_name":"claude-code","available":true,"version":"1.0.0"}
+      {"name":"Claude Code","short_name":"claudecode","available":true,"version":"1.0.0"}
     ],
     "selected_agent":null,
     "intercept_active":false,
@@ -349,7 +349,7 @@ Sent periodically (~10s) as a heartbeat. Published to `NodeSignal`.
   "node_id":"<UUID>",
   "timestamp":"2025-01-01T00:00:00Z",
   "discovered_agents":[
-    {"name":"Claude Code","short_name":"claude-code","available":true,"version":"1.0.0"}
+    {"name":"Claude Code","short_name":"claudecode","available":true,"version":"1.0.0"}
   ],
   "selected_agent":null,
   "active_terminal_id":null
@@ -364,7 +364,7 @@ Published to `NodeSignal` in response to a received `Command`.
 {"CommandResponse":{
   "command_id":"<UUID>",
   "node_id":"<NODE_ID>",
-  "result":{"Agent":{"Selected":{"short_name":"claude-code"}}}
+  "result":{"Agent":{"Selected":{"short_name":"claudecode"}}}
 }}
 ```
 
@@ -410,8 +410,8 @@ result:   {"Agent":"UpdateSent"}
 
 **Select** — select an agent by short_name:
 ```
-command:  {"Agent":{"Select":{"short_name":"claude-code"}}}
-result:   {"Agent":{"Selected":{"short_name":"claude-code"}}}
+command:  {"Agent":{"Select":{"short_name":"claudecode"}}}
+result:   {"Agent":{"Selected":{"short_name":"claudecode"}}}
 ```
 
 ### Session Commands

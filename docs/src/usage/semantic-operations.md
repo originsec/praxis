@@ -218,10 +218,27 @@ triggers, see [Chain Triggers](#chain-triggers) below.
 
 **Memory** - Stores or retrieves data by key (mode is store or retrieve). Store passes data through unchanged; retrieve loads a previously stored key.
 
-**Loop** - Controls retries. `max_iterations` is the number of times the
-retry path may run: port `r` (0) fires on each retry and port `x` (1) fires
-once the retries are exhausted. For example, with `max_iterations: 1`, the
-Loop takes `r` once and then takes `x` on its next visit.
+**Loop** - Repeats a body, feeding its latest output into the next pass.
+Connect the body's final element to the Loop, port `r` (0) back to the body's
+first element, and port `x` (1) to the next step after the loop.
+`max_iterations` counts total completed body passes, including the first pass
+before reaching the Loop. With `max_iterations: 3`, the Loop takes `r` twice,
+then takes `x` after the third pass. With `max_iterations: 1`, it exits on its
+first visit without repeating the body.
+
+Both ports carry the most recent body output: `r` feeds it back into the body,
+and `x` sends the final pass's result to the exit branch. Each element rebuilds
+its input from the latest outputs on its active incoming connections; other
+incoming edges (such as the Trigger) remain additional context, separated by
+`---`. A repeated body waits for its current pass's branches; results from
+branches skipped on a later pass are discarded. Nested Loops start their counts
+over when their enclosing body repeats. Session groups retain conversation
+history while their session remains open, as usual.
+
+Previously, Loop cached first-pass inputs and treated `max_iterations` as a
+retry count, resulting in one extra body pass. Existing chains that need the
+same number of passes should increase their old `max_iterations` value by one;
+repeated bodies now receive the latest output instead of a fixed first input.
 
 **Tool** - Invokes a registered toolkit tool (picker lists known tools; params are JSON).
 

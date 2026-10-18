@@ -1112,7 +1112,7 @@ pub enum ChainElement {
         key: String,
         mode: MemoryMode,
     },
-    /// Loop element - retries via port 0 until max_iterations, then exits via port 1
+    /// Loop element - repeats via port 0; exits via port 1 after max_iterations total body passes
     Loop { id: String, max_iterations: u32 },
     /// Tool element - invokes a registered toolkit tool
     Tool {

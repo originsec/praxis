@@ -315,6 +315,7 @@ async fn run_command(
         c.arg("-c").arg(command);
         c
     };
+    crate::intercept::env_vars::apply_to_command(cmd.as_std_mut());
     crate::utils::silence_tokio_command(&mut cmd);
 
     if let Some(dir) = working_dir.filter(|d| !d.trim().is_empty()) {

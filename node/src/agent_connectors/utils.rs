@@ -258,6 +258,7 @@ pub fn build_command(path: &str) -> Command {
         Command::new(path)
     };
 
+    crate::intercept::env_vars::apply_to_command(&mut cmd);
     cmd.env("PATH", new_path);
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
@@ -265,7 +266,9 @@ pub fn build_command(path: &str) -> Command {
 
 #[cfg(not(windows))]
 pub fn build_command(path: &str) -> Command {
-    Command::new(path)
+    let mut cmd = Command::new(path);
+    crate::intercept::env_vars::apply_to_command(&mut cmd);
+    cmd
 }
 
 //
