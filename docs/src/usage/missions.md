@@ -87,6 +87,10 @@ same mission. Planning, waiting, and checkpoint calls are not evidence of an
 external outcome. Original tool results remain in the event journal when model
 context is compacted.
 
+The verifier receives a service-recorded receipt for each successful checkpoint
+call. It proves that the checkpoint was saved, while the findings inside the
+checkpoint still require separate observed evidence.
+
 Context compaction retains the objective, pinned checkpoint, recent complete tool
 exchanges, and bounded extracts from older context. Extracts are explicitly
 incomplete. Token estimates are conservative byte-based estimates, not a

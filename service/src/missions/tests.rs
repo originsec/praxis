@@ -488,6 +488,49 @@ async fn verifier_cannot_complete_a_mission_using_invented_evidence_ids() {
 }
 
 #[tokio::test]
+async fn verifier_sees_checkpoint_persistence_without_trusting_its_findings() {
+    let fixture = Fixture::new().await;
+    let record = record();
+    fixture.database.insert_mission(&record).await.unwrap();
+    fixture
+        .database
+        .append_mission_event(
+            &record.mission.id,
+            "tool_result",
+            json!({
+                "tool_id": "checkpoint-call",
+                "name": "mission_checkpoint",
+                "is_error": false,
+                "result": "{\"summary\":\"unverified claim\",\"evidence\":[\"invented\"]}",
+            }),
+        )
+        .await
+        .unwrap();
+    fixture
+        .database
+        .append_mission_event(
+            &record.mission.id,
+            "tool_result",
+            json!({
+                "tool_id": "failed-checkpoint",
+                "name": "mission_checkpoint",
+                "is_error": true,
+                "result": "Not saved",
+            }),
+        )
+        .await
+        .unwrap();
+
+    let evidence = fixture.manager.evidence(&record).await.unwrap();
+    let (text, shown) = verification_evidence(&evidence, &record.mission.checkpoint);
+    assert_eq!(shown.len(), 1);
+    assert!(text.contains("checkpoint-call: "));
+    assert!(text.contains("Checkpoint persisted by the mission service"));
+    assert!(!text.contains("unverified claim"));
+    assert!(!shown.contains_key("failed-checkpoint"));
+}
+
+#[tokio::test]
 async fn truncated_model_tool_calls_are_rejected_before_dispatch() {
     let sse = format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
