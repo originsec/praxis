@@ -5,14 +5,14 @@ local M = {}
 -- string for use with other devtools/cdp functions.
 --
 -- Two modes for enabling the debug port:
---   WebView2: set debug_port_env_var + debug_port_format (env var)
---   Electron: set debug_port_cli_arg (CLI argument)
+--   Environment: set debug_port_env_var + debug_port_format
+--   CLI: set debug_port_cli_arg (Electron or M365 Copilot WebView2)
 --
 -- config fields:
 --   process_path        (string)  Path to the executable
 --   debug_port_env_var  (string?) Env var for debug port (WebView2)
 --   debug_port_format   (string?) Format string for env var value
---   debug_port_cli_arg  (string?) CLI arg format string (Electron)
+--   debug_port_cli_arg  (string?) CLI arg format string
 --   base_port           (number)  Base port number
 --   port_range          (number)  Random port range (default 778)
 --   kill_existing       (bool?)   Kill existing processes first (default true)

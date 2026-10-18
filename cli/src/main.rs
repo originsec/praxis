@@ -5,6 +5,7 @@ mod clipboard;
 mod commands;
 mod config;
 mod event;
+mod editor;
 mod intercept_live;
 mod keymap;
 mod markdown;
@@ -489,21 +490,14 @@ async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let terminal_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let terminal_resume = Arc::new(tokio::sync::Notify::new());
-    let mut events = EventHandler::new(
-        client.clone(),
-        terminal_paused.clone(),
-        terminal_resume.clone(),
-    );
+    let mut events = EventHandler::new(client.clone());
     let mut app = App::new(
         client.clone(),
         rabbitmq_url.to_string(),
         client_id,
         events.sender(),
     );
-    app.terminal_paused = terminal_paused;
-    app.terminal_resume = terminal_resume;
+    app.terminal_input = Some(events.terminal_input.clone());
     if let Some(stored) = resume {
         app.seed_orchestrator_resume(stored);
     }

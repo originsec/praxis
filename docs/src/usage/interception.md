@@ -59,9 +59,21 @@ multi-agent attribution.
 
 Lines starting with `#` are ignored. To disable a target without
 deleting it, comment out the entire section. Praxis ships built-in
-targets for the bundled connectors (Claude Code, Claude Desktop,
+targets for the bundled connectors (Claude Code, Claude Desktop, Codex,
 Cursor, Droid, Gemini, M365 Copilot); the defaults are seeded on first
 boot.
+
+The Codex target covers `api.openai.com`, `auth.openai.com`, and `chatgpt.com`
+without a URL filter, including login and secure WebSocket traffic. To add it
+to a target file saved before Codex support, insert:
+
+```toml
+[codex]
+domains = ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+```
+
+Alternatively, reset the file to the built-in defaults. Add custom provider
+hostnames when Codex uses a different API endpoint.
 
 ### Managing targets
 
@@ -545,6 +557,10 @@ This tool is designed for research, not covert operations.
 
 - Some apps have pinned certificates
 - Node.js: Set `NODE_EXTRA_CA_CERTS`
+- Codex: Praxis supplies `CODEX_CA_CERTIFICATE`; restart existing Codex CLI or
+  app-server processes after changing interception. Open a new terminal before
+  manually restarting them so they inherit the updated environment. This setting
+  covers HTTPS, login, and WebSockets and takes precedence over `SSL_CERT_FILE`.
 - Python: Set `REQUESTS_CA_BUNDLE`
 - Browsers may need manual cert import
 

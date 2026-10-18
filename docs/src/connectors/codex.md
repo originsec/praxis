@@ -34,7 +34,27 @@ The binary is verified by running `codex --version` and checking the output cont
 
 ## Interception
 
-Traffic interception is not yet supported for this connector.
+Traffic interception supports Codex CLI and app-server HTTPS and secure
+WebSocket requests. The built-in `codex` target includes:
+
+- `api.openai.com` — API requests, including Responses WebSockets.
+- `auth.openai.com` — sign-in and token refresh.
+- `chatgpt.com` — ChatGPT-backed Codex requests and WebSockets.
+
+There is no URL filter, so authentication and WebSocket handshakes are captured
+alongside model requests. For a custom provider, add its hostname to the target
+in **Settings → Intercept**. Existing saved target files are preserved during
+upgrades: add the `[codex]` section or reset to the built-in defaults.
+
+Praxis configures `CODEX_CA_CERTIFICATE` with its exported CA bundle when
+interception is enabled. Codex uses this setting for HTTPS, login, and secure
+WebSockets; it takes precedence over `SSL_CERT_FILE`. See
+[OpenAI's custom CA documentation](https://learn.chatgpt.com/docs/auth#custom-ca-bundles).
+Restart existing Codex processes after enabling or disabling interception so
+their TLS clients pick up the changed environment. For manually launched clients,
+open a new terminal first: an existing shell retains its earlier environment.
+Praxis-launched clients receive the current settings directly. Disabling
+interception restores the saved user-environment values.
 
 ## Authentication
 

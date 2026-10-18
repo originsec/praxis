@@ -324,6 +324,59 @@ mod tests {
     }
 
     #[test]
+    fn m365_session_and_recon_launch_with_webview_switch() {
+        let lua = mlua::Lua::new();
+        lua.load(
+            r#"
+            calls = {}
+            closed = {}
+            praxis = {
+                os_name = function() return "windows" end,
+                kill_processes_by_name = function() end,
+                sleep_ms = function() end,
+                cdp_wait_for_element = function() return false end,
+                cdp_process_id = function() return nil end,
+                cdp_evaluate = function() return { hasWork = true, hasWeb = true } end,
+                release_desktop = function(handle) table.insert(closed, handle) end,
+                log_info = function() end,
+                log_warn = function() end,
+            }
+            package.preload["praxis.devtools"] = function()
+                return {
+                    connect = function(config)
+                        table.insert(calls, config)
+                        return "cdp", "desktop"
+                    end,
+                    close = function(handle) table.insert(closed, handle) end,
+                }
+            end
+        "#,
+        )
+        .exec()
+        .unwrap();
+        let connector: mlua::Table = lua
+            .load(include_str!("../../../../agents/m365copilot.lua"))
+            .eval()
+            .unwrap();
+        lua.globals().set("connector", connector).unwrap();
+        lua.load(r#"
+            local ctx = { process_path = "C:\\Program Files\\M365Copilot.exe", working_dir = "Work" }
+            local session = connector.create_session(ctx)
+            connector.session_close(ctx, session)
+            local recon = connector.recon(ctx)
+            assert(#calls == 2)
+            for _, config in ipairs(calls) do
+                assert(config.process_path == ctx.process_path)
+                assert(config.debug_port_cli_arg == "--edge-webview-switches=--remote-debugging-port={}")
+                assert(config.debug_port_env_var == nil)
+                assert(config.base_port == 9250 and config.port_range == 100)
+            end
+            assert(#recon.config.project_paths == 2)
+            assert(table.concat(closed, ",") == "cdp,desktop,cdp,desktop")
+        "#).exec().unwrap();
+    }
+
+    #[test]
     fn claudecode_recon_uses_historical_session_cwds() {
         let script = EMBEDDED_LUA_SCRIPTS
             .iter()

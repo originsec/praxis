@@ -144,7 +144,20 @@ cargo test
 
 ### Integration Tests
 
-Run the full stack and test manually. Automated integration tests are on the roadmap.
+Run the full stack for end-to-end checks of service, node, and TUI behavior.
+
+With Codex CLI installed, run the interception regressions explicitly:
+
+```bash
+cargo test -p praxis_node intercept::proxy::codex_tests -- --ignored
+```
+
+Set `PRAXIS_CODEX_BIN` to test a binary outside `PATH`. These tests launch Codex
+CLI and app-server with isolated temporary state and synthetic credentials.
+Local TLS fixtures exercise Praxis's HTTP and WebSocket relay, complete a
+device-login exchange, and verify that the CA must be trusted. They do not
+change system certificates, routes, or proxy settings. Host configuration and
+enable/disable behavior require separate platform checks.
 
 ### Testing Connectors
 

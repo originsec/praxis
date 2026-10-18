@@ -56,47 +56,14 @@ impl App {
             }
         }
 
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
         //
         // Pause the event reader and suspend the terminal so the editor
         // can take over stdin/stdout without interference.
         //
 
-        self.terminal_paused
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        crossterm::terminal::disable_raw_mode().ok();
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen,
-        )
-        .ok();
-
-        let status = std::process::Command::new(&editor).arg(&path).status();
-
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
-            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
-        )
-        .ok();
-        crossterm::terminal::enable_raw_mode().ok();
-        self.terminal_paused
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.terminal_resume.notify_one();
-
-        //
-        // Drain any buffered terminal events so stale keypresses from the
-        // editor (e.g. the Enter from :q!) don't get processed by the TUI.
-        //
-
-        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
-            let _ = crossterm::event::read();
-        }
-
-        self.needs_full_redraw = true;
+        let status = self.run_external_editor(&editor, &path);
 
         match status {
             Ok(s) if s.success() => {

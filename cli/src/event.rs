@@ -1,16 +1,15 @@
 use crate::acp::AcpNotification;
 use crate::client::Client;
-use crate::intercept_live::{try_push_bounded, LivePushResult, INTERCEPT_LIVE_CAPACITY};
+use crate::intercept_live::{INTERCEPT_LIVE_CAPACITY, LivePushResult, try_push_bounded};
 use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
     InterceptRule, InterceptStatus, InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult,
     SemanticOpUpdate, SystemState, TerminalOutput, TrafficMatchWithDetails,
 };
-use crossterm::event::{Event, EventStream};
-use futures_util::StreamExt;
+use crossterm::event::Event;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::mpsc;
 
 pub enum AppEvent {
     Terminal(Event),
@@ -81,7 +80,10 @@ pub enum AppEvent {
     /// TrafficGet returned an entry with no bodies — plant empty sentinel.
     InterceptBodyFetchEmpty(i64),
     /// Body fetch failed — clear inflight so retry works and surface the error.
-    InterceptBodyFetchFailed { id: i64, message: String },
+    InterceptBodyFetchFailed {
+        id: i64,
+        message: String,
+    },
     /// Outcome of an enable/disable toggle run off the event loop.
     InterceptToggleResult {
         node_id: String,
@@ -163,7 +165,115 @@ pub enum SessionResult {
     },
 }
 
+enum TerminalCommand {
+    Pause {
+        ack: std::sync::mpsc::Sender<()>,
+        active: Arc<AtomicBool>,
+    },
+    Resume,
+}
+
+#[derive(Clone)]
+pub(crate) struct TerminalInput {
+    commands: std::sync::mpsc::Sender<TerminalCommand>,
+}
+
+pub(crate) struct TerminalPause {
+    input: TerminalInput,
+    active: Arc<AtomicBool>,
+}
+
+impl TerminalInput {
+    pub(crate) fn pause(&self) -> std::io::Result<TerminalPause> {
+        let pause = TerminalPause {
+            input: self.clone(),
+            active: Arc::new(AtomicBool::new(true)),
+        };
+        let (ack, acknowledged) = std::sync::mpsc::channel();
+        self.commands
+            .send(TerminalCommand::Pause {
+                ack,
+                active: pause.active.clone(),
+            })
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal reader stopped")
+            })?;
+        acknowledged
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("terminal reader did not pause: {error}"),
+                )
+            })?;
+        Ok(pause)
+    }
+}
+
+impl Drop for TerminalPause {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+        let _ = self.input.commands.send(TerminalCommand::Resume);
+    }
+}
+
+//
+// Own all TUI terminal reads on one thread. A pause is acknowledged only
+// between bounded reads, so an external editor can take stdin without a
+// pending EventStream worker stealing its keys. Resume is sent by the guard
+// after terminal restoration and input draining have both finished.
+//
+
+fn run_terminal_reader(
+    commands: std::sync::mpsc::Receiver<TerminalCommand>,
+    mut read: impl FnMut(std::time::Duration) -> std::io::Result<Option<Event>>,
+    mut forward: impl FnMut(Event) -> bool,
+    closed: impl Fn() -> bool,
+) {
+    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+    use std::time::Duration;
+
+    let interval = Duration::from_millis(50);
+    let mut pauses: Vec<Arc<AtomicBool>> = Vec::new();
+    while !closed() {
+        pauses.retain(|active| active.load(Ordering::Acquire));
+        let command = if !pauses.is_empty() {
+            match commands.recv_timeout(interval) {
+                Ok(command) => Some(command),
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match commands.try_recv() {
+                Ok(command) => Some(command),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        };
+        match command {
+            Some(TerminalCommand::Pause { ack, active }) => {
+                if ack.send(()).is_ok() {
+                    pauses.push(active);
+                }
+                continue;
+            }
+            Some(TerminalCommand::Resume) => continue,
+            None => {}
+        }
+        match read(interval) {
+            Ok(Some(event)) => {
+                if !forward(event) {
+                    break;
+                }
+            }
+            Ok(None) => {}
+            Err(_) => std::thread::sleep(interval),
+        }
+    }
+}
+
 pub struct EventHandler {
+    pub(crate) terminal_input: TerminalInput,
     rx: mpsc::UnboundedReceiver<AppEvent>,
     tx: mpsc::UnboundedSender<AppEvent>,
     //
@@ -185,43 +295,27 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(
-        client: Arc<Client>,
-        terminal_paused: Arc<AtomicBool>,
-        terminal_resume: Arc<Notify>,
-    ) -> Self {
+    pub fn new(client: Arc<Client>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let (intercept_tx, intercept_rx) = mpsc::channel(INTERCEPT_LIVE_CAPACITY);
         let intercept_drop_counter = Arc::new(AtomicU64::new(0));
-
-        //
-        // Terminal events from crossterm. The reader suspends when
-        // terminal_paused is set (e.g. while an external editor is open)
-        // so it doesn't steal stdin from the child process.
-        //
+        let (commands, command_rx) = std::sync::mpsc::channel();
+        let terminal_input = TerminalInput { commands };
         let tx_term = tx.clone();
-        let paused_clone = terminal_paused.clone();
-        let resume_clone = terminal_resume.clone();
-        tokio::spawn(async move {
-            let mut reader = EventStream::new();
-            loop {
-                if paused_clone.load(Ordering::Relaxed) {
-                    resume_clone.notified().await;
-                    continue;
-                }
-                match reader.next().await {
-                    Some(Ok(event)) => {
-                        if paused_clone.load(Ordering::Relaxed) {
-                            continue;
-                        }
-                        if tx_term.send(AppEvent::Terminal(event)).is_err() {
-                            break;
-                        }
+        let tx_closed = tx.clone();
+        std::thread::spawn(move || {
+            run_terminal_reader(
+                command_rx,
+                |timeout| {
+                    if crossterm::event::poll(timeout)? {
+                        crossterm::event::read().map(Some)
+                    } else {
+                        Ok(None)
                     }
-                    Some(Err(_)) => continue,
-                    None => break,
-                }
-            }
+                },
+                |event| tx_term.send(AppEvent::Terminal(event)).is_ok(),
+                || tx_closed.is_closed(),
+            );
         });
 
         //
@@ -399,6 +493,7 @@ impl EventHandler {
         });
 
         Self {
+            terminal_input,
             rx,
             tx: tx_for_app,
             intercept_rx,
@@ -458,5 +553,106 @@ impl EventHandler {
                 event = self.rx.recv() => return event,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod terminal_reader_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::sync::{Mutex, atomic::AtomicUsize, mpsc as sync_mpsc};
+    use std::time::Duration;
+
+    #[test]
+    fn acknowledged_pause_leaves_single_enter_for_editor_and_resumes_on_drop() {
+        let (commands, command_rx) = sync_mpsc::channel();
+        let input = TerminalInput { commands };
+        let (keys, key_rx) = sync_mpsc::channel();
+        let key_rx = Arc::new(Mutex::new(key_rx));
+        let reader_keys = key_rx.clone();
+        let (forwarded, events) = sync_mpsc::channel();
+        let (started, reading) = sync_mpsc::channel();
+        let read_count = Arc::new(AtomicUsize::new(0));
+        let reader_count = read_count.clone();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let reader_stopped = stopped.clone();
+        let worker = std::thread::spawn(move || {
+            run_terminal_reader(
+                command_rx,
+                |timeout| {
+                    reader_count.fetch_add(1, Ordering::Relaxed);
+                    let _ = started.send(());
+                    Ok(reader_keys.lock().unwrap().recv_timeout(timeout).ok())
+                },
+                |event| forwarded.send(event).is_ok(),
+                || reader_stopped.load(Ordering::Acquire),
+            );
+        });
+        reading.recv_timeout(Duration::from_secs(1)).unwrap();
+        let pause = input.pause().unwrap();
+        let reads_before = read_count.load(Ordering::Relaxed);
+        let enter = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        keys.send(enter.clone()).unwrap();
+
+        //
+        // A second acknowledged pause proves the reader is servicing control
+        // messages while the editor has stdin, without polling away its Enter.
+        //
+        let nested_pause = input.pause().unwrap();
+        assert_eq!(read_count.load(Ordering::Relaxed), reads_before);
+        assert_eq!(key_rx.lock().unwrap().try_recv().unwrap(), enter);
+        assert!(events.try_recv().is_err());
+        drop(nested_pause);
+        drop(pause);
+
+        let next = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        keys.send(next.clone()).unwrap();
+        assert_eq!(events.recv_timeout(Duration::from_secs(1)).unwrap(), next);
+        stopped.store(true, Ordering::Release);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn pause_acknowledgment_waits_for_pending_read_and_shutdown_works_while_paused() {
+        let (commands, command_rx) = sync_mpsc::channel();
+        let input = TerminalInput { commands };
+        let (started, reading) = sync_mpsc::channel();
+        let (release, pending_read) = sync_mpsc::channel();
+        let (finished, done) = sync_mpsc::channel();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let reader_stopped = stopped.clone();
+        let worker = std::thread::spawn(move || {
+            run_terminal_reader(
+                command_rx,
+                |_| {
+                    started.send(()).unwrap();
+                    pending_read.recv_timeout(Duration::from_secs(1)).unwrap();
+                    Ok(None)
+                },
+                |_| true,
+                || reader_stopped.load(Ordering::Acquire),
+            );
+            finished.send(()).unwrap();
+        });
+        reading.recv_timeout(Duration::from_secs(1)).unwrap();
+        let pause = TerminalPause {
+            input: input.clone(),
+            active: Arc::new(AtomicBool::new(true)),
+        };
+        let (ack, acknowledged) = sync_mpsc::channel();
+        input
+            .commands
+            .send(TerminalCommand::Pause {
+                ack,
+                active: pause.active.clone(),
+            })
+            .unwrap();
+        assert!(acknowledged.try_recv().is_err());
+        release.send(()).unwrap();
+        acknowledged.recv_timeout(Duration::from_secs(1)).unwrap();
+        stopped.store(true, Ordering::Release);
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+        drop(pause);
+        worker.join().unwrap();
     }
 }

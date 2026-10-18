@@ -154,7 +154,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 //
 // Supports two modes:
 //   - Environment variable (WebView2): set debug_port_env_var + debug_port_format
-//   - CLI argument (Electron): set debug_port_cli_arg
+//   - CLI argument (Electron/M365 Copilot): set debug_port_cli_arg
 //
 // Config table fields:
 //   process_path        (string)  Path to the executable

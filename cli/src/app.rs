@@ -49,6 +49,38 @@ pub enum Window {
     Settings,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyCapture {
+    Global,
+    Help,
+    Terminal,
+    Recon,
+    Confirm,
+    RunOptions,
+    NewOp,
+    Chain,
+    Trigger,
+    Model,
+    AddRemoteNode,
+    Rule,
+    SettingsDropdown,
+    Popup,
+}
+
+impl KeyCapture {
+    pub(crate) fn allows_navigation(self) -> bool {
+        self == Self::Global
+    }
+
+    pub(crate) fn allows_help(self) -> bool {
+        self != Self::Help
+    }
+
+    pub(crate) fn allows_quit(self) -> bool {
+        matches!(self, Self::Global | Self::Terminal)
+    }
+}
+
 pub struct App {
     pub active_window: Window,
     pub orchestrator: OrchestratorState,
@@ -77,8 +109,7 @@ pub struct App {
     pub rendered_buffer: RefCell<Buffer>,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
     pub needs_full_redraw: bool,
-    pub terminal_paused: Arc<std::sync::atomic::AtomicBool>,
-    pub terminal_resume: Arc<tokio::sync::Notify>,
+    pub terminal_input: Option<crate::event::TerminalInput>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
     //
     // Hit-test geometry stashed by the chain form renderer so the mouse
@@ -459,8 +490,7 @@ impl App {
             rendered_buffer: RefCell::new(Buffer::default()),
             event_tx: Some(event_tx),
             needs_full_redraw: false,
-            terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            terminal_resume: Arc::new(tokio::sync::Notify::new()),
+            terminal_input: None,
             last_click: None,
             chain_form_hits: std::cell::RefCell::new(Default::default()),
             hit_layer: RefCell::new(Default::default()),
@@ -1157,6 +1187,40 @@ impl App {
             && self.operations.last_live_duration_redraw.elapsed() >= Duration::from_secs(1)
     }
 
+    pub(crate) fn key_capture(&self) -> KeyCapture {
+        if self.help.open {
+            KeyCapture::Help
+        } else if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
+            KeyCapture::Terminal
+        } else if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
+            KeyCapture::Recon
+        } else if self.confirm.is_some() {
+            KeyCapture::Confirm
+        } else if self.run_options.is_some() {
+            KeyCapture::RunOptions
+        } else if self.new_op_form.is_some() {
+            KeyCapture::NewOp
+        } else if self.chain_form.is_some() {
+            KeyCapture::Chain
+        } else if self.trigger_form.is_some() {
+            KeyCapture::Trigger
+        } else if self.settings.model_form.is_some() {
+            KeyCapture::Model
+        } else if self.add_remote_node_form.is_some() {
+            KeyCapture::AddRemoteNode
+        } else if self.intercept.rule_form.is_some() {
+            KeyCapture::Rule
+        } else if self.settings.dropdown_open {
+            KeyCapture::SettingsDropdown
+        } else if self.popup.as_ref().is_some_and(|popup| {
+            matches!(popup.kind, PopupKind::ModelSelect | PopupKind::SaveSession)
+        }) {
+            KeyCapture::Popup
+        } else {
+            KeyCapture::Global
+        }
+    }
+
     async fn handle_key(&mut self, key: KeyEvent) {
         if self.text_selection.is_some() {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -1172,13 +1236,8 @@ impl App {
             self.text_selection = None;
         }
 
-        //
-        // Documentation-helper overlay: Ctrl+H summons it from any window and
-        // while it is open it captures all keys. Handled before every other
-        // intercept (including terminal raw mode) so help is reachable from
-        // every screen.
-        //
-        if self.help.open {
+        let capture = self.key_capture();
+        if capture == KeyCapture::Help {
             self.handle_help_key(key).await;
             return;
         }
@@ -1187,98 +1246,27 @@ impl App {
             return;
         }
 
-        //
-        // Terminal mode intercepts all keys except ^q when Nodes window active.
-        // ^y toggles the terminal closed from inside the PTY view.
-        //
-        if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
-            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
-                self.should_quit = true;
-                return;
+        match capture {
+            KeyCapture::Terminal => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
+                    self.should_quit = true;
+                } else {
+                    self.handle_terminal_key(key).await;
+                }
             }
-            self.handle_terminal_key(key).await;
-            return;
+            KeyCapture::Recon => self.handle_recon_key(key).await,
+            KeyCapture::Confirm => self.handle_confirm_key(key).await,
+            KeyCapture::RunOptions => self.handle_run_options_key(key).await,
+            KeyCapture::NewOp => self.handle_new_op_form_key(key).await,
+            KeyCapture::Chain => self.handle_chain_form_key(key).await,
+            KeyCapture::Trigger => self.handle_trigger_form_key(key).await,
+            KeyCapture::Model => self.handle_model_form_key(key).await,
+            KeyCapture::AddRemoteNode => self.handle_add_remote_node_form_key(key).await,
+            KeyCapture::Rule => self.handle_rule_form_key(key).await,
+            KeyCapture::SettingsDropdown => self.handle_settings_key(key).await,
+            KeyCapture::Help | KeyCapture::Global | KeyCapture::Popup => {}
         }
-
-        //
-        // Recon overlay intercepts all keys while open.
-        //
-        if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
-            self.handle_recon_key(key).await;
-            return;
-        }
-
-        //
-        // Confirm dialog intercepts all keys.
-        //
-        if self.confirm.is_some() {
-            self.handle_confirm_key(key).await;
-            return;
-        }
-
-        //
-        // Run options form intercepts all keys.
-        //
-        if self.run_options.is_some() {
-            self.handle_run_options_key(key).await;
-            return;
-        }
-
-        //
-        // New op form intercepts all keys.
-        //
-        if self.new_op_form.is_some() {
-            self.handle_new_op_form_key(key).await;
-            return;
-        }
-
-        //
-        // Chain builder form intercepts all keys.
-        //
-        if self.chain_form.is_some() {
-            self.handle_chain_form_key(key).await;
-            return;
-        }
-
-        //
-        // Trigger create/edit form intercepts all keys.
-        //
-        if self.trigger_form.is_some() {
-            self.handle_trigger_form_key(key).await;
-            return;
-        }
-
-        //
-        // Model edit form intercepts all keys.
-        //
-        if self.settings.model_form.is_some() {
-            self.handle_model_form_key(key).await;
-            return;
-        }
-
-        //
-        // Add-remote-node form intercepts all keys (including ^s save)
-        // before the window-switching shortcuts fire.
-        //
-        if self.add_remote_node_form.is_some() {
-            self.handle_add_remote_node_form_key(key).await;
-            return;
-        }
-
-        //
-        // Intercept rule create/edit form: same priority as other
-        // modals so ^s saves instead of opening Settings.
-        //
-        if self.intercept.rule_form.is_some() {
-            self.handle_rule_form_key(key).await;
-            return;
-        }
-
-        //
-        // Settings dropdown intercepts all keys.
-        //
-        if self.settings.dropdown_open {
-            self.handle_settings_key(key).await;
+        if !matches!(capture, KeyCapture::Global | KeyCapture::Popup) {
             return;
         }
 
@@ -1931,6 +1919,19 @@ impl App {
         }
     }
 
+    pub(crate) fn run_external_editor(
+        &mut self,
+        editor: &str,
+        path: &std::path::Path,
+    ) -> std::io::Result<std::process::ExitStatus> {
+        let input = self.terminal_input.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotConnected, "terminal reader unavailable")
+        })?;
+        let result = crate::editor::run(editor, path, input);
+        self.needs_full_redraw = true;
+        result
+    }
+
     //
     // Open the currently-selected Config item in $EDITOR. On a clean
     // exit with changed content, write the new buffer back to the node
@@ -2051,36 +2052,9 @@ impl App {
             return;
         }
 
-        let tmp_path = tmp.path().to_path_buf();
+        let tmp_path = tmp.into_temp_path();
 
-        self.terminal_paused
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        crossterm::terminal::disable_raw_mode().ok();
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen,
-        )
-        .ok();
-
-        let status = std::process::Command::new(&editor).arg(&tmp_path).status();
-
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture,
-            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-        )
-        .ok();
-        crossterm::terminal::enable_raw_mode().ok();
-        self.terminal_paused
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.terminal_resume.notify_one();
-
-        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
-            let _ = crossterm::event::read();
-        }
-        self.needs_full_redraw = true;
+        let status = self.run_external_editor(&editor, &tmp_path);
 
         let now = std::time::Instant::now();
 

@@ -14,7 +14,7 @@ pub enum SessionCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Agent short name (e.g. 'claude-code', 'codex')
+        /// Agent short name (e.g. 'claudecode', 'codex')
         #[arg(short, long)]
         agent: String,
 
