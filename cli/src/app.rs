@@ -174,6 +174,9 @@ pub enum ReconTab {
 pub enum ToolsSectionKind {
     Mcp,
     Skills,
+    Hooks,
+    Plugins,
+    Marketplaces,
     Internal,
 }
 
@@ -184,9 +187,14 @@ pub enum ReconNodeId {
     McpServer(usize),
     McpTool { server: usize, tool: usize },
     Skill(usize),
+    Hook(usize),
+    Plugin(usize),
+    Marketplace(usize),
     Internal(usize),
     ConfigType(String),
     ConfigItem(usize),
+    CredentialsGroup,
+    Credential(usize),
     SessionProject(String),
     SessionItem(usize),
 }
@@ -194,11 +202,10 @@ pub enum ReconNodeId {
 /// Keys for expand/collapse state (subset of branch nodes).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ReconExpandId {
-    ToolsMcp,
-    ToolsSkills,
-    ToolsInternal,
+    ToolsSection(ToolsSectionKind),
     McpServer(usize),
     ConfigType(String),
+    Credentials,
     SessionProject(String),
 }
 

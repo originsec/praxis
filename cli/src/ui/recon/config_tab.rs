@@ -29,7 +29,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay) {
     let result = overlay.recon_result.as_ref().unwrap();
     let (left, right) = super::common_two_pane_layout(area, overlay.recon_split_percent);
 
-    let title = format!(" Config ({}) ", result.config.items.len());
+    let title = format!(
+        " Config ({}) ",
+        result.config.items.len() + result.config.credentials.len()
+    );
     super::render_tree_left(f, left, app, overlay, &title);
     render_right_pane(f, right, overlay, result);
 }
@@ -41,12 +44,18 @@ fn render_right_pane(
     result: &common::ReconResult,
 ) {
     match overlay.selected {
-        Some(ReconNodeId::ConfigType(_)) => {
+        Some(ReconNodeId::ConfigType(_))
+        | Some(ReconNodeId::CredentialsGroup)
+        | Some(ReconNodeId::Credential(_)) => {
             let title = tree::detail_title(overlay);
             let block = focused_titled_panel(&title, overlay.right_pane_focused);
             let inner = block.inner(area);
             f.render_widget(block, area);
-            let lines = tree::config_type_detail_lines(overlay);
+            let lines = if matches!(overlay.selected, Some(ReconNodeId::ConfigType(_))) {
+                tree::config_type_detail_lines(overlay)
+            } else {
+                tree::credential_detail_lines(overlay)
+            };
             let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
             let total = paragraph.line_count(inner.width) as u16;
             let max_scroll = total.saturating_sub(inner.height);

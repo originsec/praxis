@@ -29,10 +29,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay) {
     let (left, right) = super::common_two_pane_layout(area, overlay.recon_split_percent);
 
     let tools = &overlay.recon_result.as_ref().unwrap().tools;
-    let title = format!(
-        " Tools ({}) ",
-        tools.mcp_servers.len() + tools.skills.len() + tools.internal_tools.len()
-    );
+    let title = format!(" Tools ({}) ", tools.total_count());
     super::render_tree_left(f, left, app, overlay, &title);
     render_right_pane(f, right, overlay);
 }
