@@ -112,6 +112,9 @@ fn render_settings_hints(f: &mut Frame, area: Rect, state: &SettingsState) {
         SettingsTab::Llm => {
             items.push(HintItem::new(action::DELETE, "delete model"));
         }
+        SettingsTab::Orchestrator => {
+            items.push(HintItem::new(action::DELETE, "delete playbook"));
+        }
         SettingsTab::Agents => {
             items.push(HintItem::new(action::SPACE, "toggle script"));
             items.push(HintItem::new(action::DELETE, "delete script"));

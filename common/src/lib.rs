@@ -9,10 +9,12 @@ pub mod log_query_schema;
 pub mod logging;
 pub mod mcp;
 pub mod messaging;
+pub mod playbook;
 pub mod remote_nodes;
 
 pub use logging::{init as init_logging, is_initialized as is_logging_initialized, send_event};
 pub use messaging::*;
+pub use playbook::PlaybookInfo;
 pub use intercept_match::{pattern_matches_entry, rule_matches_entry};
 
 pub use ai::{

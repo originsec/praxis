@@ -32,6 +32,7 @@ pub struct ServiceMcpClient {
     timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     trigger_operation_lock: Arc<Mutex<()>>,
+    playbook_lock: Arc<Mutex<()>>,
 }
 
 //
@@ -72,6 +73,7 @@ struct ClientState {
     pending_chain_create: Option<Result<ChainDefinitionInfo, String>>,
     pending_chain_trigger: Option<Result<PendingChainTriggerResult, String>>,
     pending_chain_trigger_kind: Option<PendingChainTriggerKind>,
+    pending_playbook: Option<Result<common::playbook::PlaybookReply, String>>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -110,6 +112,7 @@ impl ServiceMcpClient {
             timeout: Duration::from_secs(timeout_secs),
             state,
             trigger_operation_lock: Arc::new(Mutex::new(())),
+            playbook_lock: Arc::new(Mutex::new(())),
         };
 
         //
@@ -127,6 +130,11 @@ impl ServiceMcpClient {
         };
 
         let mut state = state.lock().await;
+
+        if let Some(reply) = common::playbook::PlaybookReply::from_message(&message) {
+            state.pending_playbook = Some(reply);
+            return;
+        }
 
         match message {
             ClientDirectMessage::RegistrationAck(_) => {}
@@ -543,6 +551,22 @@ impl ServiceMcpClient {
         };
 
         Ok((result, text))
+    }
+
+    //
+    // Send a playbook request and wait for its reply. Requests are
+    // serialized so a reply cannot be taken by a concurrent playbook call.
+    //
+    async fn playbook_request(
+        &self,
+        message: ClientSignalMessage,
+    ) -> Result<common::playbook::PlaybookReply> {
+        let _guard = self.playbook_lock.lock().await;
+        self.state.lock().await.pending_playbook = None;
+        self.publish_signal(message).await?;
+        self.poll_pending(50, |s| s.pending_playbook.take(), "playbook response")
+            .await?
+            .map_err(|e| anyhow!(e))
     }
 
     async fn begin_chain_trigger_request(&self, kind: PendingChainTriggerKind) {
@@ -1012,6 +1036,38 @@ impl McpClient for ServiceMcpClient {
         .await?
         .map(|_| ())
         .map_err(|e| anyhow!(e))
+    }
+
+    async fn list_playbooks(&self) -> Result<Vec<common::PlaybookInfo>> {
+        let message = ClientSignalMessage::PlaybookList {
+            client_id: self.client_id.clone(),
+        };
+        match self.playbook_request(message).await? {
+            common::playbook::PlaybookReply::List(list) => Ok(list),
+            _ => Err(anyhow!("Unexpected playbook response")),
+        }
+    }
+
+    async fn save_playbook(&self, content: String) -> Result<String> {
+        let message = ClientSignalMessage::PlaybookSave {
+            client_id: self.client_id.clone(),
+            content,
+        };
+        match self.playbook_request(message).await? {
+            common::playbook::PlaybookReply::Saved(name) => Ok(name),
+            _ => Err(anyhow!("Unexpected playbook response")),
+        }
+    }
+
+    async fn delete_playbook(&self, name: &str) -> Result<bool> {
+        let message = ClientSignalMessage::PlaybookDelete {
+            client_id: self.client_id.clone(),
+            name: name.to_string(),
+        };
+        match self.playbook_request(message).await? {
+            common::playbook::PlaybookReply::Deleted(success) => Ok(success),
+            _ => Err(anyhow!("Unexpected playbook response")),
+        }
     }
 
     async fn reset_node(&self, node_id: &str) -> Result<()> {

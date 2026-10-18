@@ -10,6 +10,7 @@ pub(crate) mod exec;
 mod intercept_targets;
 mod lua_agent_scripts;
 mod operations;
+mod playbooks;
 mod recon;
 mod remote_nodes;
 mod rules;
@@ -465,6 +466,29 @@ impl Database {
         }
 
         //
+        // Migration: orchestrator playbooks table for installs that predate
+        // it (the schema files create it for new databases).
+        //
+        let flag_type = match &self.pool {
+            DatabasePool::Sqlite(_) => "INTEGER",
+            DatabasePool::Postgres(_) => "SMALLINT",
+        };
+        let create_playbooks = format!(
+            "CREATE TABLE IF NOT EXISTS orchestrator_playbooks (
+                name TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_builtin {flag_type} NOT NULL DEFAULT 0,
+                version TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"
+        );
+        if let Err(e) = self.db_execute(&create_playbooks, vec![]).await {
+            common::log_warn!("Migration: failed to create orchestrator_playbooks: {}", e);
+        }
+
+        //
         // Migration: replace the legacy per-row `intercept_targets` table
         // with the TOML virtual file stored in service_config. Existing
         // customisations (including user-edited builtins) are preserved
@@ -719,6 +743,43 @@ mod foreign_key_tests {
             .await
             .expect("failed to open sqlite test db");
         TempDb { path, db }
+    }
+
+    #[tokio::test]
+    async fn playbook_crud_and_builtin_seeding() {
+        let t = temp_db().await;
+
+        crate::orchestrator::seed_builtin_playbooks(&t.db).await;
+        let seeded = t.db.list_playbooks().await.unwrap();
+        assert!(
+            seeded
+                .iter()
+                .any(|p| p.name == "fleet-recon" && p.is_builtin)
+        );
+
+        //
+        // An operator edit clears the built-in flag and survives a re-seed
+        // after an upgrade.
+        //
+        let edited = "---\nname: fleet-recon\ndescription: mine\n---\nbody\n";
+        t.db.upsert_playbook("fleet-recon", "mine", edited, false, None)
+            .await
+            .unwrap();
+        t.db.delete_config("builtin_playbooks_version").await.unwrap();
+        crate::orchestrator::seed_builtin_playbooks(&t.db).await;
+        let got = t.db.get_playbook("fleet-recon").await.unwrap().unwrap();
+        assert_eq!(got.content, edited);
+        assert!(!got.is_builtin);
+
+        assert!(t.db.delete_playbook("fleet-recon").await.unwrap());
+        assert!(t.db.get_playbook("fleet-recon").await.unwrap().is_none());
+        assert!(!t.db.delete_playbook("fleet-recon").await.unwrap());
+
+        //
+        // Without a version change, a deleted built-in is not re-added.
+        //
+        crate::orchestrator::seed_builtin_playbooks(&t.db).await;
+        assert!(t.db.get_playbook("fleet-recon").await.unwrap().is_none());
     }
 
     async fn match_row_count(db: &Database) -> i64 {

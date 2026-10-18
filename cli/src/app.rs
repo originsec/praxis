@@ -10,6 +10,7 @@ mod mouse_overlay;
 mod nodes;
 mod operations;
 mod orchestrator;
+mod playbooks;
 mod popups;
 mod settings;
 

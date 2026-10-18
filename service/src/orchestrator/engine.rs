@@ -14,6 +14,7 @@ use common::ai::{
 
 use super::approval::{ApprovalGate, Decision, PermissionRegistry, denied_result};
 use super::markers::ManualTextFilter;
+use super::playbooks::{LOAD_PLAYBOOK_TOOL, load_playbook};
 use super::tools::{
     execute_local_tool, execute_mcp_tool, execute_tool_calls_concurrent, result_is_error,
 };
@@ -21,6 +22,7 @@ use crate::acp_server::{
     session_update_plan, session_update_text, session_update_thought, session_update_tool_call,
     session_update_tool_result, session_update_usage,
 };
+use crate::database::Database;
 use crate::messaging::send_to_client;
 
 //
@@ -71,6 +73,7 @@ pub(super) struct SessionCtx {
     pub last_prompt_tokens: AtomicU64,
     pub gate: ApprovalGate,
     pub permissions: Arc<PermissionRegistry>,
+    pub db: Arc<Database>,
 }
 
 impl SessionCtx {
@@ -360,6 +363,10 @@ async fn execute_tool(
                 );
             }
         }
+    }
+
+    if name == LOAD_PLAYBOOK_TOOL {
+        return load_playbook(&ctx.db, args).await;
     }
 
     if let Some(local_result) = execute_local_tool(name, args).await {

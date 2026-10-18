@@ -25,6 +25,7 @@ tracing = "0.1"
 rmcp = { version = "1", features = ["server", "transport-io", "transport-streamable-http-server", "schemars"] }
 schemars = "1"
 uuid = { version = "1", features = ["v4"] }
+yaml-rust2 = "0.10"
 async-trait = "0.1"
 agent-client-protocol = { version = "0.11", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 

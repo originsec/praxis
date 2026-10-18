@@ -295,3 +295,14 @@ CREATE TABLE IF NOT EXISTS toolkit_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_execution ON toolkit_actions(execution_id);
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_created_at ON toolkit_actions(created_at DESC);
+
+-- Orchestrator playbooks (Agent Skills SKILL.md documents)
+CREATE TABLE IF NOT EXISTS orchestrator_playbooks (
+    name TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    version TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

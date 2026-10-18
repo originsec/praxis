@@ -29,6 +29,7 @@ pub enum ConfirmKind {
     ClearAllExecutions,
     DeleteModel(usize),        // index into model_definitions
     DeleteAgentScript(String), // script_id
+    DeletePlaybook(String),    // playbook name
     ResetAgentScripts,
     ResetInterceptTargets,
     ResetNode(String),  // node_id
@@ -187,6 +188,9 @@ impl App {
                 let _ = self.client.delete_lua_agent_script(script_id).await;
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
+            }
+            ConfirmKind::DeletePlaybook(name) => {
+                self.delete_playbook(&name).await;
             }
             ConfirmKind::ResetAgentScripts => {
                 let _ = self.client.reset_lua_agent_script_defaults().await;

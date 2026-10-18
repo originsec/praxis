@@ -313,6 +313,11 @@ async fn run_main_loop() -> Result<()> {
     }
 
     //
+    // Install or refresh the built-in orchestrator playbooks.
+    //
+    orchestrator::seed_builtin_playbooks(&database).await;
+
+    //
     // Seed the intercept-targets virtual file on first boot. The file is
     // a TOML document stored in service_config; existing customizations
     // are left untouched.
@@ -395,7 +400,7 @@ async fn run_main_loop() -> Result<()> {
     // Initialize Orchestrator manager, ACP server, and ACP node proxy.
     // The proxy is constructed first because several managers depend on it.
     //
-    let orchestrator_manager = Arc::new(OrchestratorManager::new());
+    let orchestrator_manager = Arc::new(OrchestratorManager::new(database.clone()));
     let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
     let acp_server = Arc::new(acp_server::AcpServer::new(
         orchestrator_manager.clone(),

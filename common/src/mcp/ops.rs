@@ -9,7 +9,7 @@ use crate::mcp::McpClient;
 use crate::{
     AgentFileType, AgentTool, ChainConnection, ChainDefinitionFull, ChainDefinitionInfo,
     ChainDefinitionInput, ChainElement, ChainExecutionUpdate, ChainTriggerInfo, ChainTriggerType,
-    ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo, SemanticOpUpdate,
+    ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo, PlaybookInfo, SemanticOpUpdate,
     SemanticOperationSpec, SessionItem, SystemState, TargetSpec, TriggerConfig,
 };
 
@@ -1035,6 +1035,40 @@ pub async fn trigger_toggle(
     let id = trigger.id.clone();
     let trigger = client.toggle_chain_trigger(id, enabled).await?;
     Ok((trigger.id, trigger.enabled))
+}
+
+//
+// Orchestrator playbooks.
+//
+
+pub async fn playbook_list(client: &impl McpClient) -> Result<Vec<PlaybookInfo>> {
+    client.list_playbooks().await
+}
+
+pub async fn playbook_get(client: &impl McpClient, name: &str) -> Result<PlaybookInfo> {
+    client
+        .list_playbooks()
+        .await?
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| anyhow!("No playbook named '{}'. Use playbook_list to see playbooks.", name))
+}
+
+//
+// Validate locally first so callers get the precise SKILL.md error without
+// a service round trip; the service validates again on save.
+//
+pub async fn playbook_save(client: &impl McpClient, content: String) -> Result<String> {
+    crate::playbook::parse_skill_md(&content).map_err(|e| anyhow!("Invalid SKILL.md: {}", e))?;
+    client.save_playbook(content).await
+}
+
+pub async fn playbook_delete(client: &impl McpClient, name: &str) -> Result<()> {
+    if client.delete_playbook(name).await? {
+        Ok(())
+    } else {
+        Err(anyhow!("No playbook named '{}'", name))
+    }
 }
 
 #[cfg(test)]

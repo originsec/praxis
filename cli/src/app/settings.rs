@@ -51,6 +51,15 @@ pub struct SettingsState {
     pub orchestrator_effort: String,
     pub orchestrator_context_budget: String,
 
+    //
+    // Orchestrator playbooks (Orchestrator tab). A SKILL.md that failed
+    // validation is kept as a draft, keyed by the playbook it edits (None
+    // for a new one), so the operator's edits are not lost.
+    //
+    pub playbooks: Vec<common::PlaybookInfo>,
+    pub playbooks_loaded: bool,
+    pub playbook_draft: Option<(Option<String>, String)>,
+
     pub praxis_agent_model_ref: String,
     pub praxis_agent_thinking_effort: String,
     pub praxis_agent_enabled: bool,
@@ -150,6 +159,9 @@ impl Default for SettingsState {
             orchestrator_thinking: true,
             orchestrator_effort: String::new(),
             orchestrator_context_budget: "100000".to_string(),
+            playbooks: Vec::new(),
+            playbooks_loaded: false,
+            playbook_draft: None,
             praxis_agent_model_ref: String::new(),
             praxis_agent_thinking_effort: String::new(),
             praxis_agent_enabled: false,
@@ -480,7 +492,10 @@ impl App {
                 //
                 self.settings.model_definitions.len() + 8
             }
-            SettingsTab::Orchestrator => ORCHESTRATOR_SETTING_ROWS,
+            SettingsTab::Orchestrator => {
+                // Settings rows + playbook list + "New playbook".
+                ORCHESTRATOR_SETTING_ROWS + self.settings.playbooks.len() + 1
+            }
             SettingsTab::Agents => {
                 // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 6
@@ -634,6 +649,9 @@ impl App {
     pub(crate) async fn switch_settings_tab(&mut self, tab: SettingsTab) {
         self.settings.tab = tab;
         self.settings.selected = 0;
+        if self.settings.tab == SettingsTab::Orchestrator && !self.settings.playbooks_loaded {
+            self.load_playbooks().await;
+        }
         if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
             self.load_agent_scripts().await;
         }
@@ -799,6 +817,22 @@ impl App {
                     });
                 }
             }
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.settings.tab == SettingsTab::Orchestrator =>
+            {
+                let sel = self.settings.selected;
+                if let Some(playbook) = sel
+                    .checked_sub(ORCHESTRATOR_SETTING_ROWS)
+                    .and_then(|i| self.settings.playbooks.get(i))
+                {
+                    let name = playbook.name.clone();
+                    self.confirm = Some(ConfirmAction {
+                        message: format!("Delete playbook '{}'?", name),
+                        action: ConfirmKind::DeletePlaybook(name),
+                    });
+                }
+            }
             KeyCode::Char(' ') if self.settings.tab == SettingsTab::Agents => {
                 let sel = self.settings.selected;
                 if sel >= 4 && sel < 4 + self.settings.agent_scripts.len() {
@@ -909,7 +943,11 @@ impl App {
                     self.settings.editing = true;
                     self.settings.edit_buffer = self.current_field_value();
                 }
-                _ => {}
+                _ => {
+                    let idx = sel - ORCHESTRATOR_SETTING_ROWS;
+                    let existing = self.settings.playbooks.get(idx).cloned();
+                    self.edit_playbook_in_editor(existing).await;
+                }
             },
             SettingsTab::Agents => {
                 let script_count = self.settings.agent_scripts.len();

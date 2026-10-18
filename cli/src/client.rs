@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use common::ClientTransport;
+use common::playbook::PlaybookReply;
 use common::{
     CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo, ChainDefinitionInput,
     ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage, ClientDirectMessage,
@@ -155,6 +156,11 @@ struct ClientState {
     // error message so the TUI can show it verbatim.
     //
     pending_log_query: Option<oneshot::Sender<Result<LogQueryResults, String>>>,
+
+    //
+    // Orchestrator playbook requests: single in-flight request.
+    //
+    pending_playbook: Option<oneshot::Sender<Result<PlaybookReply, String>>>,
 
     //
     // Documentation helper agent: streamed responses are forwarded to this
@@ -513,6 +519,13 @@ impl Client {
         let Ok(message) = serde_json::from_slice::<ClientDirectMessage>(data) else {
             return;
         };
+
+        if let Some(reply) = PlaybookReply::from_message(&message) {
+            if let Some(tx) = state.lock().await.pending_playbook.take() {
+                let _ = tx.send(reply);
+            }
+            return;
+        }
 
         //
         // Legacy CommandResponse routing: terminal-create is correlated by
@@ -2338,6 +2351,48 @@ impl Client {
             },
         )
         .await
+    }
+
+    //
+    // Orchestrator playbooks.
+    //
+
+    async fn playbook_request(&self, message: ClientSignalMessage) -> Result<PlaybookReply> {
+        self.request("playbook", |s| &mut s.pending_playbook, message)
+            .await?
+            .map_err(|message| anyhow!(message))
+    }
+
+    pub async fn list_playbooks(&self) -> Result<Vec<common::PlaybookInfo>> {
+        let message = ClientSignalMessage::PlaybookList {
+            client_id: self.client_id.clone(),
+        };
+        match self.playbook_request(message).await? {
+            PlaybookReply::List(list) => Ok(list),
+            other => Err(anyhow!("Unexpected playbook response: {:?}", other)),
+        }
+    }
+
+    pub async fn save_playbook(&self, content: String) -> Result<String> {
+        let message = ClientSignalMessage::PlaybookSave {
+            client_id: self.client_id.clone(),
+            content,
+        };
+        match self.playbook_request(message).await? {
+            PlaybookReply::Saved(name) => Ok(name),
+            other => Err(anyhow!("Unexpected playbook response: {:?}", other)),
+        }
+    }
+
+    pub async fn delete_playbook(&self, name: &str) -> Result<bool> {
+        let message = ClientSignalMessage::PlaybookDelete {
+            client_id: self.client_id.clone(),
+            name: name.to_string(),
+        };
+        match self.playbook_request(message).await? {
+            PlaybookReply::Deleted(success) => Ok(success),
+            other => Err(anyhow!("Unexpected playbook response: {:?}", other)),
+        }
     }
 
     //

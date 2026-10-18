@@ -391,6 +391,20 @@ pub struct TriggerCreateParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct PlaybookNameParams {
+    #[schemars(description = "Playbook name (as returned by playbook_list)")]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PlaybookSaveParams {
+    #[schemars(
+        description = "Full SKILL.md document: YAML frontmatter with `name` (lowercase letters, digits, hyphens; max 64) and `description` (max 1024 chars, say what it does and when to use it), then Markdown instructions. Replaces any playbook with the same name."
+    )]
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct TriggerIdParams {
     #[schemars(description = "Trigger ID prefix returned by trigger_list")]
     pub trigger_id: String,

@@ -2,6 +2,7 @@ mod approval;
 mod compaction;
 mod engine;
 mod markers;
+mod playbooks;
 mod tools;
 
 use std::collections::HashMap;
@@ -24,11 +25,14 @@ use crate::config::service_config::{
     LLM_ORCHESTRATOR_APPROVAL_GATE, LLM_ORCHESTRATOR_CONTEXT_BUDGET, LLM_ORCHESTRATOR_EFFORT,
     LLM_ORCHESTRATOR_MAX_TOKENS, LLM_ORCHESTRATOR_THINKING, LLM_ORCHESTRATOR_TOOL_MODE,
 };
+use crate::database::Database;
 use crate::messaging::send_to_client;
 
 use approval::{ApprovalGate, PermissionRegistry};
 use compaction::{CompactionOutcome, maybe_compact};
 use engine::{AiSettings, LoopOutcome, SessionCtx, run_loop};
+
+pub use playbooks::seed_builtin_playbooks;
 use tools::{convert_mcp_tools, get_local_tool_definitions};
 
 const ORCHESTRATOR_PROMPT: &str = include_str!("../prompts/orchestrator.prompt");
@@ -94,14 +98,16 @@ pub struct OrchestratorManager {
     sessions: RwLock<HashMap<String, OrchestratorSession>>,
     shared_mcp: RwLock<Option<SharedMcp>>,
     permissions: Arc<PermissionRegistry>,
+    db: Arc<Database>,
 }
 
 impl OrchestratorManager {
-    pub fn new() -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
             shared_mcp: RwLock::new(None),
             permissions: Arc::new(PermissionRegistry::default()),
+            db,
         }
     }
 
@@ -303,11 +309,30 @@ impl OrchestratorManager {
 
         let (peer, mcp_tools) = self.ensure_shared_mcp(mcp_port).await?;
 
-        let mut tools = mcp_tools;
+        let mut tools: Vec<Tool> = mcp_tools
+            .into_iter()
+            .filter(|t| !playbooks::HIDDEN_MCP_TOOLS.contains(&t.name.as_str()))
+            .collect();
         tools.extend(get_local_tool_definitions());
+        tools.push(playbooks::tool_definition());
 
-        let native_system = ORCHESTRATOR_PROMPT.to_string();
-        let manual_system = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
+        //
+        // Session-specific context appended to the base prompt. Built once
+        // per session so the system prompt stays stable (prompt caching and
+        // providers' thinking-block binding both depend on that).
+        //
+        let available_playbooks = self.db.list_playbooks().await.unwrap_or_else(|e| {
+            common::log_warn!("Orchestrator: failed to load playbooks: {}", e);
+            Vec::new()
+        });
+        let base_prompt = format!(
+            "{}{}",
+            ORCHESTRATOR_PROMPT,
+            playbooks::prompt_section(&available_playbooks)
+        );
+
+        let native_system = base_prompt.clone();
+        let manual_system = get_system_prompt_with_tools(&base_prompt, &tools);
 
         common::log_info!(
             "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {} ({}), history {}",
@@ -360,6 +385,7 @@ impl OrchestratorManager {
             last_prompt_tokens: AtomicU64::new(0),
             gate: ApprovalGate::new(approval_gate),
             permissions: Arc::clone(&self.permissions),
+            db: Arc::clone(&self.db),
         });
 
         //
