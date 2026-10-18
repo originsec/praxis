@@ -324,6 +324,11 @@ impl App {
     pub(crate) fn open_command_palette(&mut self) {
         let commands = vec![
             PopupItem {
+                label: "mission list".to_string(),
+                value: "mission list".to_string(),
+                description: "List durable missions; /mission --help for commands".to_string(),
+            },
+            PopupItem {
                 label: "clear".to_string(),
                 value: "clear".to_string(),
                 description: "Clear the current orchestrator session".to_string(),

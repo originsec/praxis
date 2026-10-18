@@ -7,7 +7,7 @@ use rmcp::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 use super::client::McpClient;
 use super::params::*;
@@ -23,7 +23,8 @@ const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
 pub struct PraxisServer<C: McpClient + Clone + 'static> {
-    client: Arc<Mutex<Option<C>>>,
+    client: Arc<OnceCell<C>>,
+    legacy_tool_lock: Arc<Mutex<()>>,
     client_factory: Arc<
         dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<C>> + Send>>
             + Send
@@ -44,7 +45,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         });
 
         Self {
-            client: Arc::new(Mutex::new(None)),
+            client: Arc::new(OnceCell::new()),
+            legacy_tool_lock: Arc::new(Mutex::new(())),
             client_factory: factory,
             tool_router: Self::tool_router(),
         }
@@ -56,7 +58,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     pub fn with_client(client: C) -> Self {
         Self {
-            client: Arc::new(Mutex::new(Some(client))),
+            client: Arc::new(OnceCell::new_with(Some(client))),
+            legacy_tool_lock: Arc::new(Mutex::new(())),
             client_factory: Arc::new(|| {
                 Box::pin(async { Err(anyhow::anyhow!("No factory configured")) })
             }),
@@ -65,27 +68,27 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 
     async fn get_client(&self) -> Result<(), String> {
-        let mut guard = self.client.lock().await;
-        if guard.is_none() {
-            let client = (self.client_factory)().await.map_err(|e| e.to_string())?;
-            *guard = Some(client);
-        }
+        self.client
+            .get_or_try_init(|| async { (self.client_factory)().await.map_err(|e| e.to_string()) })
+            .await?;
         Ok(())
     }
 }
 
 //
-// Helper macros to reduce boilerplate in tool implementations.
+// Legacy tools share several uncorrelated response slots and must remain
+// serialized. Their lock is separate from the initialized client so mission
+// pause/cancel requests never wait behind a long-running legacy tool.
 //
 
 macro_rules! acquire_client {
     ($self:expr) => {{
+        let guard = $self.legacy_tool_lock.lock().await;
         $self
             .get_client()
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = $self.client.lock().await;
-        guard
+        (guard, $self.client.get().cloned())
     }};
 }
 
@@ -128,14 +131,34 @@ fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorDa
 
 #[tool_router]
 impl<C: McpClient + Clone + 'static> PraxisServer<C> {
+    #[tool(
+        description = "Create and manage durable missions. Actions: create, list, get, events (after sequence), resume (with reconciliation for uncertain actions), steer, pause, cancel. Commands return immediately; poll events/get for progress. Disconnecting never cancels a mission."
+    )]
+    async fn mission(
+        &self,
+        Parameters(command): Parameters<crate::missions::MissionCommand>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client().await.map_err(|e| mcp_err(&e))?;
+        let client = self
+            .client
+            .get()
+            .cloned()
+            .ok_or_else(|| mcp_err("No client"))?;
+        let response = client
+            .mission(command)
+            .await
+            .map_err(|e| mcp_err(&e.to_string()))?;
+        json_result(serde_json::to_value(response).map_err(|e| mcp_err(&e.to_string()))?)
+    }
+
     // ── Node Management ──────────────────────────────────────────────────
 
     #[tool(
         description = "List all connected nodes in the Praxis network. Each node includes a status field: 'online' (responding normally), 'warning' (node may not be available — recent communication lost), or 'offline' (node is not available)."
     )]
     async fn node_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await.ok_or_else(|| {
             mcp_err(
@@ -166,8 +189,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodePrefixParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await.ok_or_else(|| {
             mcp_err(
@@ -204,8 +227,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodePrefixParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await.ok_or_else(|| {
             mcp_err(
@@ -249,8 +272,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await.ok_or_else(|| {
             mcp_err(
@@ -295,8 +318,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let state = client
@@ -324,8 +347,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconRunParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let value = client
@@ -360,8 +383,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconRunParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let value = client
@@ -399,8 +422,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconListParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::recon_list(
             client,
@@ -476,8 +499,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconReadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         match params.path {
             Some(path) => {
@@ -528,8 +551,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconReadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         match params.path {
             Some(path) => {
@@ -580,8 +603,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconGrepParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = match params.paths {
             Some(paths) => super::ops::recon_grep_file(
@@ -623,8 +646,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ReconGrepParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = match params.paths {
             Some(paths) => super::ops::recon_grep_file(
@@ -668,8 +691,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<SessionCreateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let cwd = params.project.clone().unwrap_or_else(|| "/".to_string());
@@ -716,8 +739,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<SessionPromptParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let (_result, text) = client
@@ -746,8 +769,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let result = client
@@ -780,13 +803,38 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }))
     }
 
+    #[tool(
+        description = "Cancel the active prompt in an ACP session without closing the session. Sends cancellation immediately even while session_prompt is awaiting a result. Requires node and the session_id returned by session_create."
+    )]
+    async fn session_cancel(
+        &self,
+        Parameters(params): Parameters<SessionCloseParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client().await.map_err(mcp_err)?;
+        let client = self
+            .client
+            .get()
+            .cloned()
+            .ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
+        client
+            .acp_notification(
+                &node_id,
+                "session/cancel",
+                json!({ "sessionId": params.session_id }),
+            )
+            .await
+            .map_err(mcp_err)?;
+        json_result(json!({ "status": "success", "message": "Session cancellation sent" }))
+    }
+
     #[tool(description = "Close a session. Requires the session_id returned from session_create.")]
     async fn session_close(
         &self,
         Parameters(params): Parameters<SessionCloseParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         client
@@ -810,8 +858,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<WriteFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
         let file_type = match params.file_type {
@@ -858,8 +906,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<TrafficSearchParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await;
         let resolved_node_id = if let Some(prefix) = &params.node {
@@ -910,8 +958,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     #[tool(description = "List available operations and chains")]
     async fn op_available(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::list_available(client).await.map_err(mcp_err)?;
 
@@ -961,8 +1009,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NameParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::get_definition(client, &params.name)
             .await
@@ -1028,8 +1076,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ChainCreateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let chain = super::ops::chain_create(
             client,
@@ -1058,8 +1106,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<OpRunParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::run(
             client,
@@ -1074,11 +1122,12 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = match result {
             super::ops::OpRunResult::Operation { id, name } => json!({
                 "status": "success", "type": "operation",
-                "id": crate::short_id(&id), "name": name
+                "id": crate::short_id(&id), "id_full": id, "name": name
             }),
             super::ops::OpRunResult::Chain { name, execution_id } => json!({
                 "status": "success", "type": "chain", "name": name,
-                "execution_id": execution_id.as_deref().map(crate::short_id)
+                "execution_id": execution_id.as_deref().map(crate::short_id),
+                "execution_id_full": execution_id
             }),
         };
 
@@ -1090,8 +1139,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ShortIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::get_info(client, &params.short_id)
             .await
@@ -1151,10 +1200,14 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ShortIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        self.get_client().await.map_err(mcp_err)?;
+        let client = self
+            .client
+            .get()
+            .cloned()
+            .ok_or_else(|| mcp_err("No client"))?;
 
-        let result = super::ops::cancel(client, &params.short_id)
+        let result = super::ops::cancel(&client, &params.short_id)
             .await
             .map_err(mcp_err)?;
 
@@ -1177,8 +1230,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<OpCreateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let spec = crate::SemanticOperationSpec {
             name: params.name.clone(),
@@ -1213,8 +1266,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<OpDeleteParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let full_name = super::ops::op_delete(client, &params.name)
             .await
@@ -1229,8 +1282,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     #[tool(description = "List running/tracked operations and chain executions")]
     async fn op_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::list_tracked(client).await.map_err(mcp_err)?;
 
@@ -1281,8 +1334,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<TriggerListParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let triggers = super::ops::trigger_list(client, params.chain_id)
             .await
@@ -1317,18 +1370,14 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<TriggerCreateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let trigger_config = crate::TriggerConfig::try_from(params.trigger).map_err(mcp_err)?;
 
-        let (trigger, warning) = super::ops::trigger_create(
-            client,
-            &params.chain,
-            trigger_config,
-            params.target.into(),
-        )
-        .await
-        .map_err(mcp_err)?;
+        let (trigger, warning) =
+            super::ops::trigger_create(client, &params.chain, trigger_config, params.target.into())
+                .await
+                .map_err(mcp_err)?;
 
         let trigger_id = trigger.id.clone();
         let chain_id = trigger.chain_id.clone();
@@ -1356,8 +1405,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<TriggerIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let id = super::ops::trigger_delete(client, &params.trigger_id)
             .await
@@ -1377,8 +1426,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<TriggerToggleParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let (_guard, client) = acquire_client!(self);
+        let client = client.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let (id, enabled) = super::ops::trigger_toggle(client, &params.trigger_id, params.enabled)
             .await

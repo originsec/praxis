@@ -46,6 +46,7 @@ impl Segment {
 
 const NAV_PAIRS: &[(&str, &str, Window)] = &[
     (global::ORCHESTRATOR, "orchestrator", Window::Orchestrator),
+    (global::MISSIONS, "missions", Window::Missions),
     (global::NODES, "nodes", Window::Nodes),
     (global::OPERATIONS, "ops", Window::Operations),
     (global::INTERCEPT, "intercept", Window::Intercept),
@@ -148,12 +149,23 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::horizontal([Constraint::Min(1), Constraint::Length(right.width() as u16)])
         .split(area);
 
-    let segments = left_segments(
+    let mut segments = left_segments(
         app.connected,
         app.nodes.nodes.len(),
         app.nodes.sessions.len(),
         app.active_window,
     );
+
+    if segments.iter().map(Segment::width).sum::<u16>() > chunks[0].width {
+        segments.retain(|segment| segment.action.is_some());
+        for segment in &mut segments {
+            let active = matches!(segment.action, Some(MouseAction::SwitchWindow(window)) if window == app.active_window);
+            if !active {
+                segment.spans.truncate(1);
+            }
+            segment.spans.push(Span::raw(" "));
+        }
+    }
 
     //
     // Walk the segments left to right, registering a hit rect for each
@@ -220,6 +232,7 @@ mod tests {
 
         let expected = [
             "^o orchestrator",
+            "^b missions",
             "^l nodes",
             "^p ops",
             "^t intercept",
@@ -231,8 +244,8 @@ mod tests {
         let actual: Vec<&str> = clickable.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(actual, expected);
 
-        assert!(matches!(clickable[6].1, MouseAction::OpenHelp));
-        assert!(matches!(clickable[7].1, MouseAction::Quit));
+        assert!(matches!(clickable[7].1, MouseAction::OpenHelp));
+        assert!(matches!(clickable[8].1, MouseAction::Quit));
     }
 
     #[test]

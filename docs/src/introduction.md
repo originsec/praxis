@@ -28,6 +28,7 @@ This matters for:
 | **Traffic Interception** | MITM proxy for agent-to-LLM traffic |
 | **Agent Dialog** | Create interactive sessions with agents |
 | **Orchestrator** | Free-form multi-tool AI operator across the Praxis network |
+| **Durable Missions** | Resumable service-owned investigations with checkpoints, budgets, evidence, and verification |
 | **Help Assistant** | In-TUI documentation chat (`Ctrl+H`) grounded in the shipped docs |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
 | **Chain Automation** | Trigger chains automatically on schedules, intercept matches, or new node events |

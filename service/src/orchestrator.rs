@@ -1,3 +1,5 @@
+pub(crate) mod engine;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,7 +12,7 @@ use futures_util::StreamExt;
 
 use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
 use common::ai::{
-    ChatCompletionRequest, Message, Provider, Tool, Usage, create_ai_client,
+    ChatCompletionRequest, Message, Provider, Tool, ToolCall, Usage, create_ai_client,
     get_system_prompt_with_tools, parse_manual_tool_calls,
 };
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
@@ -179,16 +181,13 @@ struct OrchestratorSession {
     prompt_tx: mpsc::Sender<(String, String)>,
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
-    current_prompt_id: RwLock<String>,
+    current_prompt_id: Arc<RwLock<String>>,
+    prompt_pending: Arc<AtomicBool>,
 }
 
 impl OrchestratorSession {
     fn stop(&self) {
         self.stop_flag.store(true, Ordering::SeqCst);
-        self.cancel_flag.store(true, Ordering::SeqCst);
-    }
-
-    fn cancel(&self) {
         self.cancel_flag.store(true, Ordering::SeqCst);
     }
 }
@@ -216,21 +215,15 @@ impl OrchestratorManager {
     // session/new calls hit this cache (warm path for /clear).
     //
 
-    async fn ensure_shared_mcp(&self, mcp_port: u16) -> Result<(rmcp::service::Peer<rmcp::RoleClient>, Vec<Tool>), String> {
+    pub(crate) async fn ensure_shared_mcp(
+        &self,
+        mcp_port: u16,
+    ) -> Result<(rmcp::service::Peer<rmcp::RoleClient>, Vec<Tool>), String> {
         {
             let guard = self.shared_mcp.read().await;
             if let Some(shared) = guard.as_ref() {
                 return Ok((shared.peer.clone(), shared.tools.clone()));
             }
-        }
-
-        let mut guard = self.shared_mcp.write().await;
-        //
-        // Double-check after acquiring the write lock so concurrent
-        // session/new only pay for one cold connect.
-        //
-        if let Some(shared) = guard.as_ref() {
-            return Ok((shared.peer.clone(), shared.tools.clone()));
         }
 
         let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
@@ -264,6 +257,10 @@ impl OrchestratorManager {
         );
 
         let tools = convert_mcp_tools(mcp_tools);
+        let mut guard = self.shared_mcp.write().await;
+        if let Some(shared) = guard.as_ref() {
+            return Ok((shared.peer.clone(), shared.tools.clone()));
+        }
         *guard = Some(SharedMcp {
             _service: service,
             peer: peer.clone(),
@@ -339,7 +336,10 @@ impl OrchestratorManager {
             .and_then(|s| s.parse().ok())
             .unwrap_or(25000);
 
-        let history_count: usize = 20;
+        let native_tools = config
+            .get("llm_orchestrator_native_tools")
+            .map(|value| value != "false")
+            .unwrap_or(true);
 
         drop(config);
 
@@ -371,7 +371,11 @@ impl OrchestratorManager {
         let mut tools = mcp_tools;
         tools.extend(get_local_tool_definitions());
 
-        let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
+        let system_prompt = if native_tools {
+            ORCHESTRATOR_PROMPT.to_string()
+        } else {
+            get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools)
+        };
 
         common::log_info!(
             "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}, history {}",
@@ -417,6 +421,8 @@ impl OrchestratorManager {
         let stop_flag_clone = Arc::clone(&stop_flag);
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let cancel_flag_clone = Arc::clone(&cancel_flag);
+        let prompt_pending = Arc::new(AtomicBool::new(false));
+        let prompt_pending_clone = Arc::clone(&prompt_pending);
 
         let client_id_owned = client_id.to_string();
         let sid = session_id_owned.clone();
@@ -431,7 +437,11 @@ impl OrchestratorManager {
         tokio::spawn(async move {
             macro_rules! send_msg {
                 ($msg:expr) => {{
-                    let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
+                    tokio::select! {
+                        biased;
+                        _ = engine::cancelled(&cancel_flag_clone, &stop_flag_clone) => {},
+                        _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg) => {},
+                    }
                 }};
             }
 
@@ -439,8 +449,6 @@ impl OrchestratorManager {
                 if stop_flag_clone.load(Ordering::SeqCst) {
                     break;
                 }
-
-                cancel_flag_clone.store(false, Ordering::SeqCst);
 
                 common::log_info!(
                     "Orchestrator received prompt for {}: {}...",
@@ -451,14 +459,6 @@ impl OrchestratorManager {
                 conversation_history.push(Message::user(&prompt));
                 send_msg!(session_update_user_text(&sid, &prompt));
 
-                let max_history = history_count + 1;
-                if conversation_history.len() > max_history {
-                    let system_msg = conversation_history.remove(0);
-                    conversation_history =
-                        conversation_history.split_off(conversation_history.len() - history_count);
-                    conversation_history.insert(0, system_msg);
-                }
-
                 let mut early_response_sent = false;
 
                 loop {
@@ -468,31 +468,66 @@ impl OrchestratorManager {
                         break;
                     }
 
-                    let request =
-                        ChatCompletionRequest::new(model.clone(), conversation_history.clone())
-                            .with_max_tokens(max_tokens);
+                    engine::compact_history(&mut conversation_history, engine::CONTEXT_TOKENS);
+                    if engine::estimated_tokens(&conversation_history) > engine::CONTEXT_TOKENS {
+                        send_msg!(acp_error_response(
+                            prompt_id_to_json_rpc_id(&prompt_id),
+                            -32000,
+                            "Context cannot fit; reduce the pinned objective or tool data before continuing."
+                        ));
+                        early_response_sent = true;
+                        break;
+                    }
+                    let input_history = if native_tools {
+                        conversation_history.clone()
+                    } else {
+                        engine::legacy_history(&conversation_history)
+                    };
+                    let mut request = ChatCompletionRequest::new(model.clone(), input_history)
+                        .with_max_tokens(max_tokens);
+                    if native_tools {
+                        request = request.with_tools(tools.clone());
+                    }
 
                     let mut stream = client.chat_completion_stream(request);
                     let mut full_response = String::new();
                     let mut stream_usage: Option<Usage> = None;
                     let mut stream_error = false;
+                    let mut completed = false;
+                    let mut native_calls = Vec::new();
+                    let mut provider_data = None;
                     let mut send_buffer = String::new();
                     let mut held_back = false;
                     let mut bytes_sent: usize = 0;
 
-                    while let Some(result) = stream.next().await {
-                        if stop_flag_clone.load(Ordering::SeqCst)
-                            || cancel_flag_clone.load(Ordering::SeqCst)
-                        {
+                    loop {
+                        let result = tokio::select! {
+                            biased;
+                            _ = engine::cancelled(&cancel_flag_clone, &stop_flag_clone) => break,
+                            result = stream.next() => result,
+                        };
+                        let Some(result) = result else {
                             break;
-                        }
-
+                        };
                         match result {
                             Ok(delta) => {
+                                native_calls.extend(delta.tool_calls);
+                                if delta.provider_data.is_some() {
+                                    provider_data = delta.provider_data;
+                                }
+                                if let Some(reason) = &delta.finish_reason {
+                                    completed = !matches!(
+                                        reason.as_str(),
+                                        "length" | "max_tokens" | "MAX_TOKENS"
+                                    );
+                                }
                                 if !delta.content.is_empty() {
                                     full_response.push_str(&delta.content);
 
-                                    if !held_back {
+                                    if native_tools {
+                                        bytes_sent += delta.content.len();
+                                        send_msg!(session_update_text(&sid, &delta.content));
+                                    } else if !held_back {
                                         send_buffer.push_str(&delta.content);
 
                                         let tool_marker =
@@ -555,8 +590,22 @@ impl OrchestratorManager {
                         }
                     }
 
+                    drop(stream);
                     if stream_error {
-                        conversation_history.pop();
+                        break;
+                    }
+                    if cancel_flag_clone.load(Ordering::SeqCst)
+                        || stop_flag_clone.load(Ordering::SeqCst)
+                    {
+                        break;
+                    }
+                    if !completed {
+                        send_msg!(acp_error_response(
+                            prompt_id_to_json_rpc_id(&prompt_id),
+                            -32000,
+                            "Model response did not complete; no tools were executed."
+                        ));
+                        early_response_sent = true;
                         break;
                     }
 
@@ -571,8 +620,19 @@ impl OrchestratorManager {
                     // them, then run independent calls concurrently. Results are
                     // re-ordered to match emission order before feeding the model.
                     //
-                    let (tool_calls, _remaining_text) =
-                        parse_manual_tool_calls(&full_response);
+                    let calls = response_calls(native_tools, native_calls, &full_response);
+                    let mut assistant = if native_tools {
+                        Message::assistant_with_tools(&full_response, calls.clone())
+                    } else {
+                        Message::assistant(&full_response)
+                    };
+                    if native_tools {
+                        assistant.provider_data = provider_data;
+                    }
+                    let tool_calls: Vec<_> = calls
+                        .iter()
+                        .map(|call| (call.name.clone(), call.arguments.clone()))
+                        .collect();
 
                     if !tool_calls.is_empty() {
                         if stop_flag_clone.load(Ordering::SeqCst)
@@ -581,10 +641,9 @@ impl OrchestratorManager {
                             break;
                         }
 
-                        let tool_ids: Vec<String> = tool_calls
-                            .iter()
-                            .map(|_| uuid::Uuid::new_v4().to_string())
-                            .collect();
+                        let tool_ids: Vec<String> =
+                            calls.iter().map(|call| call.id.clone()).collect();
+                        conversation_history.push(assistant);
 
                         for ((tool_name, tool_args), tool_id) in
                             tool_calls.iter().zip(tool_ids.iter())
@@ -611,7 +670,22 @@ impl OrchestratorManager {
                             &stop_flag_clone,
                             |tool_name, tool_args| {
                                 let peer = peer_for_batch.clone();
+                                let validation = engine::validate_call(
+                                    &ToolCall {
+                                        id: String::new(),
+                                        name: tool_name.clone(),
+                                        arguments: tool_args.clone(),
+                                    },
+                                    &tools,
+                                );
                                 async move {
+                                    if let Err(error) = validation {
+                                        return (
+                                            json!({"status":"error","message":error.to_string()})
+                                                .to_string(),
+                                            true,
+                                        );
+                                    }
                                     if let Some(local_result) =
                                         execute_local_tool(&tool_name, &tool_args).await
                                     {
@@ -626,10 +700,11 @@ impl OrchestratorManager {
                         .await;
 
                         let Some(tool_results) = batch else {
-                            //
-                            // Cancelled or stopped mid-batch — do not feed
-                            // partial tool results back into the model.
-                            //
+                            append_interrupted_results(
+                                &mut conversation_history,
+                                native_tools,
+                                &calls,
+                            );
                             break;
                         };
 
@@ -654,9 +729,7 @@ impl OrchestratorManager {
                                 }
                             }
 
-                            send_msg!(session_update_tool_result(
-                                &sid, tool_id, result, *is_error
-                            ));
+                            send_msg!(session_update_tool_result(&sid, tool_id, result, *is_error));
                         }
 
                         if let Some(usage) = &stream_usage {
@@ -668,16 +741,12 @@ impl OrchestratorManager {
                             ));
                         }
 
-                        conversation_history.push(Message::assistant(&full_response));
-
-                        let combined_results: String = tool_results
-                            .iter()
-                            .map(|(_id, name, result, _err)| {
-                                format!("Tool '{}' result:\n{}", name, result)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
-                        conversation_history.push(Message::user(combined_results));
+                        append_tool_results(
+                            &mut conversation_history,
+                            native_tools,
+                            &calls,
+                            &tool_results,
+                        );
 
                         continue;
                     }
@@ -698,7 +767,7 @@ impl OrchestratorManager {
                         ));
                     }
 
-                    conversation_history.push(Message::assistant(&full_response));
+                    conversation_history.push(assistant);
                     break;
                 }
 
@@ -714,6 +783,7 @@ impl OrchestratorManager {
                         .unwrap(),
                     ));
                 }
+                prompt_pending_clone.store(false, Ordering::SeqCst);
             }
         });
 
@@ -722,7 +792,8 @@ impl OrchestratorManager {
             prompt_tx,
             stop_flag,
             cancel_flag,
-            current_prompt_id: RwLock::new(String::new()),
+            current_prompt_id: Arc::new(RwLock::new(String::new())),
+            prompt_pending,
         };
 
         {
@@ -741,42 +812,65 @@ impl OrchestratorManager {
         message: String,
         publish_channel: &Channel,
     ) {
-        let sessions = self.sessions.read().await;
-        match sessions.get(client_id) {
-            Some(session) if session.session_id == session_id => {
-                *session.current_prompt_id.write().await = prompt_id.clone();
-                if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
-                    //
-                    // The session is registered but its task has exited, so
-                    // the channel is closed. Treat it as a lost session
-                    // (ERR_ORCHESTRATOR_SESSION_NOT_FOUND) so the client recreates rather
-                    // than surfacing an opaque "channel closed".
-                    //
-                    common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
-                    let _ = send_to_client(
-                        publish_channel,
-                        client_id,
-                        acp_error_response(
-                            prompt_id_to_json_rpc_id(&prompt_id),
-                            ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
-                            "Orchestrator session is no longer active.",
-                        ),
+        let session = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(client_id)
+                .filter(|session| session.session_id == session_id)
+                .map(|session| {
+                    (
+                        session.prompt_tx.clone(),
+                        session.current_prompt_id.clone(),
+                        session.prompt_pending.clone(),
+                        session.cancel_flag.clone(),
+                        session.stop_flag.clone(),
                     )
-                    .await;
+                })
+        };
+        let error = if let Some((sender, current_id, pending, cancel, stop)) = session {
+            let mut current_id = current_id.write().await;
+            if stop.load(Ordering::SeqCst) || sender.is_closed() {
+                Some((
+                    ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
+                    "Orchestrator session is no longer active.",
+                ))
+            } else if pending.swap(true, Ordering::SeqCst) {
+                Some((
+                    -32000,
+                    "An Orchestrator prompt is already running. Cancel it before sending another.",
+                ))
+            } else {
+                cancel.store(false, Ordering::SeqCst);
+                *current_id = prompt_id.clone();
+                match sender.try_send((prompt_id.clone(), message)) {
+                    Ok(()) => None,
+                    Err(error) => {
+                        pending.store(false, Ordering::SeqCst);
+                        match error {
+                            mpsc::error::TrySendError::Full(_) => {
+                                Some((-32000, "Orchestrator prompt queue is full."))
+                            }
+                            mpsc::error::TrySendError::Closed(_) => Some((
+                                ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
+                                "Orchestrator session is no longer active.",
+                            )),
+                        }
+                    }
                 }
             }
-            _ => {
-                let _ = send_to_client(
-                    publish_channel,
-                    client_id,
-                    acp_error_response(
-                        prompt_id_to_json_rpc_id(&prompt_id),
-                        ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
-                        "No active Orchestrator session for this client.",
-                    ),
-                )
-                .await;
-            }
+        } else {
+            Some((
+                ERR_ORCHESTRATOR_SESSION_NOT_FOUND,
+                "No active Orchestrator session for this client.",
+            ))
+        };
+        if let Some((code, message)) = error {
+            let _ = send_to_client(
+                publish_channel,
+                client_id,
+                acp_error_response(prompt_id_to_json_rpc_id(&prompt_id), code, message),
+            )
+            .await;
         }
     }
 
@@ -819,13 +913,29 @@ impl OrchestratorManager {
         session_id: &str,
         publish_channel: &Channel,
     ) {
-        let sessions = self.sessions.read().await;
-        let prompt_id = match sessions.get(client_id) {
-            Some(session) if session.session_id == session_id => {
-                session.cancel();
-                session.current_prompt_id.read().await.clone()
+        let session = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(client_id)
+                .filter(|session| session.session_id == session_id)
+                .map(|session| {
+                    (
+                        session.current_prompt_id.clone(),
+                        session.cancel_flag.clone(),
+                        session.prompt_pending.clone(),
+                    )
+                })
+        };
+        let prompt_id = if let Some((current_id, cancel, pending)) = session {
+            let current_id = current_id.read().await;
+            if pending.load(Ordering::SeqCst) {
+                cancel.store(true, Ordering::SeqCst);
+                current_id.clone()
+            } else {
+                String::new()
             }
-            _ => String::new(),
+        } else {
+            String::new()
         };
 
         if !prompt_id.is_empty() {
@@ -843,6 +953,53 @@ impl OrchestratorManager {
             .await;
         }
     }
+}
+
+fn response_calls(native: bool, calls: Vec<ToolCall>, text: &str) -> Vec<ToolCall> {
+    if native {
+        calls
+    } else {
+        parse_manual_tool_calls(text)
+            .0
+            .into_iter()
+            .map(|(name, arguments)| ToolCall {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                arguments,
+            })
+            .collect()
+    }
+}
+
+fn append_tool_results(
+    history: &mut Vec<Message>,
+    native: bool,
+    calls: &[ToolCall],
+    results: &[(String, String, String, bool)],
+) {
+    if native {
+        for (call, (_, _, result, _)) in calls.iter().zip(results) {
+            history.push(Message::tool_result(call, result));
+        }
+    } else {
+        history.push(Message::user(
+            results
+                .iter()
+                .map(|(_, name, result, _)| format!("Tool '{name}' result:\n{result}"))
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        ));
+    }
+}
+
+fn append_interrupted_results(history: &mut Vec<Message>, native: bool, calls: &[ToolCall]) {
+    let result = json!({"status":"error","outcome":"uncertain",
+        "message":"Tool batch interrupted. Calls may already have caused side effects. Do not replay them automatically; inspect state before continuing."}).to_string();
+    let results = calls
+        .iter()
+        .map(|call| (call.id.clone(), call.name.clone(), result.clone(), true))
+        .collect::<Vec<_>>();
+    append_tool_results(history, native, calls, &results);
 }
 
 fn prompt_id_to_json_rpc_id(prompt_id: &str) -> Value {
@@ -895,7 +1052,7 @@ async fn connect_orchestrator_mcp(
     Err(last_err)
 }
 
-fn get_local_tool_definitions() -> Vec<Tool> {
+pub(crate) fn get_local_tool_definitions() -> Vec<Tool> {
     vec![
         Tool {
             name: "wait".to_string(),
@@ -951,7 +1108,7 @@ fn get_local_tool_definitions() -> Vec<Tool> {
     ]
 }
 
-async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<String> {
+pub(crate) async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<String> {
     match tool_name {
         "wait" => {
             let seconds = tool_input
@@ -1022,7 +1179,7 @@ async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<Strin
     }
 }
 
-async fn execute_mcp_tool(
+pub(crate) async fn execute_mcp_tool(
     peer: &rmcp::service::Peer<rmcp::RoleClient>,
     tool_name: &str,
     tool_input: &Value,
@@ -1071,7 +1228,7 @@ async fn execute_mcp_tool(
 // a logical failure even when the transport call itself succeeded.
 //
 
-fn result_is_error(result: &str) -> bool {
+pub(crate) fn result_is_error(result: &str) -> bool {
     serde_json::from_str::<Value>(result)
         .ok()
         .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(str::to_string))
@@ -1132,7 +1289,6 @@ where
     for (i, ((name, args), tool_id)) in calls.into_iter().zip(tool_ids.iter()).enumerate() {
         if cancel.load(Ordering::SeqCst) || stop.load(Ordering::SeqCst) {
             join_set.abort_all();
-            while join_set.join_next().await.is_some() {}
             return None;
         }
         let tool_id = tool_id.clone();
@@ -1159,8 +1315,7 @@ where
         tokio::select! {
             _ = &mut cancel_watch => {
                 join_set.abort_all();
-                while join_set.join_next().await.is_some() {}
-                return None;
+                    return None;
             }
             joined = join_set.join_next() => {
                 match joined {
@@ -1169,8 +1324,7 @@ where
                     }
                     Some(Err(_)) => {
                         join_set.abort_all();
-                        while join_set.join_next().await.is_some() {}
-                        return None;
+                                    return None;
                     }
                     None => break,
                 }
@@ -1215,9 +1369,8 @@ mod tests {
 
         assert_eq!(visible, "Trigger created. Let me verify it's active. ");
 
-        let next_buffer = format!(
-            "{retained}\"tool\": \"report_plan\", \"args\": {{\"steps\": []}}}}"
-        );
+        let next_buffer =
+            format!("{retained}\"tool\": \"report_plan\", \"args\": {{\"steps\": []}}}}");
         assert_eq!(streaming_tool_marker_position(&next_buffer), Some(0));
     }
 
@@ -1257,6 +1410,74 @@ mod tests {
         assert_eq!(streaming_tool_marker_position("Result: <done>"), None);
     }
 
+    #[test]
+    fn native_mode_never_executes_json_in_prose() {
+        let text = r#"Example only: {"tool":"node_list","args":{}}"#;
+        assert!(response_calls(true, vec![], text).is_empty());
+        assert_eq!(response_calls(false, vec![], text)[0].name, "node_list");
+    }
+
+    #[test]
+    fn native_calls_keep_provider_ids_and_arguments() {
+        let call = ToolCall {
+            id: "provider-call".into(),
+            name: "wait".into(),
+            arguments: json!({"seconds": 2}),
+        };
+        let calls = response_calls(true, vec![call.clone()], "Checking now");
+        assert_eq!(calls, vec![call.clone()]);
+        let mut history = vec![Message::assistant_with_tools("Checking now", calls.clone())];
+        append_tool_results(
+            &mut history,
+            true,
+            &calls,
+            &[(call.id.clone(), call.name.clone(), "done".into(), false)],
+        );
+        assert_eq!(history[1].role, common::ai::Role::Tool);
+        assert_eq!(history[1].tool_call_id.as_deref(), Some("provider-call"));
+    }
+
+    #[test]
+    fn interrupted_batch_closes_every_native_tool_pair_without_replay() {
+        let calls = (0..2)
+            .map(|index| ToolCall {
+                id: format!("call-{index}"),
+                name: "session_prompt".into(),
+                arguments: json!({}),
+            })
+            .collect::<Vec<_>>();
+        let mut assistant = Message::assistant_with_tools("", calls.clone());
+        assistant.provider_data =
+            Some(json!({"anthropic":[{"type":"thinking","signature":"opaque"}]}));
+        let mut history = vec![assistant.clone()];
+        append_interrupted_results(&mut history, true, &calls);
+        assert_eq!(history[0].provider_data, assistant.provider_data);
+        assert_eq!(history.len(), 3);
+        for (call, result) in calls.iter().zip(&history[1..]) {
+            assert_eq!(result.role, common::ai::Role::Tool);
+            assert_eq!(result.tool_call_id.as_ref(), Some(&call.id));
+            let result: Value = serde_json::from_str(result.text()).unwrap();
+            assert_eq!(result["outcome"], "uncertain");
+            assert!(
+                result["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Do not replay")
+            );
+        }
+    }
+
+    #[test]
+    fn compatibility_mode_results_remain_plain_user_messages() {
+        let calls = response_calls(false, vec![], r#"{"tool":"node_list","args":{}}"#);
+        let mut history = vec![Message::assistant("legacy tool text")];
+        append_interrupted_results(&mut history, false, &calls);
+        assert_eq!(history[1].role, common::ai::Role::User);
+        assert!(history.iter().all(|message| message.tool_calls.is_empty()
+            && message.tool_call_id.is_none()
+            && message.provider_data.is_none()));
+    }
+
     #[tokio::test]
     async fn concurrent_tools_overlap_in_time() {
         let cancel = AtomicBool::new(false);
@@ -1268,12 +1489,13 @@ mod tests {
         let ids = vec!["id-a".to_string(), "id-b".to_string()];
 
         let start = Instant::now();
-        let results = execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            (format!("ok-{name}"), false)
-        })
-        .await
-        .expect("batch should complete");
+        let results =
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                (format!("ok-{name}"), false)
+            })
+            .await
+            .expect("batch should complete");
 
         let elapsed = start.elapsed();
         assert_eq!(results.len(), 2);
@@ -1303,16 +1525,17 @@ mod tests {
         ];
         let ids = vec!["id-slow".to_string(), "id-fast".to_string()];
 
-        let results = execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
-            if name == "slow" {
-                tokio::time::sleep(Duration::from_millis(150)).await;
-            } else {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            (format!("result-{name}"), false)
-        })
-        .await
-        .expect("batch should complete");
+        let results =
+            execute_tool_calls_concurrent(calls, ids, &cancel, &stop, |name, _| async move {
+                if name == "slow" {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                (format!("result-{name}"), false)
+            })
+            .await
+            .expect("batch should complete");
 
         assert_eq!(results[0].1, "slow");
         assert_eq!(results[1].1, "fast");

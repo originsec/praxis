@@ -9,6 +9,7 @@ pub mod hits;
 pub mod intercept;
 pub mod list_detail;
 pub mod log_query;
+pub mod missions;
 pub mod nodes;
 pub mod operations;
 pub mod orchestrator;
@@ -52,6 +53,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     match app.active_window {
         Window::Orchestrator => orchestrator::render(f, chunks[2], app),
+        Window::Missions => missions::render(f, chunks[2], app),
         Window::Nodes => nodes::render(f, chunks[2], app),
         Window::Intercept => intercept::render(f, chunks[2], app),
         Window::LogQuery => log_query::render(f, chunks[2], app),

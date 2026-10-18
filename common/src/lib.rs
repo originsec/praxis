@@ -9,11 +9,12 @@ pub mod log_query_schema;
 pub mod logging;
 pub mod mcp;
 pub mod messaging;
+pub mod missions;
 pub mod remote_nodes;
 
+pub use intercept_match::{pattern_matches_entry, rule_matches_entry};
 pub use logging::{init as init_logging, is_initialized as is_logging_initialized, send_event};
 pub use messaging::*;
-pub use intercept_match::{pattern_matches_entry, rule_matches_entry};
 
 pub use ai::{
     AiResponse, Provider, Role, build_message, create_ai_client, execute_chat_completion,

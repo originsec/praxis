@@ -11,6 +11,11 @@ use crate::ui::common::point_in;
 #[derive(Clone)]
 pub enum MouseAction {
     SwitchWindow(Window),
+    MissionKey(crossterm::event::KeyEvent),
+    MissionRow(String),
+    MissionField(usize),
+    MissionFocus(crate::app::missions::MissionFocus),
+    MissionTab(crate::app::missions::MissionTab),
     OpenHelp,
     Quit,
 

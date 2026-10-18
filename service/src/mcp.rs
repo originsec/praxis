@@ -6,8 +6,8 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use common::{
-    CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate, ClientBroadcastMessage,
-    ChainTriggerInfo, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
+    CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
+    ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
     InterceptedTrafficEntry, OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate,
     SystemState, TrafficSearchFilters, mcp::McpClient, publish_json,
 };
@@ -61,11 +61,12 @@ enum PendingChainTriggerResult {
 
 #[derive(Default)]
 struct ClientState {
+    chain_run_requests: common::mcp::mission_requests::ResponseRequests<String>,
+    mission_requests: common::mcp::mission_requests::MissionRequests,
     system_state: Option<SystemState>,
     pending_acp: HashMap<String, PendingAcp>,
     pending_semantic_ops: HashMap<String, Option<String>>,
-    pending_traffic_search:
-        HashMap<String, Result<(Vec<InterceptedTrafficEntry>, usize), String>>,
+    pending_traffic_search: HashMap<String, Result<(Vec<InterceptedTrafficEntry>, usize), String>>,
     pending_recon_get: Option<Option<ReconResult>>,
     pending_op_def_add: Option<Result<String, String>>,
     pending_op_def_delete: Option<Result<String, String>>,
@@ -129,6 +130,13 @@ impl ServiceMcpClient {
         let mut state = state.lock().await;
 
         match message {
+            ClientDirectMessage::ChainRunResponse { request_id, result } => {
+                state.chain_run_requests.complete(&request_id, result);
+            }
+            ClientDirectMessage::MissionResponse { request_id, result } => {
+                state.mission_requests.complete(&request_id, result);
+            }
+
             ClientDirectMessage::RegistrationAck(_) => {}
             ClientDirectMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
@@ -223,18 +231,16 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ChainTriggerCreated { trigger } => {
                 if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Create) {
-                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Created(
-                        trigger.clone(),
-                    )));
+                    state.pending_chain_trigger =
+                        Some(Ok(PendingChainTriggerResult::Created(trigger.clone())));
                 }
                 state.chain_triggers.retain(|t| t.id != trigger.id);
                 state.chain_triggers.push(trigger);
             }
             ClientDirectMessage::ChainTriggerUpdated { trigger } => {
                 if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Update) {
-                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Updated(
-                        trigger.clone(),
-                    )));
+                    state.pending_chain_trigger =
+                        Some(Ok(PendingChainTriggerResult::Updated(trigger.clone())));
                 }
                 if let Some(idx) = state.chain_triggers.iter().position(|t| t.id == trigger.id) {
                     state.chain_triggers[idx] = trigger;
@@ -242,9 +248,8 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
                 if state.pending_chain_trigger_kind == Some(PendingChainTriggerKind::Delete) {
-                    state.pending_chain_trigger = Some(Ok(PendingChainTriggerResult::Deleted(
-                        trigger_id.clone(),
-                    )));
+                    state.pending_chain_trigger =
+                        Some(Ok(PendingChainTriggerResult::Deleted(trigger_id.clone())));
                 }
                 state.chain_triggers.retain(|t| t.id != trigger_id);
             }
@@ -616,6 +621,20 @@ fn inject_node_id(params: &mut Value, node_id: &str) {
 
 #[async_trait]
 impl McpClient for ServiceMcpClient {
+    async fn mission(
+        &self,
+        command: common::missions::MissionCommand,
+    ) -> Result<common::missions::MissionResponse> {
+        let pending = self.state.lock().await.mission_requests.register();
+        self.publish_signal(ClientSignalMessage::MissionRequest {
+            client_id: self.client_id.clone(),
+            request_id: pending.id.clone(),
+            command,
+        })
+        .await?;
+        pending.receive(self.timeout).await
+    }
+
     async fn get_state(&self) -> Option<SystemState> {
         self.state.lock().await.system_state.clone()
     }
@@ -805,6 +824,7 @@ impl McpClient for ServiceMcpClient {
     ) -> Result<()> {
         let message = ClientSignalMessage::ChainRun {
             client_id: self.client_id.clone(),
+            request_id: None,
             chain_id,
             node_id,
             agent_short_name,
@@ -812,6 +832,27 @@ impl McpClient for ServiceMcpClient {
             target_spec: None,
         };
         self.publish_signal(message).await
+    }
+
+    async fn run_chain_correlated(
+        &self,
+        chain_id: String,
+        node_id: String,
+        agent_short_name: String,
+        working_dir: Option<String>,
+    ) -> Result<String> {
+        let pending = self.state.lock().await.chain_run_requests.register();
+        self.publish_signal(ClientSignalMessage::ChainRun {
+            client_id: self.client_id.clone(),
+            request_id: Some(pending.id.clone()),
+            chain_id,
+            node_id,
+            agent_short_name,
+            working_dir,
+            target_spec: None,
+        })
+        .await?;
+        pending.receive(self.timeout).await
     }
 
     async fn cancel_chain(&self, execution_id: String) -> Result<()> {
@@ -1101,15 +1142,17 @@ impl McpServerManager {
             move || {
                 let url = rabbitmq_url.clone();
                 let client = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        ServiceMcpClient::connect(&url, 600).await
-                    })
+                    tokio::runtime::Handle::current()
+                        .block_on(async { ServiceMcpClient::connect(&url, 600).await })
                 });
                 match client {
                     Ok(c) => Ok(PraxisServer::with_client(c)),
                     Err(e) => {
                         common::log_error!("Failed to create MCP client: {}", e);
-                        Err(std::io::Error::other(format!("Failed to create MCP client: {}", e)))
+                        Err(std::io::Error::other(format!(
+                            "Failed to create MCP client: {}",
+                            e
+                        )))
                     }
                 }
             },
@@ -1212,6 +1255,8 @@ mod tests {
         });
 
         for name in [
+            "mission",
+            "session_cancel",
             "chain_create",
             "trigger_list",
             "trigger_create",
@@ -1269,5 +1314,63 @@ mod tests {
             state.pending_chain_trigger.take(),
             Some(Err(message)) if message == "trigger not found"
         ));
+    }
+
+    #[tokio::test]
+    async fn mission_responses_are_routed_to_the_matching_waiter() {
+        let state = Arc::new(Mutex::new(ClientState::default()));
+        let first = state.lock().await.mission_requests.register();
+        let second = state.lock().await.mission_requests.register();
+        for (id, result) in [
+            (second.id.clone(), Err("second rejected".to_string())),
+            (
+                first.id.clone(),
+                Ok(common::missions::MissionResponse::Events(Vec::new())),
+            ),
+        ] {
+            let message = ClientDirectMessage::MissionResponse {
+                request_id: id,
+                result,
+            };
+            ServiceMcpClient::handle_direct_message(&state, &serde_json::to_vec(&message).unwrap())
+                .await;
+        }
+        assert!(
+            matches!(first.receive(Duration::from_secs(1)).await.unwrap(), common::missions::MissionResponse::Events(events) if events.is_empty())
+        );
+        assert_eq!(
+            second
+                .receive(Duration::from_secs(1))
+                .await
+                .unwrap_err()
+                .to_string(),
+            "second rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_chain_launches_receive_their_own_execution_ids() {
+        let state = Arc::new(Mutex::new(ClientState::default()));
+        let first = state.lock().await.chain_run_requests.register();
+        let second = state.lock().await.chain_run_requests.register();
+        for (request_id, execution_id) in [
+            (second.id.clone(), "second-execution"),
+            (first.id.clone(), "first-execution"),
+        ] {
+            let message = ClientDirectMessage::ChainRunResponse {
+                request_id,
+                result: Ok(execution_id.into()),
+            };
+            ServiceMcpClient::handle_direct_message(&state, &serde_json::to_vec(&message).unwrap())
+                .await;
+        }
+        assert_eq!(
+            first.receive(Duration::from_secs(1)).await.unwrap(),
+            "first-execution"
+        );
+        assert_eq!(
+            second.receive(Duration::from_secs(1)).await.unwrap(),
+            "second-execution"
+        );
     }
 }

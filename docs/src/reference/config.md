@@ -505,3 +505,15 @@ the resolved URL and its source.
 | CLI Binary | `%USERPROFILE%\.praxis\bin\praxis.exe` (copy of `praxis_cli.exe`) |
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |
+
+## Orchestrator tool protocol
+
+`llm_orchestrator_native_tools` defaults to `true`: Orchestrator chat and durable
+missions use provider-native tool calls. Set this service configuration key to
+`false` for text-only endpoints that need the legacy JSON-in-text format. This
+is an explicit compatibility choice; the service does not retry a failed native
+request automatically through another protocol.
+
+`PRAXIS_CHAIN_MAX_PARALLEL` controls independent chain elements per wave (default
+`4`, range `1`–`64`). Elements sharing an agent session group or memory key remain
+serialized. Set it to `1` for sequential execution.

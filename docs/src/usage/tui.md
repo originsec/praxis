@@ -15,7 +15,7 @@ the highlight. In split views, highlighting stays within the pane where the
 drag started. Draggable controls such as pane dividers and chain-canvas elements
 retain their normal behavior.
 
-The terminal UI provides six main windows, switched with keyboard shortcuts:
+The terminal UI provides seven main windows, switched with keyboard shortcuts:
 
 ## Orchestrator (`Ctrl+O`)
 
@@ -31,6 +31,46 @@ LLM-powered conversation interface for coordinating operations across the Praxis
   `Enter` sends. Multi-line drafts grow the input box; `↑`/`↓` move
   between lines first, then through command history. Vertical movement preserves
   the character column in Unicode text and stops at the end of shorter lines.
+
+## Missions (`Ctrl+B` or `F6`)
+
+Missions have a dedicated workspace independent of Orchestrator chat. Open it
+from the navigation bar, `Ctrl+B`, or `F6` (useful when tmux owns `Ctrl+B`).
+The list refreshes while this window is open; leaving it or quitting the TUI
+keeps service-owned missions running.
+
+Browse or filter the mission list by name, objective, ID or status. The detail
+pane has three tabs: **Overview** for the objective, scope, budget, checkpoint,
+result and verification; **Evidence** for observed tool outcomes; and **Events**
+for the execution journal. Pending/uncertain tool calls remain visible. The workspace retains the latest
+2,000 events for the selected mission; the full journal remains available through
+`praxis mission events` with pagination.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+N` / `n` | Create a mission with objective, scope, model, budgets and verification |
+| `/` | Filter missions |
+| `↑` / `↓` | Select a mission, or scroll the focused detail pane |
+| `Tab` | Switch between list and detail |
+| `1` / `2` / `3` | Overview / Evidence / Events |
+| `p` | Pause the selected running mission |
+| `r` | Resume with reconciliation and total budget fields |
+| `s` | Send a steering instruction |
+| `x` | Open cancellation confirmation |
+| `F5` | Refresh |
+| `Esc` | Dismiss a form, leave filter entry or return to the list |
+
+Forms use `Tab` / `Shift+Tab` to move between fields and `F2` or `Ctrl+S` to submit.
+Cancellation requires explicit confirmation. Resume retains the existing total
+budgets unless edited, and exposes reconciliation for uncertain tool calls.
+Requests run asynchronously, so the UI remains navigable while waiting for the
+service. A timeout can mean an action completed but its response was lost;
+refresh and inspect before retrying a mutation.
+
+The Orchestrator's `/mission` commands remain available for command-oriented
+usage. `/mission attach ID` follows events in chat and `/mission detach` stops
+that watcher. Detaching never cancels service-side work. See [Durable Missions](missions.md)
+for recovery, evidence and budget semantics.
 
 ## Nodes (`Ctrl+L`)
 
@@ -292,8 +332,8 @@ The TUI supports mouse interactions across all windows:
 - **Double-click** — activate items (e.g. open an operation, select a node)
 - **Drag** — scroll through lists and content areas
 - **Scroll wheel** — scroll through lists, chat history, and scrollable content
-- **Status bar** — every hint in the bottom bar is a button: the six window
-  names switch windows, `^h help` opens the Help Assistant, and `^q quit` exits
+- **Status bar** — every hint in the bottom bar is a button: the seven window
+  names switch windows (narrow terminals show shortcut keys with the active name), `^h help` opens the Help Assistant, and `^q quit` exits
 
 Mouse interactions work alongside keyboard controls in all windows and popups.
 
@@ -302,6 +342,7 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 | Key | Action |
 |-----|--------|
 | `Ctrl+O` | Orchestrator window |
+| `Ctrl+B` / `F6` | Missions window |
 | `Ctrl+L` | Nodes window |
 | `Ctrl+P` | Operations window |
 | `Ctrl+T` | Intercept window |

@@ -35,6 +35,7 @@ use traffic_queries::TrafficQueryProcessor;
 // ServiceContext holds all the shared state needed by message handlers.
 //
 pub struct ServiceContext {
+    pub mission_manager: Arc<crate::missions::MissionManager>,
     pub node_registry: Arc<NodeRegistry>,
     pub client_registry: Arc<ClientRegistry>,
     pub pending_commands: Arc<PendingCommands>,

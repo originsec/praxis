@@ -16,6 +16,7 @@ mod log_query;
 mod mcp;
 mod messaging;
 mod orchestrator;
+mod missions;
 mod remote_nodes;
 mod semantic_helpers;
 mod semantic_ops;
@@ -395,7 +396,9 @@ async fn run_main_loop() -> Result<()> {
     // Initialize Orchestrator manager, ACP server, and ACP node proxy.
     // The proxy is constructed first because several managers depend on it.
     //
+    database.interrupt_missions().await?;
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
+    let mission_manager = Arc::new(missions::MissionManager::new(database.clone(),orchestrator_manager.clone(),service_config.clone()));
     let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
     let acp_server = Arc::new(acp_server::AcpServer::new(
         orchestrator_manager.clone(),
@@ -963,6 +966,7 @@ async fn run_main_loop() -> Result<()> {
     // Create the service context for message dispatch.
     //
     let ctx = ServiceContext {
+        mission_manager,
         node_registry,
         client_registry,
         pending_commands,
@@ -1125,6 +1129,7 @@ async fn run_main_loop() -> Result<()> {
     traffic_query_processor.shutdown().await;
     intercept_processor.shutdown().await;
     intercept_broadcaster.shutdown().await;
+    ctx.mission_manager.shutdown().await;
     ctx.acp_server.shutdown().await;
 
     Ok(())

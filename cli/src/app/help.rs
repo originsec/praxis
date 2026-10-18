@@ -115,6 +115,10 @@ impl App {
                     .to_string(),
                 "Orchestrator",
             ),
+            Window::Missions => (
+                "The Missions window: durable objectives with budgets, checkpoints, evidence and events. Create, steer, pause, resume or cancel service-owned work without a chat session.".to_string(),
+                "Missions",
+            ),
             Window::Nodes => (
                 format!(
                     "The Nodes window: browse connected nodes and their agents, and open \

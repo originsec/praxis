@@ -56,6 +56,7 @@ pub const CLAUDE_CCRV2_DEFAULT_PORT: u16 = 8587;
 
 /// All recognized config keys for validation purposes.
 pub const KNOWN_CONFIG_KEYS: &[&str] = &[
+    "llm_orchestrator_native_tools",
     LLM_MODEL_DEFINITIONS,
     LLM_FEATURE_SEMANTIC_PARSER,
     LLM_FEATURE_TRAFFIC_PARSER,

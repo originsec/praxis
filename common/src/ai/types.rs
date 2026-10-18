@@ -8,6 +8,7 @@ pub enum Role {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 impl Role {
@@ -16,6 +17,7 @@ impl Role {
             Role::System => "system",
             Role::User => "user",
             Role::Assistant => "assistant",
+            Role::Tool => "tool",
         }
     }
 }
@@ -53,6 +55,21 @@ impl From<&str> for Content {
 pub struct Message {
     pub role: Role,
     pub content: Content,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_data: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
 }
 
 impl Message {
@@ -61,6 +78,10 @@ impl Message {
         Self {
             role,
             content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
+            provider_data: None,
         }
     }
 
@@ -77,6 +98,19 @@ impl Message {
     /// Create an assistant message
     pub fn assistant(content: impl Into<String>) -> Self {
         Self::new(Role::Assistant, Content::Text(content.into()))
+    }
+
+    pub fn assistant_with_tools(content: impl Into<String>, calls: Vec<ToolCall>) -> Self {
+        let mut message = Self::assistant(content);
+        message.tool_calls = calls;
+        message
+    }
+
+    pub fn tool_result(call: &ToolCall, content: impl Into<String>) -> Self {
+        let mut message = Self::new(Role::Tool, Content::Text(content.into()));
+        message.tool_call_id = Some(call.id.clone());
+        message.tool_name = Some(call.name.clone());
+        message
     }
 
     /// Get the text content of this message
@@ -134,6 +168,7 @@ pub struct ChatCompletionRequest {
     pub temperature: Option<f32>,
     /// Top-p sampling
     pub top_p: Option<f32>,
+    pub tools: Vec<Tool>,
 }
 
 impl ChatCompletionRequest {
@@ -145,7 +180,13 @@ impl ChatCompletionRequest {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            tools: Vec::new(),
         }
+    }
+
+    pub fn with_tools(mut self, tools: Vec<Tool>) -> Self {
+        self.tools = tools;
+        self
     }
 
     /// Set max tokens
@@ -201,8 +242,12 @@ pub struct Usage {
 }
 
 /// A streaming chunk from a chat completion
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChatCompletionDelta {
+    /// Complete calls, emitted only after successful completion of the response.
+    pub tool_calls: Vec<ToolCall>,
+    /// Opaque assistant history required by the originating provider.
+    pub provider_data: Option<Value>,
     /// Incremental text content (empty string if no content in this chunk)
     pub content: String,
     /// Finish reason, present only on the final chunk

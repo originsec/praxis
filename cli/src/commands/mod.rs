@@ -1,3 +1,4 @@
+pub mod mission;
 pub mod agent;
 pub mod intercept;
 pub mod node;

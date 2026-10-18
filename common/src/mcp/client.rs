@@ -16,6 +16,13 @@ use crate::{
 
 #[async_trait]
 pub trait McpClient: Send + Sync {
+    async fn mission(
+        &self,
+        _command: crate::missions::MissionCommand,
+    ) -> Result<crate::missions::MissionResponse> {
+        anyhow::bail!("Missions are unavailable for this client")
+    }
+
     /// Get current system state with connected nodes.
     async fn get_state(&self) -> Option<SystemState>;
 
@@ -99,6 +106,16 @@ pub trait McpClient: Send + Sync {
         agent_short_name: String,
         working_dir: Option<String>,
     ) -> Result<()>;
+
+    async fn run_chain_correlated(
+        &self,
+        _chain_id: String,
+        _node_id: String,
+        _agent_short_name: String,
+        _working_dir: Option<String>,
+    ) -> Result<String> {
+        anyhow::bail!("Correlated chain launches are unavailable for this client")
+    }
 
     /// Cancel a chain execution.
     async fn cancel_chain(&self, execution_id: String) -> Result<()>;

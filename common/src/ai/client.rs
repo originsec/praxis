@@ -33,37 +33,16 @@ impl AiClient {
 
     /// Send a streaming chat completion request.
     ///
-    /// Returns a stream of delta chunks. Currently supported for
-    /// OpenAI-compatible providers only. Falls back to a single-chunk
-    /// non-streaming response for unsupported providers.
+    /// Returns text deltas and complete native tool calls. Dropping the stream
+    /// cancels the in-flight HTTP request without a background worker.
     pub fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
     ) -> Pin<Box<dyn Stream<Item = Result<ChatCompletionDelta>> + Send + '_>> {
         match self {
             AiClient::OpenAI(client) => client.chat_completion_stream(request),
-            _ => {
-                //
-                // Fallback: execute non-streaming and emit as single chunk.
-                //
-                Box::pin(async_stream::try_stream! {
-                    let response = match self {
-                        AiClient::Anthropic(client) => client.chat_completion(request).await,
-                        AiClient::Gemini(client) => client.chat_completion(request).await,
-                        AiClient::OpenAI(_) => unreachable!(),
-                    }?;
-
-                    let text = response.text().unwrap_or_default().to_string();
-                    let finish_reason = response.choices.first()
-                        .and_then(|c| c.finish_reason.clone());
-
-                    yield ChatCompletionDelta {
-                        content: text,
-                        finish_reason,
-                        usage: response.usage,
-                    };
-                })
-            }
+            AiClient::Anthropic(client) => client.chat_completion_stream(request),
+            AiClient::Gemini(client) => client.chat_completion_stream(request),
         }
     }
 }
@@ -159,10 +138,7 @@ pub async fn execute_chat_completion(
 ///
 /// A Message object ready to be added to conversation history
 pub fn build_message(role: Role, content: String) -> Message {
-    Message {
-        role,
-        content: Content::Text(content),
-    }
+    Message::new(role, Content::Text(content))
 }
 
 /// Execute a chat completion and automatically parse for tool calls

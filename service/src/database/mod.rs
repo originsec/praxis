@@ -9,6 +9,7 @@ mod event_log;
 pub(crate) mod exec;
 mod intercept_targets;
 mod lua_agent_scripts;
+pub(crate) mod missions;
 mod operations;
 mod recon;
 mod remote_nodes;
@@ -229,6 +230,13 @@ impl Database {
 
     /// Run schema migrations for existing databases
     async fn run_migrations(&self) -> Result<()> {
+        self.db_execute("CREATE TABLE IF NOT EXISTS missions (id TEXT PRIMARY KEY, status TEXT NOT NULL, revision BIGINT NOT NULL, record_json TEXT NOT NULL, updated_at TEXT NOT NULL)", vec![]).await?;
+        let event_schema = match &self.pool {
+            DatabasePool::Sqlite(_) => "CREATE TABLE IF NOT EXISTS mission_events (id INTEGER PRIMARY KEY AUTOINCREMENT, mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE, kind TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL)",
+            DatabasePool::Postgres(_) => "CREATE TABLE IF NOT EXISTS mission_events (id BIGSERIAL PRIMARY KEY, mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE, kind TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL)",
+        };
+        self.db_execute(event_schema,vec![]).await?;
+        self.db_execute("CREATE INDEX IF NOT EXISTS mission_events_cursor ON mission_events(mission_id,id)",vec![]).await?;
         //
         // Migration: Add summary column to operations table.
         // This is needed for v0.2+ which stores summary separately from result.
@@ -709,11 +717,8 @@ mod foreign_key_tests {
 
     async fn temp_db() -> TempDb {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "praxis_fk_test_{}_{}.db",
-            std::process::id(),
-            n
-        ));
+        let path =
+            std::env::temp_dir().join(format!("praxis_fk_test_{}_{}.db", std::process::id(), n));
         let _ = std::fs::remove_file(&path);
         let db = Database::new(&DatabaseConfig::Sqlite { path: path.clone() })
             .await

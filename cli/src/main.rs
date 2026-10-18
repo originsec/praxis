@@ -65,6 +65,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Durable service-side missions
+    Mission(commands::mission::MissionArgs),
     /// Node management commands
     Node {
         #[command(subcommand)]
@@ -104,6 +106,7 @@ enum Commands {
 impl Commands {
     async fn execute(self, client: &client::Client) -> Result<()> {
         match self {
+            Commands::Mission(args) => commands::mission::execute(client, args).await,
             Commands::Node { command } => commands::node::execute(client, command).await,
             Commands::Agent { command } => commands::agent::execute(client, command).await,
             Commands::Intercept { command } => commands::intercept::execute(client, command).await,

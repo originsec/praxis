@@ -41,6 +41,16 @@ pub enum SessionCommand {
         text: String,
     },
 
+    /// Cancel an active prompt without closing its session
+    Cancel {
+        /// Node ID prefix
+        #[arg(short, long)]
+        node: String,
+        /// Explicit session ID (defaults to the saved session for this node)
+        #[arg(long)]
+        session_id: Option<String>,
+    },
+
     /// Close the current session
     Close {
         /// Node ID prefix
@@ -60,6 +70,9 @@ pub async fn execute(client: &Client, command: SessionCommand) -> Result<()> {
         } => create_session(client, &node, &agent, yolo, project, timeout).await,
         SessionCommand::Prompt { node, text } => send_prompt(client, &node, &text).await,
         SessionCommand::Close { node } => close_session(client, &node).await,
+        SessionCommand::Cancel { node, session_id } => {
+            cancel_session(client, &node, session_id).await
+        }
     }
 }
 
@@ -197,5 +210,27 @@ async fn close_session(client: &Client, node_prefix: &str) -> Result<()> {
     cli_state.clear_session(&node_id)?;
 
     print_success("Session closed");
+    Ok(())
+}
+
+async fn cancel_session(
+    client: &Client,
+    node_prefix: &str,
+    session_id: Option<String>,
+) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = super::find_node_id(&state, node_prefix)
+        .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
+    let saved = CliState::load().unwrap_or_default();
+    let session_id = session_id
+        .or_else(|| saved.get_session(&node_id))
+        .ok_or_else(|| anyhow!("No saved session for node; supply --session-id"))?;
+    client
+        .acp_notification(&node_id, "session/cancel", json!({"sessionId": session_id}))
+        .await?;
+    print_success("Session cancellation sent");
     Ok(())
 }
