@@ -48,7 +48,37 @@ Paths without valid authentication are filtered out of the recon project list.
 - Project settings (`.factory/settings.json`)
 - Project local-settings override (`.factory/settings.local.json`)
 - Project MCP config (`.factory/mcp.json`) - parsed for MCP servers
-- Project instructions (`AGENTS.md`)
+- Instructions: `AGENTS.md` / `CLAUDE.md` at the project root and in
+  `.factory/`, plus the personal `~/.factory/AGENTS.md` / `CLAUDE.md`
+
+**Hooks**
+- `hooks` in user / project `settings.json` (and `settings.local.json`, scope
+  `local`), plus `.factory/hooks/hooks.json` and `.factory/hooks.json` at
+  each level (the event map may sit at the root or under `hooks`)
+- Enabled plugins' `hooks/hooks.json` (or `hooks.json`)
+
+**Plugins and Marketplaces**
+- `~/.factory/plugins/installed_plugins.json` (Claude-compatible registry),
+  enabled via `enabledPlugins` in user or project `settings.json`
+- `~/.factory/plugins/known_marketplaces.json`
+
+**Skills**
+- `SKILL.md` skills from `.factory/skills`, `.agents/skills` and
+  `.agent/skills` at user and project scope, plus enabled plugins' `skills/`
+
+**Memory**
+- Droid has no built-in memory. Recon lists the community
+  `~/.factory/memories.md` convention and automation memory
+  (`.factory/automations/*/memory/*`, user and project).
+
+**Credentials (metadata only)**
+- `~/.factory/auth.v2.file` (AES-256-GCM encrypted store) and
+  `~/.factory/auth.v2.key` (its key, stored next to it, so the bundle is
+  decryptable at rest), `auth.v2.keyring` with a `Factory CLI` keychain
+  reference, legacy `auth.encrypted` / `auth.json`
+- BYOK `customModels[].apiKey` entries in `~/.factory/settings.json`: count and
+  providers only
+- `FACTORY_API_KEY` env var (name only)
 
 **Project discovery**
 
@@ -58,6 +88,8 @@ A directory is treated as a Droid project if a recursive walk finds any of:
 - `AGENTS.md`
 
 A bare `AGENTS.md` - with no `.factory/` directory at all - is enough to mark a project root; the connector piggybacks on the cross-agent `AGENTS.md` convention rather than requiring Factory-specific config to be present.
+
+Session working directories from `~/.factory/cache/session-discovery-index.json` are added as projects too (session directory names encode the cwd lossily).
 
 **Custom commands (skills)**
 

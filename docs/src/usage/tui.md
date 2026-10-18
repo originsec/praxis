@@ -59,7 +59,9 @@ sessions left alive from previous runs or other clients.
 
 The recon overlay opens as a full-screen modal from the Nodes detail
 pane. It is a hierarchical browser (expand/collapse groups, filter bar,
-detail pane) with three tabs: **Config**, **Tools**, and **Sessions**.
+detail pane) with three tabs: **Config** (config groups plus a
+metadata-only `credentials` group), **Tools** (MCP servers, skills,
+hooks, plugins, marketplaces, internal tools), and **Sessions**.
 See [Reconnaissance](./recon.md#running-recon) for the result contents
 and refresh behavior.
 

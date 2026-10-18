@@ -55,17 +55,50 @@ Static reconnaissance discovers:
 **Configuration**
 - User settings (`~/.gemini/settings.json`)
 - Google account info (`~/.gemini/google_accounts.json`)
-- OAuth credentials (`~/.gemini/oauth_creds.json`)
-- System defaults and settings (platform-specific paths)
+- System defaults and settings (platform-specific paths: `/etc/gemini-cli/`,
+  `/Library/Application Support/GeminiCli/`, `C:\ProgramData\gemini-cli\`)
 - Environment variable snapshot - when set, ~13 relevant variables (`GEMINI_API_KEY`, `GEMINI_MODEL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.) are captured into a synthetic config item
 
-**Context Files**
-- Global context (`~/.gemini/GEMINI.md`)
-- Project context files (configurable via `context.fileName` in settings)
+**Context Files (Instructions)**
+- Global context (`~/.gemini/GEMINI.md`, plus any custom `context.fileName`)
+- Project `GEMINI.md`, `.gemini/GEMINI.md` and custom context file names
+- `@file.md` imports are followed
+- Projects come from marker files, `~/.gemini/projects.json` and
+  `~/.gemini/trustedFolders.json`
 
-**Custom Commands (Skills)**
+**Memory**
+- `save_memory` appends to the global context file under
+  `## Gemini Added Memories`; files containing that section are also listed as
+  `saved_memory`.
+- Project-scoped memories under `~/.gemini/memory/<project-slug>/GEMINI.md`.
+
+**Hooks**
+- `hooks` in user, project, system and system-defaults `settings.json`
+  (system files are reported with scope `managed`), and enabled extensions'
+  `hooks/hooks.json` (scope `extension`).
+
+**Extensions (Plugins)**
+- `~/.gemini/extensions/<name>/gemini-extension.json` with version, install
+  source (`.gemini-extension-install.json`) and enablement from
+  `extension-enablement.json` (a trailing `!` override rule reports the
+  extension as disabled).
+- Extension skills (`skills/*/SKILL.md`) and TOML commands.
+
+**Credentials (metadata only)**
+- `~/.gemini/oauth_creds.json`: `expiry_date`, `scope`, `token_type`, and which
+  tokens are present. It is no longer listed as a readable config item.
+- `gemini-credentials.json` (encrypted store), `mcp-oauth-tokens.json`,
+  `a2a-oauth-tokens.json`, `google_accounts.json` (active account),
+  `security.auth.selectedType` from settings, `~/.gemini/.env`.
+- Keychain references `gemini-cli-oauth` / `gemini-cli-api-key` and the
+  `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`,
+  `GOOGLE_CLOUD_ACCESS_TOKEN` env vars (names only).
+
+**Custom Commands and Skills**
 - Custom commands under `.gemini/commands/**/*.toml`, discovered at both user scope (`~/.gemini/commands`) and project scope
 - Nested directories form namespaced command names (e.g. `git/commit.toml` becomes `/git/commit`)
+- `SKILL.md` skills from `~/.gemini/skills`, `~/.agents/skills`,
+  `<project>/.gemini/skills` and `<project>/.agents/skills`
 
 **Sessions**
 - Session files under `~/.gemini/tmp/<project_hash>/chats/`

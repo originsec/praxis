@@ -183,57 +183,40 @@ local function plugin_is_enabled(settings_path, plugin_id)
       and settings.enabledPlugins[plugin_id] == true
 end
 
-local function installed_plugin_entries(home)
+--
+-- Every recorded installation, enabled or not. installed_plugin_entries
+-- narrows this to the enabled ones whose components the agent loads.
+--
+
+local function all_plugin_installations(home)
   local path = praxis.path_join({ home, ".claude", "plugins", "installed_plugins.json" })
-  local parsed = helpers.parse_json(praxis.read_file(path))
-  if parsed == nil or type(parsed.plugins) ~= "table" then
-    return {}
-  end
-
   local entries = {}
-  for plugin_id, installations in pairs(parsed.plugins) do
-    local items = {}
-    if type(installations) == "table" and type(installations.installPath) == "string" then
-      items = { installations }
-    elseif type(installations) == "table" then
-      items = installations
+  for _, plugin in ipairs(helpers.parse_plugin_registry(path)) do
+    local enabled = false
+    if plugin.scope == "user" then
+      enabled = plugin_is_enabled(
+        praxis.path_join({ home, ".claude", "settings.json" }), plugin.id)
+    elseif (plugin.scope == "project" or plugin.scope == "local") and plugin.project_path then
+      plugin.context_path = plugin.project_path
+      local settings_name = plugin.scope == "local" and "settings.local.json" or "settings.json"
+      enabled = plugin_is_enabled(
+        praxis.path_join({ plugin.project_path, ".claude", settings_name }), plugin.id)
+    elseif plugin.scope == "managed" then
+      enabled = true
     end
+    plugin.enabled = enabled
+    table.insert(entries, plugin)
+  end
+  return entries
+end
 
-    for _, installation in ipairs(items) do
-      if type(installation) == "table" and type(installation.installPath) == "string" then
-        local scope = installation.scope or "user"
-        local context_path = nil
-        local enabled = false
-
-        if scope == "user" then
-          enabled = plugin_is_enabled(
-            praxis.path_join({ home, ".claude", "settings.json" }), plugin_id)
-        elseif scope == "project" or scope == "local" then
-          context_path = installation.projectPath
-          if type(context_path) == "string" and context_path ~= "" then
-            local settings_name = scope == "local"
-                and "settings.local.json" or "settings.json"
-            enabled = plugin_is_enabled(
-              praxis.path_join({ context_path, ".claude", settings_name }), plugin_id)
-          end
-        elseif scope == "managed" then
-          enabled = true
-        end
-
-        if enabled and praxis.path_is_dir(installation.installPath) then
-          table.insert(entries, {
-            id = plugin_id,
-            root = installation.installPath,
-            context_path = context_path,
-          })
-        end
-      end
+local function installed_plugin_entries(home)
+  local entries = {}
+  for _, plugin in ipairs(all_plugin_installations(home)) do
+    if plugin.enabled and praxis.path_is_dir(plugin.root) then
+      table.insert(entries, plugin)
     end
   end
-
-  table.sort(entries, function(a, b)
-    return a.id == b.id and a.root < b.root or a.id < b.id
-  end)
   return entries
 end
 
@@ -324,6 +307,21 @@ local function discover_skills(home, project_paths)
   local skills = {}
   local home_claude = praxis.path_join({ home, ".claude" })
 
+  --
+  -- Skills synced from claude.ai land in skills/synced/<account>_<org>/.
+  --
+
+  local synced = praxis.path_join({ home_claude, "skills", "synced" })
+  if praxis.path_is_dir(synced) then
+    for _, entry in ipairs(praxis.read_dir(synced) or {}) do
+      if entry.is_dir then
+        for _, s in ipairs(helpers.discover_skill_md_skills(synced, { dir = entry.name })) do
+          table.insert(skills, s)
+        end
+      end
+    end
+  end
+
   for _, s in ipairs(helpers.discover_command_skills(home_claude, {
     dir = "commands",
     pattern = "%.md$",
@@ -361,6 +359,186 @@ local function discover_skills(home, project_paths)
   return skills
 end
 
+local function add_marketplaces(out, map, path, scope, context_path)
+  for _, m in ipairs(helpers.marketplace_items(map, path, scope, context_path)) do
+    table.insert(out, m)
+  end
+end
+
+local function plugin_hooks(plugin, manifest)
+  local hooks = {}
+  local function add_from(tbl, source_path)
+    for _, h in ipairs(helpers.parse_hooks(tbl, {
+      scope = "plugin",
+      source_path = source_path,
+      context_path = plugin.context_path,
+    })) do
+      table.insert(hooks, h)
+    end
+  end
+
+  local default_path = praxis.path_join({ plugin.root, "hooks", "hooks.json" })
+  local doc = helpers.parse_json(praxis.read_file(default_path))
+  if doc then
+    add_from(doc.hooks, default_path)
+  end
+  if type(manifest.hooks) == "table" and #manifest.hooks == 0 then
+    add_from(manifest.hooks, praxis.path_join({ plugin.root, ".claude-plugin", "plugin.json" }))
+  else
+    for _, rel in ipairs(as_path_list(manifest.hooks)) do
+      local path = praxis.path_join({ plugin.root, rel })
+      if helpers.norm(path) ~= helpers.norm(default_path) then
+        local extra = helpers.parse_json(praxis.read_file(path))
+        if extra then
+          add_from(extra.hooks, path)
+        end
+      end
+    end
+  end
+  return hooks
+end
+
+local function discover_plugins(home, project_paths)
+  local found = { plugins = {}, marketplaces = {}, hooks = {} }
+
+  for _, plugin in ipairs(all_plugin_installations(home)) do
+    table.insert(found.plugins, {
+      name = plugin.id,
+      version = plugin.version,
+      source = plugin.marketplace,
+      enabled = plugin.enabled,
+      scope = plugin.scope,
+      path = plugin.root,
+      context_path = plugin.context_path,
+    })
+    if plugin.enabled and praxis.path_is_dir(plugin.root) then
+      for _, h in ipairs(plugin_hooks(plugin, plugin_manifest(plugin))) do
+        table.insert(found.hooks, h)
+      end
+    end
+  end
+
+  local plugins_dir = praxis.path_join({ home, ".claude", "plugins" })
+  for _, file in ipairs({ "known_marketplaces.json", "known_marketplaces_claudeai.json" }) do
+    local path = praxis.path_join({ plugins_dir, file })
+    add_marketplaces(found.marketplaces, helpers.parse_json(praxis.read_file(path)), path, "user")
+  end
+
+  local user_settings = praxis.path_join({ home, ".claude", "settings.json" })
+  local settings = helpers.parse_json(praxis.read_file(user_settings))
+  if settings then
+    add_marketplaces(found.marketplaces, settings.extraKnownMarketplaces, user_settings, "user")
+  end
+  for _, proj in ipairs(project_paths or {}) do
+    for _, name in ipairs({ "settings.json", "settings.local.json" }) do
+      local path = praxis.path_join({ proj, ".claude", name })
+      local doc = helpers.parse_json(praxis.read_file(path))
+      if doc then
+        add_marketplaces(found.marketplaces, doc.extraKnownMarketplaces, path,
+          name == "settings.json" and "project" or "local", proj)
+      end
+    end
+  end
+
+  return found
+end
+
+--
+-- Claude Code reads AGENTS.md only when a project has no CLAUDE.md,
+-- .claude/CLAUDE.md or CLAUDE.local.md, so add it as a fallback rather
+-- than as an unconditional project config.
+--
+
+local function add_agents_md_fallback(result)
+  for _, proj in ipairs(result.project_paths) do
+    local has_claude_md = false
+    for _, rel in ipairs({ "CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md" }) do
+      if praxis.path_exists(praxis.path_join({ proj, rel })) then
+        has_claude_md = true
+        break
+      end
+    end
+    if not has_claude_md then
+      for _, rel in ipairs({ "AGENTS.md", ".claude/AGENTS.md" }) do
+        local path = praxis.path_join({ proj, rel })
+        if praxis.path_exists(path) then
+          table.insert(result.config_items, {
+            path = path,
+            config_type = "project_instructions:" .. proj,
+          })
+        end
+      end
+    end
+  end
+end
+
+--
+-- ~/.claude.json keeps a `projects` map keyed by every directory Claude
+-- Code has been launched in.
+--
+
+local function discover_known_projects(home)
+  local paths = {}
+  local prefs = helpers.parse_json(praxis.read_file(praxis.path_join({ home, ".claude.json" })))
+  if prefs and type(prefs.projects) == "table" then
+    for path, _ in pairs(prefs.projects) do
+      if type(path) == "string" and praxis.path_is_dir(path) then
+        table.insert(paths, path)
+      end
+    end
+  end
+  for _, p in ipairs(discover_session_project_paths(home)) do
+    table.insert(paths, p)
+  end
+  return helpers.dedup(paths)
+end
+
+local MANAGED_DIRS = {
+  linux = "/etc/claude-code",
+  macos = "/Library/Application Support/ClaudeCode",
+  windows = "C:/Program Files/ClaudeCode",
+}
+
+local function managed_dir()
+  return MANAGED_DIRS[praxis.os_name()]
+end
+
+local function collect_managed_instructions(_is_semantic)
+  local result = helpers.new_recon_result()
+  local dir = managed_dir()
+  if dir then
+    helpers.add_config_if_exists(result.config_items,
+      praxis.path_join({ dir, "CLAUDE.md" }), "managed_instructions", false)
+    for _, s in ipairs(helpers.discover_skill_md_skills(praxis.path_join({ dir, ".claude" }), {
+      dir = "skills",
+    })) do
+      table.insert(result.skills, s)
+    end
+  end
+  return result
+end
+
+local function managed_hook_files()
+  local dir = managed_dir()
+  if not dir then
+    return {}
+  end
+  return {
+    { path = praxis.path_join({ dir, "managed-settings.json" }), scope = "managed" },
+    { path = praxis.path_join({ dir, "managed-settings.d", "*.json" }), scope = "managed" },
+  }
+end
+
+local function keychain_credentials(_home)
+  if praxis.os_name() ~= "macos" then
+    return {}
+  end
+  return {
+    helpers.credential_keychain("Claude Code-credentials", { holds = "claude.ai OAuth tokens" }),
+    helpers.credential_keychain("Claude Code", { holds = "Console API key" }),
+  }
+end
+
 local function discover_plugin_mcp(result, _ctx)
   for _, home in ipairs(praxis.user_homes() or {}) do
     for _, plugin in ipairs(installed_plugin_entries(home)) do
@@ -393,14 +571,24 @@ local function discover_plugin_mcp(result, _ctx)
   end
 end
 
+local function post_collect(result, ctx)
+  add_agents_md_fallback(result)
+  discover_plugin_mcp(result, ctx)
+end
+
 local recon_config = {
   home_dir = ".claude",
 
+  system_configs = collect_managed_instructions,
+
   home_configs = {
-    { path = ".claude/settings.json", type = "global_settings", mcp = true },
+    { path = ".claude/settings.json", type = "global_settings", mcp = true, hooks = true },
     { path = ".claude.json", type = "preferences", mcp = "preferences" },
     { path = ".claude/mcp.json", type = "global_mcp", mcp = "plugin" },
     { path = ".claude/CLAUDE.md", type = "global_instructions" },
+    { path = ".claude/rules/**/*.md", type = "global_rules" },
+    { path = ".claude/projects/*/memory/*.md", type = "auto_memory" },
+    { path = ".claude/agent-memory/*/MEMORY.md", type = "agent_memory" },
   },
 
   project_markers = {
@@ -409,14 +597,62 @@ local recon_config = {
     "/claude.md",
     "/CLAUDE.md",
   },
-  project_discovery = discover_session_project_paths,
+  project_discovery = discover_known_projects,
 
   project_configs = {
-    { path = ".claude/settings.json", type = "project_settings", mcp = true },
-    { path = ".claude/settings.local.json", type = "project_settings_local" },
+    { path = ".claude/settings.json", type = "project_settings", mcp = true, hooks = true },
+    { path = ".claude/settings.local.json", type = "project_settings_local",
+      hooks = true, hook_scope = "local" },
     { path = "CLAUDE.md", type = "project_instructions" },
+    { path = ".claude/CLAUDE.md", type = "project_instructions" },
+    { path = "CLAUDE.local.md", type = "project_local_instructions" },
+    { path = ".claude/rules/**/*.md", type = "project_rules" },
+    { path = ".claude/agent-memory/*/MEMORY.md", type = "project_agent_memory" },
     { path = ".mcp.json", type = "project_mcp", mcp = "project_mcp" },
   },
+
+  managed_hooks = {
+    default = managed_hook_files(),
+  },
+  plugin_discovery = discover_plugins,
+  instruction_imports = 4,
+
+  credentials = {
+    { path = ".claude/.credentials.json", kind = "oauth_token_file",
+      fields = {
+        subscription_type = "claudeAiOauth.subscriptionType",
+        rate_limit_tier = "claudeAiOauth.rateLimitTier",
+        expires_at = "claudeAiOauth.expiresAt",
+        refresh_token_expires_at = "claudeAiOauth.refreshTokenExpiresAt",
+      },
+      presence = { "claudeAiOauth.accessToken", "claudeAiOauth.refreshToken", "mcpOAuth" } },
+    { path = ".claude.json", kind = "account_config", require_any = true,
+      fields = {
+        email = "oauthAccount.emailAddress",
+        account_uuid = "oauthAccount.accountUuid",
+        organization = "oauthAccount.organizationName",
+        organization_role = "oauthAccount.organizationRole",
+        billing_type = "oauthAccount.billingType",
+      },
+      presence = { "oauthAccount", "primaryApiKey" } },
+    { path = ".claude/config.json", kind = "api_key_in_config", require_any = true,
+      presence = { "primaryApiKey" } },
+    { path = ".claude/settings.json", kind = "api_key_in_config", require_any = true,
+      presence = {
+        "apiKeyHelper",
+        "env.ANTHROPIC_API_KEY",
+        "env.ANTHROPIC_AUTH_TOKEN",
+        "env.CLAUDE_CODE_OAUTH_TOKEN",
+      } },
+  },
+  credential_env_vars = {
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  },
+  credential_discovery = keychain_credentials,
 
   mcp_parsers = {
     default = helpers.parse_mcp_from_json,
@@ -428,7 +664,7 @@ local recon_config = {
   auth_check = auth_check,
   session_discovery = discover_sessions_for_home,
   skill_discovery = discover_skills,
-  post_collect = discover_plugin_mcp,
+  post_collect = post_collect,
   session_fns = session_fns,
 }
 

@@ -56,10 +56,11 @@ fn register_tab_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
         overlay
             .recon_result
             .as_ref()
-            .map_or(0, |r| r.config.items.len()),
-        overlay.recon_result.as_ref().map_or(0, |r| {
-            r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
-        }),
+            .map_or(0, |r| r.config.items.len() + r.config.credentials.len()),
+        overlay
+            .recon_result
+            .as_ref()
+            .map_or(0, |r| r.tools.total_count()),
         overlay
             .recon_result
             .as_ref()
@@ -237,10 +238,11 @@ fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     let config_count = overlay
         .recon_result
         .as_ref()
-        .map_or(0, |r| r.config.items.len());
-    let tools_count = overlay.recon_result.as_ref().map_or(0, |r| {
-        r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
-    });
+        .map_or(0, |r| r.config.items.len() + r.config.credentials.len());
+    let tools_count = overlay
+        .recon_result
+        .as_ref()
+        .map_or(0, |r| r.tools.total_count());
     let sessions_count = overlay
         .recon_result
         .as_ref()

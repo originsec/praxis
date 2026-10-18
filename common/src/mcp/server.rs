@@ -349,6 +349,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "mcp_servers": recon.tools.mcp_servers.len(),
             "mcp_tools": mcp_tools_count,
             "skills": recon.tools.skills.len(),
+            "hooks": recon.tools.hooks.len(),
+            "plugins": recon.tools.plugins.len(),
+            "marketplaces": recon.tools.marketplaces.len(),
+            "credentials": recon.config.credentials.len(),
             "config_items": recon.config.items.len(),
             "sessions": recon.sessions.items.len(),
             "project_paths": recon.config.project_paths.len()
@@ -386,6 +390,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "mcp_tools": mcp_tools_count,
             "skills": recon.tools.skills.len(),
             "internal_tools": recon.tools.internal_tools.len(),
+            "hooks": recon.tools.hooks.len(),
+            "plugins": recon.tools.plugins.len(),
+            "marketplaces": recon.tools.marketplaces.len(),
+            "credentials": recon.config.credentials.len(),
             "config_items": recon.config.items.len(),
             "sessions": recon.sessions.items.len(),
             "project_paths": recon.config.project_paths.len()
@@ -393,7 +401,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 
     #[tool(
-        description = "List stored recon data. Section: all, sessions, tools, projects, configs (default: all)"
+        description = "List stored recon data. Section: all, sessions, tools, projects, configs, hooks, plugins (plugins + marketplaces), credentials (metadata only, never secret values), memory, instructions (default: all)"
     )]
     async fn recon_list(
         &self,
@@ -464,6 +472,33 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         if let Some(projects) = &result.projects {
             response["projects"] = json!(projects);
+        }
+
+        for (key, value) in [
+            ("hooks", result.hooks.as_ref().map(|v| json!(v))),
+            ("plugins", result.plugins.as_ref().map(|v| json!(v))),
+            (
+                "marketplaces",
+                result.marketplaces.as_ref().map(|v| json!(v)),
+            ),
+            ("credentials", result.credentials.as_ref().map(|v| json!(v))),
+        ] {
+            if let Some(value) = value {
+                response[key] = value;
+            }
+        }
+
+        for (key, items) in [
+            ("memory", &result.memory),
+            ("instructions", &result.instructions),
+        ] {
+            if let Some(items) = items {
+                let items: Vec<_> = items
+                    .iter()
+                    .map(|c| json!({"path": c.path, "config_type": c.config_type}))
+                    .collect();
+                response[key] = json!(items);
+            }
         }
 
         json_result(response)

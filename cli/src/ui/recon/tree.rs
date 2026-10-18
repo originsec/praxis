@@ -39,11 +39,10 @@ pub fn selected_session_idx(selected: &Option<ReconNodeId>) -> Option<usize> {
 
 pub fn expand_id_for(id: &ReconNodeId) -> Option<ReconExpandId> {
     match id {
-        ReconNodeId::ToolsSection(ToolsSectionKind::Mcp) => Some(ReconExpandId::ToolsMcp),
-        ReconNodeId::ToolsSection(ToolsSectionKind::Skills) => Some(ReconExpandId::ToolsSkills),
-        ReconNodeId::ToolsSection(ToolsSectionKind::Internal) => Some(ReconExpandId::ToolsInternal),
+        ReconNodeId::ToolsSection(kind) => Some(ReconExpandId::ToolsSection(*kind)),
         ReconNodeId::McpServer(i) => Some(ReconExpandId::McpServer(*i)),
         ReconNodeId::ConfigType(t) => Some(ReconExpandId::ConfigType(t.clone())),
+        ReconNodeId::CredentialsGroup => Some(ReconExpandId::Credentials),
         ReconNodeId::SessionProject(p) => Some(ReconExpandId::SessionProject(p.clone())),
         _ => None,
     }
@@ -63,9 +62,22 @@ pub fn toggle_expand(overlay: &mut ReconOverlay, id: &ReconNodeId) {
 
 pub fn default_expanded(result: &common::ReconResult) -> HashSet<ReconExpandId> {
     let mut e = HashSet::new();
-    e.insert(ReconExpandId::ToolsMcp);
-    if result.tools.skills.len() <= 8 {
-        e.insert(ReconExpandId::ToolsSkills);
+    e.insert(ReconExpandId::ToolsSection(ToolsSectionKind::Mcp));
+    for (kind, n) in [
+        (ToolsSectionKind::Skills, result.tools.skills.len()),
+        (ToolsSectionKind::Hooks, result.tools.hooks.len()),
+        (ToolsSectionKind::Plugins, result.tools.plugins.len()),
+        (
+            ToolsSectionKind::Marketplaces,
+            result.tools.marketplaces.len(),
+        ),
+    ] {
+        if n <= 8 {
+            e.insert(ReconExpandId::ToolsSection(kind));
+        }
+    }
+    if result.config.credentials.len() <= 12 {
+        e.insert(ReconExpandId::Credentials);
     }
     // Internal often long / semantic-only — start collapsed.
 
@@ -153,15 +165,19 @@ fn build_tools_rows(
                     return true;
                 }
                 matches_filter(filter, &[&s.name, &s.transport.to_string()])
-                    || s.tools.iter().any(|t| {
-                        matches_filter(filter, &[&t.name, &t.description])
-                    })
+                    || s.tools
+                        .iter()
+                        .any(|t| matches_filter(filter, &[&t.name, &t.description]))
             })
             .collect();
 
         if !filtering || !servers.is_empty() || matches_filter(filter, &["mcp", "servers"]) {
             let sec_id = ReconNodeId::ToolsSection(ToolsSectionKind::Mcp);
-            let expanded = is_expanded(overlay, &ReconExpandId::ToolsMcp, filtering);
+            let expanded = is_expanded(
+                overlay,
+                &ReconExpandId::ToolsSection(ToolsSectionKind::Mcp),
+                filtering,
+            );
             rows.push(VisibleRow {
                 id: sec_id,
                 depth: 0,
@@ -191,7 +207,8 @@ fn build_tools_rows(
                     }
 
                     let eid = ReconExpandId::McpServer(*si);
-                    let expanded_s = is_expanded(overlay, &eid, filtering && !tool_matches.is_empty());
+                    let expanded_s =
+                        is_expanded(overlay, &eid, filtering && !tool_matches.is_empty());
                     let (badge_label, badge_color) = if server.tools.is_empty() {
                         ("empty".to_string(), STATUS_RUNNING)
                     } else {
@@ -240,87 +257,171 @@ fn build_tools_rows(
         }
     }
 
-    // Skills
-    {
-        let skills: Vec<(usize, &common::AgentTool)> = result
-            .tools
-            .skills
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| {
-                !filtering || matches_filter(filter, &[&s.name, &s.description])
-            })
-            .collect();
-        if !filtering || !skills.is_empty() || matches_filter(filter, &["skills"]) {
-            let expanded = is_expanded(overlay, &ReconExpandId::ToolsSkills, filtering);
-            rows.push(VisibleRow {
-                id: ReconNodeId::ToolsSection(ToolsSectionKind::Skills),
-                depth: 0,
-                expandable: true,
-                expanded,
-                label: "Skills".to_string(),
-                meta: format!("({})", result.tools.skills.len()),
-                badge: None,
-                trailing: String::new(),
-            });
-            if expanded {
-                for (i, skill) in skills {
-                    rows.push(VisibleRow {
-                        id: ReconNodeId::Skill(i),
-                        depth: 1,
-                        expandable: false,
-                        expanded: false,
-                        label: skill.name.clone(),
-                        meta: String::new(),
-                        badge: None,
-                        trailing: String::new(),
-                    });
-                }
-            }
-        }
-    }
+    let tools = &result.tools;
+    let skills = tools
+        .skills
+        .iter()
+        .map(|t| leaf(&t.name, String::new(), &[&t.name, &t.description]))
+        .collect();
+    push_flat_section(&mut rows, overlay, filter, ToolsSectionKind::Skills, skills);
 
-    // Internal
-    {
-        let tools: Vec<(usize, &common::AgentTool)> = result
-            .tools
-            .internal_tools
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| {
-                !filtering || matches_filter(filter, &[&t.name, &t.description])
-            })
-            .collect();
-        if !filtering || !tools.is_empty() || matches_filter(filter, &["internal"]) {
-            let expanded = is_expanded(overlay, &ReconExpandId::ToolsInternal, filtering);
-            rows.push(VisibleRow {
-                id: ReconNodeId::ToolsSection(ToolsSectionKind::Internal),
-                depth: 0,
-                expandable: true,
-                expanded,
-                label: "Internal".to_string(),
-                meta: format!("({})", result.tools.internal_tools.len()),
-                badge: None,
-                trailing: String::new(),
-            });
-            if expanded {
-                for (i, tool) in tools {
-                    rows.push(VisibleRow {
-                        id: ReconNodeId::Internal(i),
-                        depth: 1,
-                        expandable: false,
-                        expanded: false,
-                        label: tool.name.clone(),
-                        meta: String::new(),
-                        badge: None,
-                        trailing: String::new(),
-                    });
-                }
-            }
-        }
-    }
+    let hooks = tools
+        .hooks
+        .iter()
+        .map(|h| {
+            let label = match h.matcher.as_deref() {
+                Some(m) => format!("{} [{}]", h.event, m),
+                None => h.event.clone(),
+            };
+            leaf(
+                &label,
+                h.scope.clone(),
+                &[&h.event, &h.command, &h.scope, &h.source_path],
+            )
+        })
+        .collect();
+    push_flat_section(&mut rows, overlay, filter, ToolsSectionKind::Hooks, hooks);
+
+    let plugins = tools
+        .plugins
+        .iter()
+        .map(|p| {
+            let trailing = if p.enabled {
+                p.scope.clone()
+            } else {
+                "disabled".to_string()
+            };
+            leaf(
+                &p.name,
+                trailing,
+                &[&p.name, p.source.as_deref().unwrap_or(""), &p.path],
+            )
+        })
+        .collect();
+    push_flat_section(
+        &mut rows,
+        overlay,
+        filter,
+        ToolsSectionKind::Plugins,
+        plugins,
+    );
+
+    let marketplaces = tools
+        .marketplaces
+        .iter()
+        .map(|m| leaf(&m.name, truncate_path(&m.source, 32), &[&m.name, &m.source]))
+        .collect();
+    push_flat_section(
+        &mut rows,
+        overlay,
+        filter,
+        ToolsSectionKind::Marketplaces,
+        marketplaces,
+    );
+
+    let internal = tools
+        .internal_tools
+        .iter()
+        .map(|t| leaf(&t.name, String::new(), &[&t.name, &t.description]))
+        .collect();
+    push_flat_section(
+        &mut rows,
+        overlay,
+        filter,
+        ToolsSectionKind::Internal,
+        internal,
+    );
 
     rows
+}
+
+//
+// One leaf row in a flat Tools section: label, trailing hint and the
+// strings the filter matches against.
+//
+
+struct Leaf {
+    label: String,
+    trailing: String,
+    haystack: Vec<String>,
+}
+
+fn leaf(label: &str, trailing: String, haystack: &[&str]) -> Leaf {
+    Leaf {
+        label: label.to_string(),
+        trailing,
+        haystack: haystack.iter().map(|h| h.to_string()).collect(),
+    }
+}
+
+fn section_label(kind: ToolsSectionKind) -> &'static str {
+    match kind {
+        ToolsSectionKind::Mcp => "MCP Servers",
+        ToolsSectionKind::Skills => "Skills",
+        ToolsSectionKind::Hooks => "Hooks",
+        ToolsSectionKind::Plugins => "Plugins",
+        ToolsSectionKind::Marketplaces => "Marketplaces",
+        ToolsSectionKind::Internal => "Internal",
+    }
+}
+
+fn leaf_id(kind: ToolsSectionKind, i: usize) -> ReconNodeId {
+    match kind {
+        ToolsSectionKind::Skills => ReconNodeId::Skill(i),
+        ToolsSectionKind::Hooks => ReconNodeId::Hook(i),
+        ToolsSectionKind::Plugins => ReconNodeId::Plugin(i),
+        ToolsSectionKind::Marketplaces => ReconNodeId::Marketplace(i),
+        ToolsSectionKind::Mcp => ReconNodeId::McpServer(i),
+        ToolsSectionKind::Internal => ReconNodeId::Internal(i),
+    }
+}
+
+fn push_flat_section(
+    rows: &mut Vec<VisibleRow>,
+    overlay: &ReconOverlay,
+    filter: &str,
+    kind: ToolsSectionKind,
+    leaves: Vec<Leaf>,
+) {
+    let filtering = filter_active(filter);
+    let total = leaves.len();
+    let label = section_label(kind);
+    let matching: Vec<(usize, Leaf)> = leaves
+        .into_iter()
+        .enumerate()
+        .filter(|(_, l)| {
+            let hay: Vec<&str> = l.haystack.iter().map(String::as_str).collect();
+            !filtering || matches_filter(filter, &hay)
+        })
+        .collect();
+    if filtering && matching.is_empty() && !matches_filter(filter, &[label]) {
+        return;
+    }
+    let expanded = is_expanded(overlay, &ReconExpandId::ToolsSection(kind), filtering);
+    rows.push(VisibleRow {
+        id: ReconNodeId::ToolsSection(kind),
+        depth: 0,
+        expandable: true,
+        expanded,
+        label: label.to_string(),
+        meta: format!("({})", total),
+        badge: None,
+        trailing: String::new(),
+    });
+    if expanded {
+        for (i, l) in matching {
+            rows.push(VisibleRow {
+                id: leaf_id(kind, i),
+                depth: 1,
+                expandable: false,
+                expanded: false,
+                label: l.label,
+                meta: String::new(),
+                badge: None,
+                trailing: l.trailing,
+            });
+        }
+    }
 }
 
 //
@@ -329,13 +430,7 @@ fn build_tools_rows(
 // group keyed by the type prefix so the tree is scannable.
 //
 fn config_group_key(config_type: &str) -> String {
-    if let Some((prefix, rest)) = config_type.split_once(':') {
-        let rest = rest.trim();
-        if rest.starts_with('/') || rest.starts_with('~') || rest.starts_with('.') {
-            return prefix.trim().to_string();
-        }
-    }
-    config_type.to_string()
+    common::config_type_group(config_type).to_string()
 }
 
 fn config_item_in_group(item: &common::ConfigItem, group: &str) -> bool {
@@ -376,9 +471,7 @@ fn build_config_rows(
 ) -> Vec<VisibleRow> {
     let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, item) in result.config.items.iter().enumerate() {
-        if filter_active(filter)
-            && !matches_filter(filter, &[&item.path, &item.config_type])
-        {
+        if filter_active(filter) && !matches_filter(filter, &[&item.path, &item.config_type]) {
             continue;
         }
         groups
@@ -432,6 +525,50 @@ fn build_config_rows(
             }
         }
     }
+
+    //
+    // Credential stores are metadata-only, so they live in their own
+    // group with no file content behind the rows.
+    //
+    let creds: Vec<(usize, &common::CredentialItem)> = result
+        .config
+        .credentials
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !filtering || matches_filter(filter, &[&c.path, &c.kind, "credentials"]))
+        .collect();
+    if !creds.is_empty() {
+        let expanded = is_expanded(overlay, &ReconExpandId::Credentials, filtering);
+        rows.push(VisibleRow {
+            id: ReconNodeId::CredentialsGroup,
+            depth: 0,
+            expandable: true,
+            expanded,
+            label: "credentials".to_string(),
+            meta: format!("({})", result.config.credentials.len()),
+            badge: None,
+            trailing: "metadata only".to_string(),
+        });
+        if expanded {
+            for (i, c) in creds {
+                let (badge, color) = match c.exists {
+                    Some(true) => ("present", STATUS_DONE),
+                    Some(false) => ("absent", MUTED),
+                    None => ("keychain", STATUS_RUNNING),
+                };
+                rows.push(VisibleRow {
+                    id: ReconNodeId::Credential(i),
+                    depth: 1,
+                    expandable: false,
+                    expanded: false,
+                    label: truncate_path(&c.path, 48),
+                    meta: String::new(),
+                    badge: Some((badge.to_string(), color)),
+                    trailing: c.kind.clone(),
+                });
+            }
+        }
+    }
     rows
 }
 
@@ -443,10 +580,7 @@ fn build_sessions_rows(
     let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, s) in result.sessions.items.iter().enumerate() {
         if filter_active(filter)
-            && !matches_filter(
-                filter,
-                &[&s.session_id, &s.context_path, &s.session_file],
-            )
+            && !matches_filter(filter, &[&s.session_id, &s.context_path, &s.session_file])
         {
             continue;
         }
@@ -645,10 +779,7 @@ pub fn row_line(
     }
 
     if !row.meta.is_empty() {
-        spans.push(Span::styled(
-            format!("  {}", row.meta),
-            meta_style,
-        ));
+        spans.push(Span::styled(format!("  {}", row.meta), meta_style));
     }
 
     //
@@ -664,10 +795,7 @@ pub fn row_line(
             spans.push(Span::styled(" ".repeat(pad), apply_bg(Style::default())));
             spans.push(Span::styled(row.trailing.clone(), trail_style));
         } else {
-            spans.push(Span::styled(
-                format!("  {}", row.trailing),
-                trail_style,
-            ));
+            spans.push(Span::styled(format!("  {}", row.trailing), trail_style));
         }
     }
 
@@ -685,9 +813,33 @@ pub fn detail_title(overlay: &ReconOverlay) -> String {
         return " Detail ".to_string();
     };
     match id {
-        ReconNodeId::ToolsSection(ToolsSectionKind::Mcp) => " MCP Servers ".to_string(),
-        ReconNodeId::ToolsSection(ToolsSectionKind::Skills) => " Skills ".to_string(),
         ReconNodeId::ToolsSection(ToolsSectionKind::Internal) => " Internal Tools ".to_string(),
+        ReconNodeId::ToolsSection(kind) => format!(" {} ", section_label(*kind)),
+        ReconNodeId::Hook(i) => result
+            .tools
+            .hooks
+            .get(*i)
+            .map(|h| format!(" {} ", h.event))
+            .unwrap_or_else(|| " Hook ".to_string()),
+        ReconNodeId::Plugin(i) => result
+            .tools
+            .plugins
+            .get(*i)
+            .map(|p| format!(" {} ", p.name))
+            .unwrap_or_else(|| " Plugin ".to_string()),
+        ReconNodeId::Marketplace(i) => result
+            .tools
+            .marketplaces
+            .get(*i)
+            .map(|m| format!(" {} ", m.name))
+            .unwrap_or_else(|| " Marketplace ".to_string()),
+        ReconNodeId::CredentialsGroup => " Credentials ".to_string(),
+        ReconNodeId::Credential(i) => result
+            .config
+            .credentials
+            .get(*i)
+            .map(|c| format!(" {} ", c.path))
+            .unwrap_or_else(|| " Credential ".to_string()),
         ReconNodeId::McpServer(i) => result
             .tools
             .mcp_servers
@@ -751,7 +903,11 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
                     Style::default().fg(TEXT_BRIGHT),
                 )),
                 Line::from(Span::styled(
-                    format!(" {} tool{} discovered across servers", tools, if tools == 1 { "" } else { "s" }),
+                    format!(
+                        " {} tool{} discovered across servers",
+                        tools,
+                        if tools == 1 { "" } else { "s" }
+                    ),
                     Style::default().fg(MUTED),
                 )),
                 Line::from(""),
@@ -761,12 +917,65 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
                 )),
             ]
         }
-        ReconNodeId::ToolsSection(ToolsSectionKind::Skills) => {
-            summary_list(
-                "skill",
-                result.tools.skills.len(),
-                "Slash-command style skills available to the agent.",
-            )
+        ReconNodeId::ToolsSection(ToolsSectionKind::Skills) => summary_list(
+            "skill",
+            result.tools.skills.len(),
+            "Slash commands and SKILL.md skills (agent-specific and shared .agents/skills dirs).",
+        ),
+        ReconNodeId::ToolsSection(ToolsSectionKind::Hooks) => summary_list(
+            "hook",
+            result.tools.hooks.len(),
+            "Lifecycle hooks from user, project, managed and plugin scopes.",
+        ),
+        ReconNodeId::ToolsSection(ToolsSectionKind::Plugins) => summary_list(
+            "plugin",
+            result.tools.plugins.len(),
+            "Installed plugins / extensions.",
+        ),
+        ReconNodeId::ToolsSection(ToolsSectionKind::Marketplaces) => summary_list(
+            "marketplace",
+            result.tools.marketplaces.len(),
+            "Configured plugin marketplace sources.",
+        ),
+        ReconNodeId::Hook(i) => {
+            let Some(h) = result.tools.hooks.get(*i) else {
+                return empty_detail();
+            };
+            field_lines(&[
+                ("Event", Some(h.event.as_str())),
+                ("Matcher", h.matcher.as_deref()),
+                ("Type", h.hook_type.as_deref()),
+                ("Command", Some(h.command.as_str())),
+                ("Scope", Some(h.scope.as_str())),
+                ("Source", Some(h.source_path.as_str())),
+                ("Context", h.context_path.as_deref()),
+            ])
+        }
+        ReconNodeId::Plugin(i) => {
+            let Some(p) = result.tools.plugins.get(*i) else {
+                return empty_detail();
+            };
+            field_lines(&[
+                ("Name", Some(p.name.as_str())),
+                ("Version", p.version.as_deref()),
+                ("Source", p.source.as_deref()),
+                ("Enabled", Some(if p.enabled { "yes" } else { "no" })),
+                ("Scope", Some(p.scope.as_str())),
+                ("Path", Some(p.path.as_str())),
+                ("Context", p.context_path.as_deref()),
+            ])
+        }
+        ReconNodeId::Marketplace(i) => {
+            let Some(m) = result.tools.marketplaces.get(*i) else {
+                return empty_detail();
+            };
+            field_lines(&[
+                ("Name", Some(m.name.as_str())),
+                ("Source", Some(m.source.as_str())),
+                ("Scope", Some(m.scope.as_str())),
+                ("Declared in", Some(m.path.as_str())),
+                ("Context", m.context_path.as_deref()),
+            ])
         }
         ReconNodeId::ToolsSection(ToolsSectionKind::Internal) => {
             let n = result.tools.internal_tools.len();
@@ -791,7 +1000,12 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(" Name  ", Style::default().fg(MUTED)),
-                    Span::styled(server.name.clone(), Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        server.name.clone(),
+                        Style::default()
+                            .fg(TEXT_BRIGHT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled(" Transport  ", Style::default().fg(MUTED)),
@@ -819,7 +1033,9 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!(" Tools ({})", server.tools.len()),
-                Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             )));
             if server.tools.is_empty() {
                 lines.push(Line::from(Span::styled(
@@ -851,7 +1067,12 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
                 .get(*server)
                 .map(|s| s.name.as_str())
                 .unwrap_or("?");
-            tool_detail_lines(&t.name, &t.description, Some(server_name), t.context_path.as_deref())
+            tool_detail_lines(
+                &t.name,
+                &t.description,
+                Some(server_name),
+                t.context_path.as_deref(),
+            )
         }
         ReconNodeId::Skill(i) => {
             let Some(t) = result.tools.skills.get(*i) else {
@@ -866,6 +1087,73 @@ pub fn tools_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
             tool_detail_lines(&t.name, &t.description, None, t.context_path.as_deref())
         }
         _ => empty_detail(),
+    }
+}
+
+//
+// Label/value detail block; empty or missing values are skipped.
+//
+
+fn field_lines(fields: &[(&str, Option<&str>)]) -> Vec<Line<'static>> {
+    fields
+        .iter()
+        .filter_map(|(label, value)| {
+            let value = value.filter(|v| !v.is_empty())?;
+            Some(Line::from(vec![
+                Span::styled(format!(" {}  ", label), Style::default().fg(MUTED)),
+                Span::styled(value.to_string(), Style::default().fg(TEXT)),
+            ]))
+        })
+        .collect()
+}
+
+pub fn credential_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>> {
+    let Some(result) = overlay.recon_result.as_ref() else {
+        return empty_detail();
+    };
+    match overlay.selected {
+        Some(ReconNodeId::Credential(i)) => {
+            let Some(c) = result.config.credentials.get(i) else {
+                return empty_detail();
+            };
+            let exists = match c.exists {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "unknown (not inspected)",
+            };
+            let mut lines = field_lines(&[
+                ("Path", Some(c.path.as_str())),
+                ("Kind", Some(c.kind.as_str())),
+                ("Exists", Some(exists)),
+                ("Modified", c.last_modified.as_deref()),
+            ]);
+            if !c.metadata.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    " Metadata",
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                let pairs: Vec<(&str, Option<&str>)> = c
+                    .metadata
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), Some(v.as_str())))
+                    .collect();
+                lines.extend(field_lines(&pairs));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                " Secret values are never collected.",
+                Style::default().fg(DIM),
+            )));
+            lines
+        }
+        _ => summary_list(
+            "credential store",
+            result.config.credentials.len(),
+            "Where the agent keeps credentials (metadata only, secrets redacted on the node).",
+        ),
     }
 }
 
@@ -913,12 +1201,7 @@ fn tool_detail_lines(
 fn summary_list(singular: &str, n: usize, blurb: &str) -> Vec<Line<'static>> {
     vec![
         Line::from(Span::styled(
-            format!(
-                " {} {}{}",
-                n,
-                singular,
-                if n == 1 { "" } else { "s" }
-            ),
+            format!(" {} {}{}", n, singular, if n == 1 { "" } else { "s" }),
             Style::default().fg(TEXT_BRIGHT),
         )),
         Line::from(""),
@@ -984,13 +1267,14 @@ pub fn session_project_detail_lines(overlay: &ReconOverlay) -> Vec<Line<'static>
         .count();
     vec![
         Line::from(Span::styled(
-            format!(" {} session{} under", count, if count == 1 { "" } else { "s" }),
+            format!(
+                " {} session{} under",
+                count,
+                if count == 1 { "" } else { "s" }
+            ),
             Style::default().fg(TEXT_BRIGHT),
         )),
-        Line::from(Span::styled(
-            format!(" {}", p),
-            Style::default().fg(MUTED),
-        )),
+        Line::from(Span::styled(format!(" {}", p), Style::default().fg(MUTED))),
         Line::from(""),
         Line::from(Span::styled(
             " Expand and select a session to view the transcript.",

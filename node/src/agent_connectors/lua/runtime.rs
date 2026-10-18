@@ -249,7 +249,8 @@ pub fn vm_recon(lua: &Lua, is_semantic: bool, process_path: Option<&str>) -> Res
         }))
         .map_err(lua_error)?;
     let value: Value = func.call(ctx).map_err(lua_error)?;
-    let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
+    let mut recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
+    recon.redact_secrets();
     Ok(recon)
 }
 
@@ -439,6 +440,36 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             "path_is_dir",
             lua.create_function(|_, path: String| Ok(Path::new(&path).is_dir()))
                 .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "path_stat",
+            lua.create_function(|lua, path: String| {
+                let Ok(md) = std::fs::metadata(&path) else {
+                    return Ok(Value::Nil);
+                };
+                let modified = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64);
+                #[cfg(unix)]
+                let mode = {
+                    use std::os::unix::fs::PermissionsExt;
+                    Some(format!("{:o}", md.permissions().mode() & 0o777))
+                };
+                #[cfg(not(unix))]
+                let mode: Option<String> = None;
+                lua.to_value(&json!({
+                    "is_dir": md.is_dir(),
+                    "size": md.len(),
+                    "modified_unix": modified,
+                    "mode": mode,
+                }))
+            })
+            .map_err(lua_error)?,
         )
         .map_err(lua_error)?;
 

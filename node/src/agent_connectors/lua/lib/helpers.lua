@@ -116,35 +116,32 @@ end
 -- run_standard_recon entrypoint.
 --
 
+local RECON_LIST_FIELDS = {
+  "config_items",
+  "raw_configs_for_mcp",
+  "context_filenames",
+  "project_paths",
+  "sessions",
+  "skills",
+  "hooks",
+  "plugins",
+  "marketplaces",
+  "credentials",
+}
+
 function M.new_recon_result()
-  return {
-    config_items = {},
-    raw_configs_for_mcp = {},
-    context_filenames = {},
-    project_paths = {},
-    sessions = {},
-    skills = {},
-  }
+  local result = {}
+  for _, field in ipairs(RECON_LIST_FIELDS) do
+    result[field] = {}
+  end
+  return result
 end
 
 function M.merge_recon_result(dest, source)
-  for _, item in ipairs(source.config_items or {}) do
-    table.insert(dest.config_items, item)
-  end
-  for _, item in ipairs(source.raw_configs_for_mcp or {}) do
-    table.insert(dest.raw_configs_for_mcp, item)
-  end
-  for _, f in ipairs(source.context_filenames or {}) do
-    table.insert(dest.context_filenames, f)
-  end
-  for _, p in ipairs(source.project_paths or {}) do
-    table.insert(dest.project_paths, p)
-  end
-  for _, s in ipairs(source.sessions or {}) do
-    table.insert(dest.sessions, s)
-  end
-  for _, s in ipairs(source.skills or {}) do
-    table.insert(dest.skills, s)
+  for _, field in ipairs(RECON_LIST_FIELDS) do
+    for _, item in ipairs(source[field] or {}) do
+      table.insert(dest[field], item)
+    end
   end
 end
 
@@ -888,6 +885,11 @@ end
 --
 -- When mcp is truthy, the config's content is tracked in raw_configs_for_mcp
 -- with an mcp_key field (true becomes "default", a string is used directly).
+-- When hooks is truthy the file's hooks are parsed into result.hooks: true
+-- reads the top-level `hooks` key, "root" treats the whole document as the
+-- event map, and a function fn(doc, meta) -> {hooks} handles agent-specific
+-- shapes. tmpl.hook_scope overrides the scope recorded on each hook
+-- (defaults to "user" / "project" from opts.scope).
 -- Recon never carries file contents in its output — contents are fetched
 -- on-demand by the consumer.
 --
@@ -911,6 +913,24 @@ function M.collect_configs(base_path, templates, opts)
       contents = contents,
     })
 
+    if tmpl.hooks then
+      local doc = M.parse_config_document(file_path, contents)
+      local meta = {
+        scope = tmpl.hook_scope or (scope == "project" and "project" or "user"),
+        source_path = file_path,
+        context_path = scope == "project" and base_path or nil,
+      }
+      local hooks = {}
+      if doc and type(tmpl.hooks) == "function" then
+        hooks = tmpl.hooks(doc, meta) or {}
+      elseif doc then
+        hooks = M.parse_hooks(tmpl.hooks == "root" and doc or doc.hooks, meta)
+      end
+      for _, hook in ipairs(hooks) do
+        table.insert(result.hooks, hook)
+      end
+    end
+
     if tmpl.mcp then
       local content = contents or praxis.read_file(file_path)
       if content then
@@ -932,7 +952,9 @@ function M.collect_configs(base_path, templates, opts)
     if file_path:find("[%*%?]") then
       local matches = praxis.glob_files(file_path) or {}
       for _, match in ipairs(matches) do
-        add_item(match, tmpl)
+        if not praxis.path_is_dir(match) then
+          add_item(match, tmpl)
+        end
       end
     else
       if praxis.path_exists(file_path) then
@@ -1198,6 +1220,533 @@ function M.dedup_skills(skills)
 end
 
 --
+-- Look up a dotted path ("tokens.account_id") in a decoded table.
+--
+
+function M.get_path(obj, dotted)
+  local cur = obj
+  for part in tostring(dotted or ""):gmatch("[^%.]+") do
+    if type(cur) ~= "table" then
+      return nil
+    end
+    cur = cur[part]
+  end
+  return cur
+end
+
+--
+-- Decode a JSON or TOML config file (by extension). contents may be passed
+-- when the caller already read the file.
+--
+
+function M.parse_config_document(path, contents)
+  contents = contents or praxis.read_file(path)
+  if contents == nil then
+    return nil
+  end
+  if M.ends_with(string.lower(path), ".toml") then
+    return M.parse_toml(contents)
+  end
+  return M.parse_json(contents)
+end
+
+--
+-- Parse an event -> handlers map into HookItem tables. Two shapes are in
+-- use across agents:
+--
+--   nested (Claude Code, Gemini CLI, Codex, Droid):
+--     { PreToolUse = { { matcher = "Bash", hooks = { { type = "command", command = "..." } } } } }
+--   flat (Cursor, Antigravity):
+--     { beforeShellExecution = { { command = "...", matcher = "..." } } }
+--
+-- An event may map to a single handler table instead of a list. meta
+-- carries scope / source_path / context_path for every emitted hook.
+--
+
+local function hook_command(h)
+  for _, field in ipairs({ "command", "url", "prompt", "bash", "powershell" }) do
+    if type(h[field]) == "string" and h[field] ~= "" then
+      return h[field]
+    end
+  end
+  if type(h.server) == "string" and type(h.tool) == "string" then
+    return "mcp:" .. h.server .. "/" .. h.tool
+  end
+  return ""
+end
+
+local function hook_matcher(m)
+  if type(m) == "string" and m ~= "" then
+    return m
+  end
+  if type(m) == "table" then
+    local parts = {}
+    for _, v in ipairs(m) do
+      table.insert(parts, tostring(v))
+    end
+    if #parts > 0 then
+      return table.concat(parts, "|")
+    end
+  end
+  return nil
+end
+
+function M.parse_hooks(hooks_tbl, meta)
+  local out = {}
+  if type(hooks_tbl) ~= "table" then
+    return out
+  end
+  meta = meta or {}
+
+  local function emit(event, matcher, h)
+    table.insert(out, {
+      event = event,
+      matcher = matcher,
+      hook_type = type(h.type) == "string" and h.type or nil,
+      command = hook_command(h),
+      scope = meta.scope or "user",
+      source_path = meta.source_path or "",
+      context_path = meta.context_path,
+    })
+  end
+
+  for event, entries in pairs(hooks_tbl) do
+    if type(event) == "string" and type(entries) == "table" then
+      if #entries == 0 then
+        entries = { entries }
+      end
+      for _, entry in ipairs(entries) do
+        if type(entry) == "table" then
+          local matcher = hook_matcher(entry.matcher)
+          if type(entry.hooks) == "table" then
+            for _, h in ipairs(entry.hooks) do
+              if type(h) == "table" then
+                emit(event, matcher, h)
+              end
+            end
+          elseif hook_command(entry) ~= "" then
+            emit(event, matcher, entry)
+          end
+        end
+      end
+    end
+  end
+
+  table.sort(out, function(a, b)
+    if a.event ~= b.event then
+      return a.event < b.event
+    end
+    return (a.matcher or "") < (b.matcher or "")
+  end)
+  return out
+end
+
+--
+-- Read hooks from absolute (non-home) files such as managed/system
+-- settings. files: { { path = "/etc/...", scope = "managed", key = true|"root" } };
+-- paths may be globs (managed-settings.d/*.json).
+-- Only the hooks are extracted; the files themselves are not surfaced as
+-- config items.
+--
+
+function M.collect_file_hooks(files)
+  local out = {}
+  for _, f in ipairs(files or {}) do
+    local paths = f.path:find("[%*%?]") and (praxis.glob_files(f.path) or {}) or { f.path }
+    for _, path in ipairs(paths) do
+      local doc = M.parse_config_document(path)
+      if doc then
+        local tbl = (f.key == "root") and doc or doc.hooks
+        for _, hook in ipairs(M.parse_hooks(tbl, {
+          scope = f.scope or "managed",
+          source_path = path,
+          context_path = f.context_path,
+        })) do
+          table.insert(out, hook)
+        end
+      end
+    end
+  end
+  return out
+end
+
+--
+-- Pick the per-OS entry from { linux = ..., macos = ..., windows = ...,
+-- default = ... }.
+--
+
+function M.for_os(tbl)
+  if type(tbl) ~= "table" then
+    return {}
+  end
+  return tbl[praxis.os_name()] or tbl.default or {}
+end
+
+--
+-- Agent Skills standard (agentskills.io) discovery. Each skill is a
+-- directory holding SKILL.md with `name` / `description` frontmatter.
+-- dirs.home are home-relative, dirs.project project-relative; each agent
+-- lists the agent-specific and shared (.agents/skills) dirs it reads.
+--
+
+function M.discover_skill_dirs(home, project_paths, dirs)
+  local skills = {}
+  local scanned = {}
+
+  --
+  -- A project rooted at the home dir would otherwise rescan the user-level
+  -- dir (e.g. ~/.agents/skills) as project skills.
+  --
+
+  local function scan(base, rel, context_path)
+    local key = M.norm(praxis.path_join({ base, rel }))
+    if scanned[key] then
+      return
+    end
+    scanned[key] = true
+    for _, s in ipairs(M.discover_skill_md_skills(base, { dir = rel, context_path = context_path })) do
+      table.insert(skills, s)
+    end
+  end
+
+  for _, rel in ipairs(dirs.home or {}) do
+    scan(home, rel, nil)
+  end
+  for _, proj in ipairs(project_paths or {}) do
+    for _, rel in ipairs(dirs.project or {}) do
+      scan(proj, rel, proj)
+    end
+  end
+  return skills
+end
+
+M.SHARED_SKILL_DIRS = ".agents/skills"
+
+--
+-- Follow `@path` imports in instruction files (Claude Code CLAUDE.md and
+-- Gemini CLI GEMINI.md syntax). Paths resolve relative to the importing
+-- file, `~/` resolves to the owning user's home. Fenced code blocks and
+-- inline code spans are skipped, and recursion stops after max_depth
+-- hops (Claude Code documents five). Imported files are added to
+-- result.config_items as imported_instructions.
+--
+
+local function strip_code(content)
+  local out = content:gsub("```.-```", ""):gsub("`[^`\n]*`", "")
+  return out
+end
+
+function M.collect_instruction_imports(result, max_depth)
+  max_depth = max_depth or 5
+  local seen = {}
+  for _, item in ipairs(result.config_items) do
+    seen[M.norm(item.path)] = true
+  end
+
+  local function scan(path, context_path, depth)
+    if depth > max_depth then
+      return
+    end
+    local content = praxis.read_file(path)
+    if not content then
+      return
+    end
+    local dir = M.parent_dir(path) or ""
+    local home = praxis.extract_user_home(path)
+    for token in (" " .. strip_code(content)):gmatch("%s@([^%s%)%]\"'`,;]+)") do
+      token = token:gsub("[%.:!%?]+$", "")
+      local target = nil
+      if M.starts_with(token, "~/") and home then
+        target = praxis.path_join({ home, token:sub(3) })
+      elseif M.starts_with(token, "/") or token:match("^%a:[/\\]") then
+        target = token
+      elseif token:find("/", 1, true) or token:match("%.%w+$") then
+        target = praxis.path_join({ dir, token })
+      end
+      if target then
+        local key = M.norm(target)
+        if not seen[key] and praxis.path_exists(target) and not praxis.path_is_dir(target) then
+          seen[key] = true
+          local ctype = "imported_instructions"
+          if context_path then
+            ctype = ctype .. ":" .. context_path
+          end
+          table.insert(result.config_items, { path = target, config_type = ctype })
+          scan(target, context_path, depth + 1)
+        end
+      end
+    end
+  end
+
+  local roots = {}
+  for _, item in ipairs(result.config_items) do
+    local group = item.config_type:match("^([^:]+)") or item.config_type
+    if M.ends_with(group, "instructions") then
+      table.insert(roots, { path = item.path, ctx = item.config_type:match("^[^:]+:(.+)$") })
+    end
+  end
+  for _, root in ipairs(roots) do
+    scan(root.path, root.ctx, 1)
+  end
+end
+
+--
+-- Credential store metadata. Each spec describes one store relative to a
+-- user home:
+--
+--   { path = ".codex/auth.json", kind = "oauth_token_file",
+--     fields = { auth_mode = "auth_mode", account_id = "tokens.account_id" },
+--     presence = { "tokens.refresh_token", "OPENAI_API_KEY" },
+--     require_any = false }
+--
+-- Only scalar values at the allow-listed `fields` paths are copied. Paths
+-- in `presence` are reported as `<leaf>_present = "true"` — their values are
+-- never read into the result. require_any drops the entry unless at least
+-- one presence path is set (for "API key in a general config file"). The
+-- Rust side additionally redacts anything secret-looking before the result
+-- leaves the node.
+--
+
+--
+-- JSON null decodes to an mlua sentinel (light userdata), not nil.
+--
+
+local JSON_NULL = praxis.json_decode("[null]")[1]
+
+local function is_set(v)
+  return v ~= nil and v ~= JSON_NULL and v ~= "" and v ~= false
+end
+
+local function metadata_value(key, value)
+  if type(value) == "number" then
+    local k = string.lower(key)
+    if k:find("expir") or M.ends_with(k, "_at") or k:find("refresh") then
+      local secs = value > 1e12 and math.floor(value / 1000) or math.floor(value)
+      local ts = praxis.format_unix_timestamp(secs)
+      if ts ~= "" then
+        return ts
+      end
+    end
+    return tostring(value)
+  end
+  if type(value) == "boolean" then
+    return tostring(value)
+  end
+  if type(value) == "string" and value ~= "" then
+    return value
+  end
+  return nil
+end
+
+local function stat_metadata(path)
+  local st = praxis.path_stat(path)
+  if st == nil then
+    return nil, nil
+  end
+  local last_modified = nil
+  if st.modified_unix then
+    last_modified = praxis.format_unix_timestamp(st.modified_unix)
+  end
+  return st, last_modified
+end
+
+function M.credential_from_file(path, spec)
+  local st, last_modified = stat_metadata(path)
+  if st == nil or st.is_dir then
+    return nil
+  end
+
+  local metadata = {}
+  if st.mode then
+    metadata.file_mode = st.mode
+  end
+
+  local wants_doc = spec.fields ~= nil or spec.presence ~= nil
+  local doc = wants_doc and M.parse_config_document(path) or nil
+  local any_present = false
+  if doc then
+    for key, dotted in pairs(spec.fields or {}) do
+      local v = metadata_value(key, M.get_path(doc, dotted))
+      if v ~= nil then
+        metadata[key] = v
+      end
+    end
+    for _, dotted in ipairs(spec.presence or {}) do
+      if is_set(M.get_path(doc, dotted)) then
+        local leaf = dotted:match("([^%.]+)$") or dotted
+        metadata[leaf .. "_present"] = "true"
+        any_present = true
+      end
+    end
+  end
+
+  if spec.require_any and not any_present then
+    return nil
+  end
+
+  for k, v in pairs(spec.metadata or {}) do
+    metadata[k] = v
+  end
+
+  return {
+    path = path,
+    kind = spec.kind or "credential_file",
+    exists = true,
+    last_modified = last_modified,
+    metadata = metadata,
+  }
+end
+
+function M.collect_credentials(home, specs)
+  local out = {}
+  for _, spec in ipairs(specs or {}) do
+    local pattern = praxis.path_join({ home, spec.path })
+    local paths = pattern:find("[%*%?]") and (praxis.glob_files(pattern) or {}) or { pattern }
+    for _, p in ipairs(paths) do
+      local item = M.credential_from_file(p, spec)
+      if item then
+        table.insert(out, item)
+      end
+    end
+  end
+  return out
+end
+
+--
+-- Environment variables that carry credentials. Only the variable name
+-- is reported, never its value.
+--
+
+function M.credential_env_vars(vars, home)
+  local out = {}
+  for _, key in ipairs(vars or {}) do
+    if praxis.env_get(key, home) ~= nil then
+      table.insert(out, {
+        path = "env:" .. key,
+        kind = "env_var",
+        exists = true,
+        metadata = {},
+      })
+    end
+  end
+  return out
+end
+
+--
+-- OS keychain reference. Presence cannot be checked without touching the
+-- keychain, so exists is left unset.
+--
+
+function M.credential_keychain(service, metadata)
+  local md = { service = service }
+  for k, v in pairs(metadata or {}) do
+    md[k] = v
+  end
+  return {
+    path = "keychain:" .. service,
+    kind = "os_keychain",
+    metadata = md,
+  }
+end
+
+local function dedup_by(list, key_fn)
+  local seen = {}
+  local out = {}
+  for _, item in ipairs(list or {}) do
+    local k = key_fn(item)
+    if not seen[k] then
+      seen[k] = true
+      table.insert(out, item)
+    end
+  end
+  return out
+end
+
+--
+-- Claude-style plugin registry (installed_plugins.json), shared by Claude
+-- Code and Droid:
+--   { plugins = { ["name@marketplace"] = { { scope, installPath, version,
+--     projectPath? }, ... } } }
+-- A single installation object instead of a list is also accepted.
+-- Returns { id, marketplace, root, scope, version, project_path } entries;
+-- callers decide enablement from their own settings files.
+--
+
+function M.parse_plugin_registry(path)
+  local parsed = M.parse_json(praxis.read_file(path))
+  if parsed == nil or type(parsed.plugins) ~= "table" then
+    return {}
+  end
+
+  local entries = {}
+  for plugin_id, installations in pairs(parsed.plugins) do
+    local items = {}
+    if type(installations) == "table" and type(installations.installPath) == "string" then
+      items = { installations }
+    elseif type(installations) == "table" then
+      items = installations
+    end
+    for _, inst in ipairs(items) do
+      if type(inst) == "table" and type(inst.installPath) == "string" then
+        local project_path = inst.projectPath
+        if type(project_path) ~= "string" or project_path == "" then
+          project_path = nil
+        end
+        table.insert(entries, {
+          id = plugin_id,
+          marketplace = tostring(plugin_id):match("@(.+)$"),
+          root = inst.installPath,
+          scope = type(inst.scope) == "string" and inst.scope or "user",
+          version = type(inst.version) == "string" and inst.version or nil,
+          project_path = project_path,
+        })
+      end
+    end
+  end
+
+  table.sort(entries, function(a, b)
+    return a.id == b.id and a.root < b.root or a.id < b.id
+  end)
+  return entries
+end
+
+--
+-- Marketplace maps ({ name = { source = { source = "github", repo = ... } } })
+-- as used by known_marketplaces.json and extraKnownMarketplaces.
+--
+
+local function marketplace_source(entry)
+  local src = type(entry) == "table" and entry.source or nil
+  if type(src) ~= "table" then
+    return type(src) == "string" and src or ""
+  end
+  local location = src.repo or src.url or src.path or src.package or ""
+  if type(src.source) == "string" and src.source ~= "" then
+    return src.source .. ":" .. tostring(location)
+  end
+  return tostring(location)
+end
+
+function M.marketplace_items(map, path, scope, context_path)
+  local out = {}
+  if type(map) ~= "table" then
+    return out
+  end
+  for name, entry in pairs(map) do
+    if type(name) == "string" then
+      table.insert(out, {
+        name = name,
+        source = marketplace_source(entry),
+        path = path,
+        scope = scope,
+        context_path = context_path,
+      })
+    end
+  end
+  return out
+end
+
+--
 -- Standard recon orchestration. Takes a declarative config table describing
 -- where to find configs, how to discover projects, and how to parse MCP
 -- servers. Handles the full system → home → project → auth → MCP pipeline
@@ -1219,6 +1768,17 @@ end
 --                                internal-tools discovery
 --   context_filenames (table?)   initial context filenames to include
 --   post_collect      (fn?)      fn(buffer, ctx) -> nil, called after collection
+--   skill_dirs        (table?)   { home = {...}, project = {...} } SKILL.md dirs
+--                                scanned in addition to skill_discovery
+--   credentials       (table?)   credential file specs (see collect_credentials)
+--   credential_env_vars (table?) env var names that carry credentials
+--   credential_discovery (fn?)   fn(home) -> {credential items} (keychain etc.)
+--   managed_hooks     (table?)   per-OS { { path, scope, key } } hook files
+--                                outside user homes (managed settings)
+--   plugin_discovery  (fn?)      fn(home, project_paths) -> { plugins,
+--                                marketplaces, hooks }
+--   instruction_imports (bool|n) follow `@path` imports in instruction files
+--                                (a number sets the max import depth)
 --
 
 function M.run_standard_recon(ctx, config)
@@ -1289,6 +1849,39 @@ function M.run_standard_recon(ctx, config)
       end
     end
 
+    if config.skill_dirs then
+      for _, s in ipairs(M.discover_skill_dirs(home, home_result.project_paths, config.skill_dirs)) do
+        table.insert(home_result.skills, s)
+      end
+    end
+
+    if config.plugin_discovery then
+      local ok, found = pcall(config.plugin_discovery, home, home_result.project_paths)
+      if ok and type(found) == "table" then
+        for _, field in ipairs({ "plugins", "marketplaces", "hooks" }) do
+          for _, item in ipairs(found[field] or {}) do
+            table.insert(home_result[field], item)
+          end
+        end
+      elseif not ok then
+        praxis.log_warn("plugin_discovery failed for " .. tostring(home) .. ": " .. tostring(found))
+      end
+    end
+
+    for _, c in ipairs(M.collect_credentials(home, config.credentials)) do
+      table.insert(home_result.credentials, c)
+    end
+    if config.credential_discovery then
+      local ok, creds = pcall(config.credential_discovery, home)
+      if ok and type(creds) == "table" then
+        for _, c in ipairs(creds) do
+          table.insert(home_result.credentials, c)
+        end
+      elseif not ok then
+        praxis.log_warn("credential_discovery failed for " .. tostring(home) .. ": " .. tostring(creds))
+      end
+    end
+
     if config.skill_discovery then
       local ok, skills = pcall(config.skill_discovery, home, home_result.project_paths)
       if ok and type(skills) == "table" then
@@ -1311,8 +1904,25 @@ function M.run_standard_recon(ctx, config)
   result.project_paths = M.dedup(result.project_paths)
   result.context_filenames = M.dedup(result.context_filenames)
 
+  for _, hook in ipairs(M.collect_file_hooks(M.for_os(config.managed_hooks))) do
+    table.insert(result.hooks, hook)
+  end
+
+  --
+  -- Process-level env vars are checked once; they are not per-home.
+  --
+
+  for _, c in ipairs(M.credential_env_vars(config.credential_env_vars)) do
+    table.insert(result.credentials, c)
+  end
+
   if config.post_collect then
     config.post_collect(result, ctx)
+  end
+
+  if config.instruction_imports then
+    local depth = type(config.instruction_imports) == "number" and config.instruction_imports or nil
+    M.collect_instruction_imports(result, depth)
   end
 
   --
@@ -1350,12 +1960,39 @@ function M.run_standard_recon(ctx, config)
   for _, p in ipairs(filtered_paths) do
     authed_set[p] = true
   end
+  local function authed(item)
+    return item.context_path == nil or authed_set[item.context_path]
+  end
+
   local skills_filtered = {}
   for _, s in ipairs(M.dedup_skills(result.skills or {})) do
-    if s.context_path == nil or authed_set[s.context_path] then
+    if authed(s) then
       table.insert(skills_filtered, s)
     end
   end
+
+  local function filter_dedup(list, key_fn)
+    local out = {}
+    for _, item in ipairs(dedup_by(list, key_fn)) do
+      if authed(item) then
+        table.insert(out, item)
+      end
+    end
+    return out
+  end
+
+  local hooks = filter_dedup(result.hooks, function(h)
+    return table.concat({ h.source_path, h.event, h.matcher or "", h.command }, "::")
+  end)
+  local plugins = filter_dedup(result.plugins, function(p)
+    return table.concat({ p.name, p.scope or "", p.path or "", p.context_path or "" }, "::")
+  end)
+  local marketplaces = filter_dedup(result.marketplaces, function(m)
+    return table.concat({ m.name, m.path or "", m.context_path or "" }, "::")
+  end)
+  local credentials = dedup_by(result.credentials, function(c)
+    return c.path
+  end)
 
   --
   -- Semantic enrichment: discover internal/built-in tools by interrogating
@@ -1384,11 +2021,15 @@ function M.run_standard_recon(ctx, config)
     config = {
       items = result.config_items,
       project_paths = filtered_paths,
+      credentials = credentials,
     },
     tools = {
       mcp_servers = mcp_unique,
       skills = skills_filtered,
       internal_tools = internal_tools,
+      hooks = hooks,
+      plugins = plugins,
+      marketplaces = marketplaces,
     },
     sessions = {
       items = result.sessions,

@@ -75,7 +75,18 @@ All recon tools take a `node` prefix and an `agent` short-name.
 
 - `recon_run` — Run static reconnaissance (`node`, `agent`)
 - `recon_run_semantic` — Run semantic reconnaissance, includes internal tools (`node`, `agent`)
-- `recon_list` — List stored recon data (`node`, `agent`, `section` = all/sessions/tools/projects/configs)
+- `recon_list` — List stored recon data (`node`, `agent`, `section`). Sections:
+  - `all` (default) — everything below except the `memory` / `instructions` views
+  - `sessions`, `projects`, `configs`
+  - `tools` — MCP servers, skills, internal tools
+  - `hooks` — event, matcher, hook type, command, scope, source file
+  - `plugins` — installed plugins plus configured `marketplaces`
+  - `credentials` — credential store metadata (path, kind, exists, last modified, non-secret metadata; never secret values)
+  - `memory`, `instructions` — config items whose type is a memory store or instruction/rules file (readable via `recon_config_read`)
+
+  An unknown section returns an error listing the valid values. `recon_run`
+  / `recon_run_semantic` summaries include `hooks`, `plugins`,
+  `marketplaces` and `credentials` counts.
 - `recon_config_read` — Read config file content discovered by recon (`node`, `agent`, optional `path`)
 - `recon_session_read` — Read session file content (`node`, `agent`, optional `path`)
 - `recon_config_grep` — Grep config files with regex (`node`, `agent`, `pattern`, optional `paths`)

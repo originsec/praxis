@@ -9,8 +9,9 @@ use crate::mcp::McpClient;
 use crate::{
     AgentFileType, AgentTool, ChainConnection, ChainDefinitionFull, ChainDefinitionInfo,
     ChainDefinitionInput, ChainElement, ChainExecutionUpdate, ChainTriggerInfo, ChainTriggerType,
-    ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo, SemanticOpUpdate,
-    SemanticOperationSpec, SessionItem, SystemState, TargetSpec, TriggerConfig,
+    ConfigItem, CredentialItem, GrepFileEntry, HookItem, MarketplaceItem, McpServer,
+    OperationDefinitionInfo, PluginItem, SemanticOpUpdate, SemanticOperationSpec, SessionItem,
+    SystemState, TargetSpec, TriggerConfig,
 };
 
 //
@@ -529,7 +530,23 @@ pub async fn list_tracked(client: &(impl McpClient + Sync)) -> Result<OpListResu
 
 //
 // Unified recon list — returns stored recon data for a specific section or all.
+// `memory` and `instructions` are views over config items (by config_type
+// group) so they stay readable through recon_config_read; `credentials` is
+// metadata only and has no readable file behind it.
 //
+
+pub const RECON_LIST_SECTIONS: &[&str] = &[
+    "all",
+    "configs",
+    "credentials",
+    "hooks",
+    "instructions",
+    "memory",
+    "plugins",
+    "projects",
+    "sessions",
+    "tools",
+];
 
 pub struct ReconListResult {
     pub sessions: Option<Vec<SessionItem>>,
@@ -538,6 +555,12 @@ pub struct ReconListResult {
     pub skills: Option<Vec<AgentTool>>,
     pub internal_tools: Option<Vec<AgentTool>>,
     pub configs: Option<Vec<ConfigItem>>,
+    pub hooks: Option<Vec<HookItem>>,
+    pub plugins: Option<Vec<PluginItem>>,
+    pub marketplaces: Option<Vec<MarketplaceItem>>,
+    pub credentials: Option<Vec<CredentialItem>>,
+    pub memory: Option<Vec<ConfigItem>>,
+    pub instructions: Option<Vec<ConfigItem>>,
 }
 
 pub async fn recon_list(
@@ -561,9 +584,40 @@ pub async fn recon_list(
             )
         })?;
 
+    if let Some(s) = section
+        && !RECON_LIST_SECTIONS.contains(&s)
+    {
+        return Err(anyhow!(
+            "Unknown recon section '{}'. Valid sections: {}",
+            s,
+            RECON_LIST_SECTIONS.join(", ")
+        ));
+    }
+
     let show_all = section.is_none() || section == Some("all");
+    let wants = |name: &str| show_all || section == Some(name);
+    let memory: Vec<ConfigItem> = recon
+        .config
+        .items
+        .iter()
+        .filter(|c| c.is_memory())
+        .cloned()
+        .collect();
+    let instructions: Vec<ConfigItem> = recon
+        .config
+        .items
+        .iter()
+        .filter(|c| c.is_instructions())
+        .cloned()
+        .collect();
 
     Ok(ReconListResult {
+        hooks: wants("hooks").then(|| recon.tools.hooks.clone()),
+        plugins: wants("plugins").then(|| recon.tools.plugins.clone()),
+        marketplaces: wants("plugins").then(|| recon.tools.marketplaces.clone()),
+        credentials: wants("credentials").then(|| recon.config.credentials.clone()),
+        memory: (section == Some("memory")).then_some(memory),
+        instructions: (section == Some("instructions")).then_some(instructions),
         sessions: if show_all || section == Some("sessions") {
             Some(recon.sessions.items)
         } else {

@@ -62,6 +62,49 @@ end
 -- than recursively searching their descendants for generic instruction files.
 --
 
+local function uri_to_path(uri)
+  if type(uri) ~= "string" then
+    return nil
+  end
+  local path = uri:gsub("^file://", "")
+  path = path:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+  if path:match("^/%a:/") then
+    path = path:sub(2)
+  end
+  return path
+end
+
+--
+-- Agy projects (~/.gemini/config/projects/<uuid>.json) list their git
+-- folders as file:// URIs, and the CLI prompt history records the
+-- workspace each prompt ran in.
+--
+
+local function discover_registered_projects(home)
+  local paths = {}
+  local pattern = praxis.path_join({ home, ".gemini", "config", "projects", "*.json" })
+  for _, file in ipairs(praxis.glob_files(pattern) or {}) do
+    local project = helpers.parse_json(praxis.read_file(file))
+    local resources = helpers.get_path(project, "projectResources.resources")
+    for _, res in ipairs(type(resources) == "table" and resources or {}) do
+      local path = uri_to_path(helpers.get_path(res, "gitFolder.folderUri"))
+      if path then
+        table.insert(paths, path)
+      end
+    end
+  end
+
+  local history = praxis.read_file_prefix(
+    praxis.path_join({ home, ".gemini", "antigravity-cli", "history.jsonl" }), 1024 * 1024)
+  for line in (history or ""):gmatch("[^\r\n]+") do
+    local entry = helpers.parse_json(line)
+    if entry and type(entry.workspace) == "string" then
+      table.insert(paths, entry.workspace)
+    end
+  end
+  return paths
+end
+
 local function discover_known_workspaces(home)
   local paths = {}
   local settings = helpers.parse_json(praxis.read_file(settings_path(home)) or "")
@@ -76,6 +119,12 @@ local function discover_known_workspaces(home)
 
   for workspace, _ in pairs(read_conversation_cache(home)) do
     if type(workspace) == "string" and praxis.path_is_dir(workspace) then
+      table.insert(paths, workspace)
+    end
+  end
+
+  for _, workspace in ipairs(discover_registered_projects(home)) do
+    if praxis.path_is_dir(workspace) then
       table.insert(paths, workspace)
     end
   end
@@ -201,22 +250,118 @@ local function parse_mcp_config(content, context_path)
   return servers
 end
 
+--
+-- Hooks files map hook names to definitions:
+--   { ["my-hook"] = { enabled = true, PreToolUse = { { matcher, hooks = {...} } },
+--                     SessionStart = { { type = "command", command = "..." } } } }
+-- Disabled definitions are skipped.
+--
+
+local function parse_named_hooks(doc, meta)
+  local hooks = {}
+  for _, def in pairs(type(doc) == "table" and doc or {}) do
+    if type(def) == "table" and def.enabled ~= false then
+      for _, h in ipairs(helpers.parse_hooks(def, meta)) do
+        table.insert(hooks, h)
+      end
+    end
+  end
+  return hooks
+end
+
+local function parse_settings_hooks(doc, meta)
+  return parse_named_hooks(doc.hooks, meta)
+end
+
+--
+-- Plugins are directories under ~/.gemini/config/plugins (global),
+-- ~/.gemini/antigravity-cli/plugins (CLI staging) and <project>/.agents/plugins,
+-- with plugin.json at the root or in .antigravity-plugin/ / .gemini-plugin/.
+--
+
+local PLUGIN_MANIFESTS = {
+  "plugin.json",
+  ".antigravity-plugin/plugin.json",
+  ".gemini-plugin/plugin.json",
+}
+
+local function plugin_dirs(home, project_paths)
+  local dirs = {
+    { path = praxis.path_join({ home, ".gemini", "config", "plugins" }), scope = "user" },
+    { path = praxis.path_join({ home, ".gemini", "antigravity-cli", "plugins" }), scope = "user" },
+  }
+  for _, proj in ipairs(project_paths or {}) do
+    table.insert(dirs, {
+      path = praxis.path_join({ proj, ".agents", "plugins" }),
+      scope = "project",
+      context_path = proj,
+    })
+  end
+  return dirs
+end
+
+local function each_plugin(home, project_paths, fn)
+  for _, dir in ipairs(plugin_dirs(home, project_paths)) do
+    if praxis.path_is_dir(dir.path) then
+      for _, entry in ipairs(praxis.read_dir(dir.path) or {}) do
+        if entry.is_dir then
+          local manifest = nil
+          for _, rel in ipairs(PLUGIN_MANIFESTS) do
+            manifest = manifest or helpers.parse_json(praxis.read_file(
+              praxis.path_join({ entry.path, rel })))
+          end
+          fn(entry, manifest or {}, dir)
+        end
+      end
+    end
+  end
+end
+
+local function discover_plugins(home, project_paths)
+  local found = { plugins = {}, hooks = {} }
+  each_plugin(home, project_paths, function(entry, manifest, dir)
+    table.insert(found.plugins, {
+      name = type(manifest.name) == "string" and manifest.name or entry.name,
+      version = type(manifest.version) == "string" and manifest.version or nil,
+      enabled = true,
+      scope = dir.scope,
+      path = entry.path,
+      context_path = dir.context_path,
+    })
+    local hooks_path = praxis.path_join({ entry.path, "hooks.json" })
+    local doc = helpers.parse_json(praxis.read_file(hooks_path))
+    for _, h in ipairs(parse_named_hooks(doc, {
+      scope = "plugin",
+      source_path = hooks_path,
+      context_path = dir.context_path,
+    })) do
+      table.insert(found.hooks, h)
+    end
+  end)
+  return found
+end
+
+--
+-- Skills are SKILL.md folders (see skill_dirs); workflows are the legacy
+-- single-file slash commands being migrated to skills.
+--
+
 local function discover_skills(home, project_paths)
   local skills = {}
-  local global_root = praxis.path_join({ home, ".gemini", "antigravity-cli" })
 
-  for _, skill in ipairs(helpers.discover_command_skills(global_root, {
-    dir = "skills",
-    pattern = "%.md$",
-    name_prefix = "/",
-    parse = "markdown",
-  })) do
+  for _, skill in ipairs(helpers.discover_command_skills(
+    praxis.path_join({ home, ".gemini", "config" }), {
+      dir = "workflows",
+      pattern = "%.md$",
+      name_prefix = "/",
+      parse = "markdown",
+    })) do
     table.insert(skills, skill)
   end
 
   for _, project_path in ipairs(project_paths or {}) do
     for _, skill in ipairs(helpers.discover_command_skills(project_path, {
-      dir = ".agents/skills",
+      dir = ".agents/workflows",
       pattern = "%.md$",
       name_prefix = "/",
       parse = "markdown",
@@ -225,6 +370,15 @@ local function discover_skills(home, project_paths)
       table.insert(skills, skill)
     end
   end
+
+  each_plugin(home, project_paths, function(entry, _manifest, dir)
+    for _, skill in ipairs(helpers.discover_skill_md_skills(entry.path, {
+      dir = "skills",
+      context_path = dir.context_path,
+    })) do
+      table.insert(skills, skill)
+    end
+  end)
 
   return skills
 end
@@ -265,12 +419,20 @@ local recon_config = {
   home_dir = ".gemini",
 
   home_configs = {
-    { path = ".gemini/antigravity-cli/settings.json", type = "global_settings" },
+    { path = ".gemini/antigravity-cli/settings.json", type = "global_settings",
+      hooks = parse_settings_hooks },
     { path = ".gemini/antigravity-cli/keybindings.json", type = "global_keybindings" },
     { path = ".gemini/antigravity-cli/cache/last_conversations.json", type = "conversation_cache" },
     { path = ".gemini/config/mcp_config.json", type = "global_mcp", mcp = true },
-    { path = ".gemini/config/hooks.json", type = "global_hooks" },
+    { path = ".gemini/config/hooks.json", type = "global_hooks", hooks = parse_named_hooks },
     { path = ".gemini/GEMINI.md", type = "global_instructions" },
+    { path = ".gemini/AGENTS.md", type = "global_instructions" },
+    { path = ".gemini/config/GEMINI.md", type = "global_instructions" },
+    { path = ".gemini/config/AGENTS.md", type = "global_instructions" },
+    { path = ".gemini/config/rules/*.md", type = "global_rules" },
+    { path = ".gemini/antigravity-cli/rules/*.md", type = "global_rules" },
+    { path = ".gemini/antigravity-cli/knowledge/*/metadata.json", type = "knowledge_memory" },
+    { path = ".gemini/antigravity/knowledge/*/metadata.json", type = "knowledge_memory" },
   },
 
   context_filenames = { "GEMINI.md", "AGENTS.md" },
@@ -279,10 +441,36 @@ local recon_config = {
 
   project_configs = {
     { path = ".agents/mcp_config.json", type = "project_mcp", mcp = true },
-    { path = ".agents/hooks.json", type = "project_hooks" },
+    { path = ".agents/hooks.json", type = "project_hooks", hooks = parse_named_hooks },
     { path = "GEMINI.md", type = "project_instructions" },
     { path = "AGENTS.md", type = "project_instructions" },
+    { path = ".agents/GEMINI.md", type = "project_instructions" },
+    { path = ".agents/AGENTS.md", type = "project_instructions" },
+    { path = ".agents/rules/*.md", type = "project_rules" },
+    { path = ".agent/rules/*.md", type = "project_rules" },
   },
+
+  skill_dirs = {
+    home = {
+      ".gemini/antigravity-cli/skills",
+      ".gemini/config/skills",
+      ".gemini/antigravity/skills",
+    },
+    project = { ".agents/skills", ".agent/skills" },
+  },
+  plugin_discovery = discover_plugins,
+
+  --
+  -- Agy keeps tokens in the OS keyring (go-keyring). The service name is
+  -- inferred from local Secret Service attributes, not from vendor docs.
+  --
+
+  credential_discovery = function(_home)
+    return {
+      helpers.credential_keychain("gemini", { note = "service name inferred" }),
+    }
+  end,
+  credential_env_vars = { "GEMINI_API_KEY" },
 
   mcp_parsers = {
     default = parse_mcp_config,

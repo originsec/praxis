@@ -168,6 +168,12 @@ local function collect_system_config()
     for _, f in ipairs(extract_context_filenames(parsed)) do
       table.insert(result.context_filenames, f)
     end
+    for _, hook in ipairs(helpers.parse_hooks(parsed.hooks, {
+      scope = "managed",
+      source_path = path,
+    })) do
+      table.insert(result.hooks, hook)
+    end
   end
 
   local os_name = praxis.os_name()
@@ -176,6 +182,9 @@ local function collect_system_config()
   if os_name == "windows" then
     system_defaults_path = "C:\\ProgramData\\gemini-cli\\system-defaults.json"
     system_settings_path = "C:\\ProgramData\\gemini-cli\\settings.json"
+  elseif os_name == "macos" then
+    system_defaults_path = "/Library/Application Support/GeminiCli/system-defaults.json"
+    system_settings_path = "/Library/Application Support/GeminiCli/settings.json"
   else
     system_defaults_path = "/etc/gemini-cli/system-defaults.json"
     system_settings_path = "/etc/gemini-cli/settings.json"
@@ -262,10 +271,29 @@ local function post_collect(result, _ctx)
         if praxis.path_exists(p) then
           table.insert(result.config_items, {
             path = p,
-            config_type = "project_context:" .. proj,
+            config_type = "project_instructions:" .. proj,
             contents = nil,
           })
         end
+      end
+    end
+  end
+
+  --
+  -- Global context files (~/.gemini/<fileName>) double as the save_memory
+  -- target: facts are appended under "## Gemini Added Memories". Surface
+  -- those files under the memory group as well.
+  --
+
+  for _, home in ipairs(praxis.user_homes() or {}) do
+    for _, fname in ipairs(result.context_filenames) do
+      local p = praxis.path_join({ home, ".gemini", fname })
+      if fname ~= "GEMINI.md" and praxis.path_exists(p) then
+        table.insert(result.config_items, { path = p, config_type = "global_instructions" })
+      end
+      local content = praxis.read_file(p)
+      if content and content:find("## Gemini Added Memories", 1, true) then
+        table.insert(result.config_items, { path = p, config_type = "saved_memory" })
       end
     end
   end
@@ -302,6 +330,126 @@ local function post_collect(result, _ctx)
 end
 
 --
+-- Gemini records every project it has run in: projects.json maps absolute
+-- paths to slugs, trustedFolders.json lists trusted roots.
+--
+
+local function discover_known_projects(home)
+  local paths = {}
+  local registry = helpers.parse_json(praxis.read_file(
+    praxis.path_join({ home, ".gemini", "projects.json" })))
+  if registry and type(registry.projects) == "table" then
+    for path, _ in pairs(registry.projects) do
+      table.insert(paths, path)
+    end
+  end
+  local trusted = helpers.parse_json(praxis.read_file(
+    praxis.path_join({ home, ".gemini", "trustedFolders.json" })))
+  for path, level in pairs(trusted or {}) do
+    if level ~= "DO_NOT_TRUST" then
+      table.insert(paths, path)
+    end
+  end
+
+  local existing = {}
+  for _, p in ipairs(helpers.dedup(paths)) do
+    if type(p) == "string" and praxis.path_is_dir(p) then
+      table.insert(existing, p)
+    end
+  end
+  return existing
+end
+
+--
+-- Extensions live in ~/.gemini/extensions/<name>/ with a
+-- gemini-extension.json manifest and optional install metadata. Each can
+-- ship hooks (hooks/hooks.json), skills and TOML commands.
+-- extension-enablement.json holds per-path override rules where the last
+-- match wins; a final "!" rule is reported as disabled.
+--
+
+local function extension_enabled(enablement, name)
+  local entry = type(enablement) == "table" and enablement[name] or nil
+  local overrides = type(entry) == "table" and entry.overrides or nil
+  if type(overrides) ~= "table" or #overrides == 0 then
+    return true
+  end
+  return not helpers.starts_with(tostring(overrides[#overrides]), "!")
+end
+
+local function discover_extensions(home, _project_paths)
+  local found = { plugins = {}, hooks = {} }
+  local ext_root = praxis.path_join({ home, ".gemini", "extensions" })
+  if not praxis.path_is_dir(ext_root) then
+    return found
+  end
+  local enablement = helpers.parse_json(praxis.read_file(
+    praxis.path_join({ ext_root, "extension-enablement.json" })))
+
+  for _, entry in ipairs(praxis.read_dir(ext_root) or {}) do
+    local manifest_path = praxis.path_join({ entry.path, "gemini-extension.json" })
+    local manifest = entry.is_dir and helpers.parse_json(praxis.read_file(manifest_path))
+    if manifest then
+      local name = type(manifest.name) == "string" and manifest.name or entry.name
+      local install = helpers.parse_json(praxis.read_file(
+        praxis.path_join({ entry.path, ".gemini-extension-install.json" }))) or {}
+      local source = nil
+      if type(install.source) == "string" then
+        source = (type(install.type) == "string" and (install.type .. ":") or "") .. install.source
+      end
+      local enabled = extension_enabled(enablement, name)
+      table.insert(found.plugins, {
+        name = name,
+        version = type(manifest.version) == "string" and manifest.version or nil,
+        source = source,
+        enabled = enabled,
+        scope = "user",
+        path = entry.path,
+      })
+      if enabled then
+        for _, h in ipairs(helpers.collect_file_hooks({
+          { path = praxis.path_join({ entry.path, "hooks", "hooks.json" }), scope = "extension" },
+        })) do
+          table.insert(found.hooks, h)
+        end
+      end
+    end
+  end
+  return found
+end
+
+local function discover_extension_skills(home)
+  local skills = {}
+  local ext_root = praxis.path_join({ home, ".gemini", "extensions" })
+  for _, entry in ipairs(praxis.read_dir(ext_root) or {}) do
+    if entry.is_dir and praxis.path_exists(praxis.path_join({ entry.path, "gemini-extension.json" })) then
+      for _, s in ipairs(helpers.discover_skill_md_skills(entry.path, { dir = "skills" })) do
+        table.insert(skills, s)
+      end
+      for _, s in ipairs(helpers.discover_command_skills(entry.path, {
+        dir = "commands",
+        pattern = "%.toml$",
+        name_prefix = "/",
+        parse = "toml",
+      })) do
+        table.insert(skills, s)
+      end
+    end
+  end
+  return skills
+end
+
+local function keychain_credentials(_home)
+  return {
+    helpers.credential_keychain("gemini-cli-oauth", {
+      account = "main-account",
+      used_when = "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE",
+    }),
+    helpers.credential_keychain("gemini-cli-api-key", { account = "default-api-key" }),
+  }
+end
+
+--
 -- Discover Gemini CLI custom commands (.gemini/commands/**/*.toml) at user
 -- and project scope. Nested directories form namespaced command names.
 --
@@ -332,6 +480,10 @@ local function discover_skills(home, project_paths)
     end
   end
 
+  for _, s in ipairs(discover_extension_skills(home)) do
+    table.insert(skills, s)
+  end
+
   return skills
 end
 
@@ -343,17 +495,48 @@ local recon_config = {
 
   home_configs = {
     { path = ".gemini/google_accounts.json", type = "user_google_accounts" },
-    { path = ".gemini/oauth_creds.json", type = "user_oauth_creds" },
-    { path = ".gemini/GEMINI.md", type = "user_context" },
-    { path = ".gemini/settings.json", type = "user_settings", mcp = true },
+    { path = ".gemini/GEMINI.md", type = "global_instructions" },
+    { path = ".gemini/settings.json", type = "user_settings", mcp = true, hooks = true },
+    { path = ".gemini/memory/*/GEMINI.md", type = "project_saved_memory" },
   },
 
   project_markers = { "/.gemini/settings.json" },
+  project_discovery = discover_known_projects,
 
   project_configs = {
-    { path = ".gemini/GEMINI.md", type = "project_context" },
-    { path = ".gemini/settings.json", type = "project_settings", mcp = true },
+    { path = "GEMINI.md", type = "project_instructions" },
+    { path = ".gemini/GEMINI.md", type = "project_instructions" },
+    { path = ".gemini/settings.json", type = "project_settings", mcp = true, hooks = true },
   },
+
+  skill_dirs = {
+    home = { ".gemini/skills", helpers.SHARED_SKILL_DIRS },
+    project = { ".gemini/skills", helpers.SHARED_SKILL_DIRS },
+  },
+  plugin_discovery = discover_extensions,
+  instruction_imports = true,
+
+  credentials = {
+    { path = ".gemini/oauth_creds.json", kind = "oauth_token_file",
+      fields = { expiry_date = "expiry_date", scope = "scope", token_type = "token_type" },
+      presence = { "access_token", "refresh_token", "id_token" } },
+    { path = ".gemini/gemini-credentials.json", kind = "encrypted_store" },
+    { path = ".gemini/mcp-oauth-tokens.json", kind = "oauth_token_file" },
+    { path = ".gemini/a2a-oauth-tokens.json", kind = "oauth_token_file" },
+    { path = ".gemini/google_accounts.json", kind = "account_config",
+      fields = { active_account = "active" } },
+    { path = ".gemini/settings.json", kind = "auth_config", require_any = true,
+      fields = { auth_type = "security.auth.selectedType" },
+      presence = { "security.auth.selectedType" } },
+    { path = ".gemini/.env", kind = "env_file" },
+  },
+  credential_env_vars = {
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CLOUD_ACCESS_TOKEN",
+  },
+  credential_discovery = keychain_credentials,
 
   mcp_parsers = {
     default = helpers.parse_mcp_from_json,
