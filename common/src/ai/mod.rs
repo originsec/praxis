@@ -5,6 +5,7 @@ pub mod parsing;
 pub mod prompts;
 pub mod provider;
 pub mod providers;
+pub mod stream;
 pub mod types;
 
 pub use provider::Provider;
@@ -13,6 +14,10 @@ pub use types::{
     AiResponse, ChatCompletionChoice, ChatCompletionDelta, ChatCompletionRequest,
     ChatCompletionResponse, Content, Message, Role, Tool, Usage,
 };
+
+pub use types::{ContentPart, ReasoningConfig};
+
+pub use stream::{INVALID_TOOL_ARGUMENTS_KEY, StreamEvent};
 
 pub use client::{
     AiClient, build_message, create_ai_client, execute_chat_completion, execute_with_tool_parsing,

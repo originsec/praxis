@@ -149,6 +149,13 @@ impl Provider {
     pub fn api_key_optional(&self) -> bool {
         matches!(self, Provider::Ollama | Provider::Custom)
     }
+
+    /// Whether native function calling is used by default. Local and custom
+    /// endpoints serve arbitrary models, many without tool support, so they
+    /// default to prompt-based (manual) tool calling.
+    pub fn supports_native_tools(&self) -> bool {
+        !matches!(self, Provider::Ollama | Provider::Custom)
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +182,15 @@ mod tests {
     fn test_provider_invalid() {
         assert_eq!(Provider::from_str("invalid"), None);
         assert_eq!(Provider::from_str(""), None);
+    }
+
+    #[test]
+    fn test_native_tools_default() {
+        assert!(Provider::Anthropic.supports_native_tools());
+        assert!(Provider::Gemini.supports_native_tools());
+        assert!(Provider::OpenRouter.supports_native_tools());
+        assert!(!Provider::Ollama.supports_native_tools());
+        assert!(!Provider::Custom.supports_native_tools());
     }
 
     #[test]

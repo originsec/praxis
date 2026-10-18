@@ -25,6 +25,13 @@ impl Role {
 #[serde(untagged)]
 pub enum Content {
     Text(String),
+    //
+    // Structured content used by native tool calling and extended thinking:
+    // an assistant turn carrying tool_use / thinking blocks, or a user turn
+    // carrying tool results. Providers translate these to their own wire
+    // shapes.
+    //
+    Parts(Vec<ContentPart>),
 }
 
 impl Content {
@@ -32,8 +39,48 @@ impl Content {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Content::Text(t) => Some(t),
+            Content::Parts(_) => None,
         }
     }
+}
+
+/// A structured content block within a message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text {
+        text: String,
+    },
+    //
+    // Model reasoning. `signature` is the provider's opaque integrity token
+    // (Anthropic thinking signature) and must be replayed unchanged.
+    //
+    Thinking {
+        thinking: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    RedactedThinking {
+        data: String,
+    },
+    //
+    // `signature` carries a Gemini thoughtSignature attached to the
+    // functionCall part; it must be replayed on the same part.
+    //
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    ToolResult {
+        tool_use_id: String,
+        name: String,
+        content: String,
+        #[serde(default)]
+        is_error: bool,
+    },
 }
 
 impl From<String> for Content {
@@ -79,10 +126,47 @@ impl Message {
         Self::new(Role::Assistant, Content::Text(content.into()))
     }
 
-    /// Get the text content of this message
+    /// Create a message from structured parts.
+    pub fn with_parts(role: Role, parts: Vec<ContentPart>) -> Self {
+        Self::new(role, Content::Parts(parts))
+    }
+
+    /// Get the text content of this message. For structured messages this
+    /// is the first text part (see `joined_text` for all of them).
     pub fn text(&self) -> &str {
         match &self.content {
             Content::Text(t) => t,
+            Content::Parts(parts) => parts
+                .iter()
+                .find_map(|p| match p {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .unwrap_or(""),
+        }
+    }
+
+    /// All text parts of this message concatenated.
+    pub fn joined_text(&self) -> String {
+        match &self.content {
+            Content::Text(t) => t.clone(),
+            Content::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        }
+    }
+
+    /// Structured view of this message. Plain text becomes one text part.
+    pub fn parts(&self) -> Vec<ContentPart> {
+        match &self.content {
+            Content::Text(t) if t.is_empty() => Vec::new(),
+            Content::Text(t) => vec![ContentPart::Text { text: t.clone() }],
+            Content::Parts(parts) => parts.clone(),
         }
     }
 }
@@ -134,6 +218,19 @@ pub struct ChatCompletionRequest {
     pub temperature: Option<f32>,
     /// Top-p sampling
     pub top_p: Option<f32>,
+    /// Tools offered through the provider's native function-calling API.
+    /// Empty means no native tools.
+    pub tools: Vec<Tool>,
+    /// Request model reasoning (thinking) output where supported.
+    pub reasoning: Option<ReasoningConfig>,
+}
+
+/// Reasoning / extended-thinking request options.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReasoningConfig {
+    /// Optional effort hint (low, medium, high, ...). Passed to providers
+    /// that accept one; ignored otherwise.
+    pub effort: Option<String>,
 }
 
 impl ChatCompletionRequest {
@@ -145,6 +242,8 @@ impl ChatCompletionRequest {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            tools: Vec::new(),
+            reasoning: None,
         }
     }
 
@@ -157,6 +256,18 @@ impl ChatCompletionRequest {
     /// Set temperature
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
+        self
+    }
+
+    /// Offer tools through the provider's native function-calling API
+    pub fn with_tools(mut self, tools: Vec<Tool>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Request reasoning output
+    pub fn with_reasoning(mut self, reasoning: ReasoningConfig) -> Self {
+        self.reasoning = Some(reasoning);
         self
     }
 }
