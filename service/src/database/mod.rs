@@ -10,6 +10,7 @@ pub(crate) mod exec;
 mod intercept_targets;
 mod lua_agent_scripts;
 mod operations;
+mod posture;
 mod recon;
 mod remote_nodes;
 mod rules;
@@ -472,6 +473,24 @@ impl Database {
         // old version-tracking key is removed.
         //
         self.migrate_intercept_targets_to_toml().await;
+
+        //
+        // Migration: create posture_results (one endpoint-posture JSON blob
+        // per node) for databases that predate the posture feature.
+        //
+        let posture_sql = "CREATE TABLE IF NOT EXISTS posture_results (
+                node_id TEXT PRIMARY KEY,
+                posture_json TEXT NOT NULL,
+                performed_at TEXT NOT NULL
+            )";
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(posture_sql).execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(posture_sql).execute(pool).await;
+            }
+        }
 
         //
         // Migration: drop the recon-result columns that used to back the

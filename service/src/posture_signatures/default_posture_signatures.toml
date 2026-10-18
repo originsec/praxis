@@ -1,0 +1,97 @@
+# Praxis posture signatures: host security products detected during an
+# endpoint posture scan.
+#
+# Each [section] is one product; the header is its id. Comment a section out
+# (prefix every line with #) to disable it. Use "Reset to defaults" to
+# restore this file's original contents.
+#
+# Fields:
+#   name       display name (required)
+#   category   e.g. "edr", "monitoring", "ai_governance" (default "edr")
+#   processes  running process names, per OS ({ windows = [...], linux = [...],
+#              macos = [...] }); matched case-insensitively, ".exe" optional
+#   services   installed service names: Windows service key, systemd unit
+#              (".service" implied) or /etc/init.d script, macOS launchd
+#              plist label under /Library/LaunchDaemons or LaunchAgents
+#   paths      install paths that exist when the product is installed
+#              (%VAR% / ${VAR} expand from the node environment)
+#   source     documentation the signature is based on (not sent to nodes)
+#
+# At least one of processes/services/paths is required. A product is
+# reported "running" when one of its processes is running, otherwise
+# "installed". Signatures marked "third-party" rely on non-vendor
+# documentation because the vendor's docs require a login.
+
+[microsoft-defender-endpoint]
+name = "Microsoft Defender for Endpoint"
+category = "edr"
+# Windows: MsSense.exe runs only once the device is onboarded (the Sense
+# service itself ships with every Windows install, so it is not used).
+processes = { windows = ["MsSense.exe"], linux = ["wdavdaemon"], macos = ["wdavdaemon_unprivileged"] }
+services = { linux = ["mdatp"] }
+paths = { linux = ["/opt/microsoft/mdatp"], macos = ["/Applications/Microsoft Defender.app"] }
+source = "https://learn.microsoft.com/en-us/defender-endpoint/linux-support-install ; https://learn.microsoft.com/en-us/defender-endpoint/mac-resources ; MsSense.exe: third-party https://www.winhelponline.com/blog/defender-advanced-threat-protection-mssense-exe-crashes/"
+
+[crowdstrike-falcon]
+name = "CrowdStrike Falcon"
+category = "edr"
+processes = { windows = ["CSFalconService.exe"], linux = ["falcon-sensor"] }
+services = { windows = ["CSAgent", "CSFalconService"], linux = ["falcon-sensor"], macos = ["com.crowdstrike.falcon.Agent"] }
+paths = { windows = ['C:\Program Files\CrowdStrike'], linux = ["/opt/CrowdStrike"], macos = ["/Applications/Falcon.app"] }
+source = "third-party: https://blog.kolide.com/blog/how-to-tell-if-crowdstrike-falcon-sensor-is-running ; https://oit.duke.edu/help/articles/kb0035334/ ; https://fleetdm.com/reports/get-crowd-strike-sensor-status"
+
+[sentinelone]
+name = "SentinelOne"
+category = "edr"
+paths = { windows = ['C:\Program Files\SentinelOne'], linux = ["/opt/sentinelone"], macos = ["/Library/Sentinel"] }
+source = "third-party: https://community.jumpcloud.com/t5/community-scripts/sentinelone-command-install-script-mac-linux/m-p/560 ; https://www.sonicwall.com/support/knowledge-base/sentinelone-agent-command-line-tool/kA1VN0000000E7q0AE"
+
+[cortex-xdr]
+name = "Palo Alto Networks Cortex XDR"
+category = "edr"
+processes = { windows = ["cyserver.exe"] }
+paths = { linux = ["/opt/traps"], macos = ["/Library/Application Support/PaloAltoNetworks/Traps"] }
+source = "https://docs-cortex.paloaltonetworks.com/r/Cortex-XDR/8.9/Cortex-XDR-Agent-Administrator-Guide/Cytool-for-Linux ; https://cortex-docs.paloaltonetworks.com/cortex-xdr-agent/9.3/cortex-xdr-agent-for-windows/troubleshooting-resources-for-windows/cytool-for-windows"
+
+[carbon-black-cloud]
+name = "Carbon Black Cloud"
+category = "edr"
+paths = { windows = ['C:\Program Files\Broadcom\Endpoint Security Agent', 'C:\Program Files\Confer'], linux = ["/opt/carbonblack/psc"], macos = ["/Applications/VMware Carbon Black Cloud"] }
+source = "https://knowledge.broadcom.com/external/article/291756"
+
+[sophos-protection-linux]
+name = "Sophos Protection for Linux"
+category = "edr"
+services = { linux = ["sophos-spl"] }
+paths = { linux = ["/opt/sophos-spl"] }
+source = "https://docs.sophos.com/esg/spl/en-us/help/ServerProtectionAgentTroubleshooting/"
+
+[elastic-agent]
+name = "Elastic Agent / Elastic Defend"
+category = "edr"
+processes = { windows = ["elastic-agent.exe", "elastic-endpoint.exe"], linux = ["elastic-agent", "elastic-endpoint"], macos = ["elastic-agent", "elastic-endpoint"] }
+paths = { windows = ['C:\Program Files\Elastic\Agent'], linux = ["/opt/Elastic/Agent", "/usr/share/elastic-agent"], macos = ["/Library/Elastic/Agent", "/Library/Elastic/Endpoint"] }
+source = "https://www.elastic.co/docs/reference/fleet/installation-layout ; https://www.elastic.co/docs/solutions/security/configure-elastic-defend/uninstall-elastic-agent"
+
+[wazuh-agent]
+name = "Wazuh agent"
+category = "monitoring"
+services = { windows = ["WazuhSvc"] }
+paths = { windows = ['C:\Program Files (x86)\ossec-agent'], linux = ["/var/ossec"], macos = ["/Library/Ossec"] }
+source = "https://documentation.wazuh.com/current/installation-guide/wazuh-agent/wazuh-agent-package-windows.html ; https://documentation.wazuh.com/4.8/installation-guide/wazuh-agent/wazuh-agent-package-macos.html"
+
+[osquery]
+name = "osquery"
+category = "monitoring"
+processes = { windows = ["osqueryd.exe"], linux = ["osqueryd"], macos = ["osqueryd"] }
+services = { windows = ["osqueryd"], linux = ["osqueryd"], macos = ["io.osquery.agent"] }
+paths = { windows = ['C:\Program Files\osquery'], linux = ["/opt/osquery"], macos = ["/opt/osquery/lib/osquery.app"] }
+source = "https://osquery.readthedocs.io/en/stable/installation/install-linux/ ; https://osquery.readthedocs.io/en/stable/installation/install-macos/ ; https://osquery.readthedocs.io/en/stable/installation/install-windows/"
+
+[nightfall-ai-agent]
+name = "Nightfall AI agent"
+category = "ai_governance"
+processes = { windows = ["NightfallUI.exe"] }
+services = { macos = ["ai.nightfall.daemon", "ai.nightfall.agent"] }
+paths = { windows = ['C:\Program Files\NightfallAI-Agent'], macos = ["/Applications/NightfallAIAgent.app"] }
+source = "https://kb.nightfall.ai/articles/1301349102-nightfall-agent-what-is-the-install-path-for-the-macos-and-windows-agent"

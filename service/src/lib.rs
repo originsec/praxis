@@ -16,6 +16,7 @@ mod log_query;
 mod mcp;
 mod messaging;
 mod orchestrator;
+mod posture_signatures;
 mod remote_nodes;
 mod semantic_helpers;
 mod semantic_ops;

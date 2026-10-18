@@ -61,6 +61,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         SettingsTab::Llm => llm::render_llm(f, content, state),
         SettingsTab::Agents => agents::render_agents(f, content, state),
         SettingsTab::Intercept => intercept::render_intercept(f, content, state),
+        SettingsTab::Posture => intercept::render_posture(f, content, state),
         SettingsTab::Service => service::render_service(f, content, state),
         SettingsTab::About => about::render_about(f, content, state),
     }
@@ -124,6 +125,7 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         (SettingsTab::Llm, "LLM"),
         (SettingsTab::Agents, "Agents"),
         (SettingsTab::Intercept, "Intercept"),
+        (SettingsTab::Posture, "Posture"),
         (SettingsTab::Service, "Service"),
         (SettingsTab::About, "About"),
     ];

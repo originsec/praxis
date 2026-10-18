@@ -95,6 +95,10 @@ pub enum AppEvent {
         performed_at: Option<String>,
         is_semantic: Option<bool>,
     },
+    PostureLoaded {
+        node_id: String,
+        result: Result<common::posture::PostureLookup, String>,
+    },
     ReconConfigContent {
         target_idx: usize,
         content: Option<String>,

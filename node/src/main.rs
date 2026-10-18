@@ -6,6 +6,7 @@ mod agent_connectors;
 mod app;
 mod handlers;
 mod intercept;
+mod posture;
 mod runtime;
 mod terminal;
 mod utils;

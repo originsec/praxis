@@ -122,6 +122,17 @@ pub trait McpClient: Send + Sync {
         agent_short_name: &str,
     ) -> Result<Option<ReconResult>>;
 
+    //
+    // Get the stored endpoint posture for a node. With `refresh`, the
+    // service first re-runs the posture scan on the node (slower).
+    //
+
+    async fn get_posture(
+        &self,
+        node_id: &str,
+        refresh: bool,
+    ) -> Result<crate::posture::PostureLookup>;
+
     /// Request chain triggers list (triggers refresh).
     async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()>;
 

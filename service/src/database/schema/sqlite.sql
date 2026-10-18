@@ -188,6 +188,13 @@ CREATE INDEX IF NOT EXISTS idx_recon_node_agent ON recon_results(node_id, agent_
 CREATE INDEX IF NOT EXISTS idx_recon_performed_at ON recon_results(performed_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recon_unique_agent ON recon_results(node_id, agent_short_name);
 
+-- Endpoint posture results (one row per node)
+CREATE TABLE IF NOT EXISTS posture_results (
+    node_id TEXT PRIMARY KEY,
+    posture_json TEXT NOT NULL,
+    performed_at TEXT NOT NULL
+);
+
 -- Service configuration table (key-value store)
 CREATE TABLE IF NOT EXISTS service_config (
     key TEXT PRIMARY KEY,

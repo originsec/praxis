@@ -10,6 +10,7 @@ pub enum VirtualTable {
     TrafficMatchLogs,
     NodeLogs,
     AgentLogs,
+    PostureLogs,
     ReconLogs,
     ReconToolLogs,
     ReconSessionLogs,
@@ -27,6 +28,7 @@ impl VirtualTable {
             VirtualTable::TrafficMatchLogs => "TrafficMatchLogs",
             VirtualTable::NodeLogs => "NodeLogs",
             VirtualTable::AgentLogs => "AgentLogs",
+            VirtualTable::PostureLogs => "PostureLogs",
             VirtualTable::ReconLogs => "ReconLogs",
             VirtualTable::ReconToolLogs => "ReconToolLogs",
             VirtualTable::ReconSessionLogs => "ReconSessionLogs",
@@ -43,6 +45,7 @@ pub const ALL_TABLES: &[VirtualTable] = &[
     VirtualTable::TrafficMatchLogs,
     VirtualTable::NodeLogs,
     VirtualTable::AgentLogs,
+    VirtualTable::PostureLogs,
     VirtualTable::ReconLogs,
     VirtualTable::ReconToolLogs,
     VirtualTable::ReconSessionLogs,
@@ -219,6 +222,97 @@ pub async fn materialize_recon_logs(
             ]
         })
         .collect();
+
+    Ok((columns, rows))
+}
+
+//
+// One row per policy key, telemetry/sandbox setting, and detected security
+// product, plus per-agent summary rows, from the latest posture per node.
+//
+
+pub async fn materialize_posture_logs(
+    database: &Arc<Database>,
+) -> anyhow::Result<(Vec<String>, Vec<Vec<Value>>)> {
+    let columns: Vec<String> = table_columns(VirtualTable::PostureLogs)
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+    let s = |v: &str| Value::String(v.to_string());
+    let mut rows = Vec::new();
+    for r in database.list_all_posture_results().await? {
+        let ts = s(&r.performed_at);
+        let node = s(&r.node_id);
+        for p in &r.posture.host.security_products {
+            rows.push(vec![
+                ts.clone(),
+                node.clone(),
+                Value::Null,
+                s("security_product"),
+                s(&p.name),
+                s(&p.evidence.join("; ")),
+                Value::Null,
+                s(&p.category),
+                Value::Bool(p.running),
+            ]);
+        }
+        for a in &r.posture.agents {
+            let agent = s(&a.agent_short_name);
+            let summary = [
+                ("managed_policy", a.managed_policy.to_string()),
+                (
+                    "telemetry_enabled",
+                    a.telemetry
+                        .enabled
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                ),
+                ("telemetry_endpoints", a.telemetry.endpoints.join(", ")),
+            ];
+            for (name, value) in summary {
+                rows.push(vec![
+                    ts.clone(),
+                    node.clone(),
+                    agent.clone(),
+                    s("summary"),
+                    s(name),
+                    s(&value),
+                    Value::Null,
+                    Value::Null,
+                    Value::Bool(true),
+                ]);
+            }
+            for src in a.policy_sources.iter().filter(|p| p.present) {
+                for k in &src.keys {
+                    rows.push(vec![
+                        ts.clone(),
+                        node.clone(),
+                        agent.clone(),
+                        s("policy"),
+                        s(&k.key),
+                        s(&k.summary),
+                        src.scope.map(|sc| s(sc.as_str())).unwrap_or(Value::Null),
+                        s(&src.location),
+                        Value::Bool(true),
+                    ]);
+                }
+            }
+            for st in &a.settings {
+                rows.push(vec![
+                    ts.clone(),
+                    node.clone(),
+                    agent.clone(),
+                    s(st.category.as_str()),
+                    s(&st.key),
+                    s(&st.value),
+                    s(st.scope.as_str()),
+                    s(&st.source),
+                    Value::Bool(st.effective),
+                ]);
+            }
+        }
+    }
 
     Ok((columns, rows))
 }

@@ -1,0 +1,676 @@
+# Praxis endpoint posture definitions, keyed by agent short_name.
+#
+# For each agent:
+#   format     default document format for sources ("json" or "toml")
+#   sources    config locations in precedence order, HIGHEST FIRST. Each has
+#              a scope ("managed", "user" or "defaults"), an optional os
+#              ("linux", "macos", "windows") and exactly one of:
+#                path      file path; "~/" = per user home, "*" = drop-in glob,
+#                          %VAR% / ${VAR} expand from the node environment
+#                plist     macOS managed preferences domain (optional `value`
+#                          = key inside the plist, `base64 = true` when that
+#                          key holds an encoded document)
+#                registry  Windows key (HKLM\... or HKCU\...); `value` names a
+#                          value holding the whole document, otherwise every
+#                          value under the key is a policy key
+#              env_override names an env var that replaces `path` when set.
+#   telemetry  enabled / endpoints / keys: dotted setting paths, or "$VAR" for
+#              the node's own process environment
+#   sandbox    keys: dotted setting paths or "$VAR"
+#   categories top-level policy key -> category label for policy summaries
+#   notes      caveats shown with the agent's posture
+#
+# Every location below is taken from vendor documentation; the URL is noted
+# above each agent.
+
+# Claude Code
+#   https://code.claude.com/docs/en/managed-settings
+#   https://code.claude.com/docs/en/settings
+#   https://code.claude.com/docs/en/monitoring-usage
+#   https://code.claude.com/docs/en/permissions
+#   https://code.claude.com/docs/en/sandboxing
+[claudecode]
+format = "json"
+notes = [
+    "By default Claude Code applies only the highest-priority managed source that defines any policy (managedSourcesBehavior = first-wins: server-managed > MDM/HKLM > managed files > HKCU); Praxis reports per-key precedence across all of them.",
+    "Server-managed settings from the claude.ai console are not visible on the endpoint.",
+    "HKCU\\SOFTWARE\\Policies\\ClaudeCode is user-writable and only used when no admin source supplies policy.",
+]
+
+[[claudecode.sources]]
+scope = "managed"
+os = "macos"
+plist = "com.anthropic.claudecode"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "windows"
+registry = 'HKLM\SOFTWARE\Policies\ClaudeCode'
+value = "Settings"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/ClaudeCode/managed-settings.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/ClaudeCode/managed-settings.d/*.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/ClaudeCode/managed-mcp.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/claude-code/managed-settings.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/claude-code/managed-settings.d/*.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/claude-code/managed-mcp.json"
+
+[[claudecode.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\Program Files\ClaudeCode\managed-settings.json'
+
+[[claudecode.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\Program Files\ClaudeCode\managed-settings.d\*.json'
+
+[[claudecode.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\Program Files\ClaudeCode\managed-mcp.json'
+
+[[claudecode.sources]]
+scope = "managed"
+os = "windows"
+registry = 'HKCU\SOFTWARE\Policies\ClaudeCode'
+value = "Settings"
+
+[[claudecode.sources]]
+scope = "user"
+path = "~/.claude/settings.json"
+
+[claudecode.telemetry]
+enabled = ["env.CLAUDE_CODE_ENABLE_TELEMETRY", "$CLAUDE_CODE_ENABLE_TELEMETRY"]
+endpoints = [
+    "env.OTEL_EXPORTER_OTLP_ENDPOINT",
+    "env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "$OTEL_EXPORTER_OTLP_ENDPOINT",
+    "$OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "$OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "$OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+]
+keys = [
+    "env.OTEL_METRICS_EXPORTER",
+    "env.OTEL_LOGS_EXPORTER",
+    "env.OTEL_TRACES_EXPORTER",
+    "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+    "env.OTEL_EXPORTER_OTLP_HEADERS",
+    "env.OTEL_LOG_USER_PROMPTS",
+    "env.OTEL_LOG_TOOL_DETAILS",
+    "env.OTEL_LOG_TOOL_CONTENT",
+    "env.OTEL_LOG_ASSISTANT_RESPONSES",
+    "env.OTEL_LOG_RAW_API_BODIES",
+    "otelHeadersHelper",
+    "$OTEL_METRICS_EXPORTER",
+    "$OTEL_LOGS_EXPORTER",
+    "$OTEL_TRACES_EXPORTER",
+    "$OTEL_LOG_USER_PROMPTS",
+]
+
+[claudecode.sandbox]
+keys = [
+    "permissions.defaultMode",
+    "permissions.disableBypassPermissionsMode",
+    "permissions.disableAutoMode",
+    "permissions.allow",
+    "permissions.ask",
+    "permissions.deny",
+    "allowManagedPermissionRulesOnly",
+    "sandbox.enabled",
+    "sandbox.autoAllowBashIfSandboxed",
+    "sandbox.allowUnsandboxedCommands",
+    "sandbox.failIfUnavailable",
+    "sandbox.network.allowedDomains",
+    "sandbox.network.allowManagedDomainsOnly",
+    "sandbox.filesystem.allowManagedReadPathsOnly",
+]
+
+[claudecode.categories]
+permissions = "permissions"
+allowManagedPermissionRulesOnly = "permissions"
+sandbox = "sandbox"
+hooks = "hooks"
+allowManagedHooksOnly = "hooks"
+disableAllHooks = "hooks"
+mcpServers = "mcp"
+allowManagedMcpServersOnly = "mcp"
+allowedMcpServers = "mcp"
+deniedMcpServers = "mcp"
+managedMcpServers = "mcp"
+allowAllClaudeAiMcps = "mcp"
+model = "model"
+availableModels = "model"
+deniedModels = "model"
+forceLoginMethod = "login"
+forceLoginOrgUUID = "login"
+apiKeyHelper = "login"
+env = "environment"
+otelHeadersHelper = "telemetry"
+strictKnownMarketplaces = "plugins"
+blockedMarketplaces = "plugins"
+strictPluginOnlyCustomization = "plugins"
+enabledPlugins = "plugins"
+requiredMinimumVersion = "updates"
+managedSourcesBehavior = "policy"
+forceRemoteSettingsRefresh = "policy"
+policyHelper = "policy"
+
+# Claude Desktop
+#   https://support.claude.com/en/articles/12622667-enterprise-configuration
+#   https://www.claude.com/docs/third-party/claude-desktop/configuration
+[claudedesktop]
+format = "json"
+notes = [
+    "Claude Desktop reads HKCU only when HKLM holds no policy values.",
+    "The Code tab embeds Claude Code, which also honours Claude Code managed settings.",
+]
+
+[[claudedesktop.sources]]
+scope = "managed"
+os = "macos"
+plist = "com.anthropic.claudefordesktop"
+
+[[claudedesktop.sources]]
+scope = "managed"
+os = "windows"
+registry = 'HKLM\SOFTWARE\Policies\Claude'
+
+[[claudedesktop.sources]]
+scope = "managed"
+os = "windows"
+registry = 'HKCU\SOFTWARE\Policies\Claude'
+
+[[claudedesktop.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/claude-desktop/managed-settings.json"
+
+[claudedesktop.telemetry]
+endpoints = ["otlpEndpoint"]
+keys = [
+    "otlpProtocol",
+    "otlpHeaders",
+    "otlpTracesEnabled",
+    "otlpContentCapture",
+    "disableEssentialTelemetry",
+    "disableNonessentialTelemetry",
+]
+
+[claudedesktop.sandbox]
+keys = [
+    "disableBypassPermissionsMode",
+    "autoModeEnabled",
+    "isClaudeCodeForDesktopEnabled",
+    "isLocalDevMcpEnabled",
+    "isDesktopExtensionEnabled",
+    "secureVmFeaturesEnabled",
+    "allowedWorkspaceFolders",
+]
+
+[claudedesktop.categories]
+allowedWorkspaceFolders = "permissions"
+disableBypassPermissionsMode = "permissions"
+autoModeEnabled = "permissions"
+disabledBuiltinTools = "permissions"
+builtinToolPolicy = "permissions"
+managedMcpServers = "mcp"
+isLocalDevMcpEnabled = "mcp"
+isDesktopExtensionEnabled = "mcp"
+isDesktopExtensionDirectoryEnabled = "mcp"
+forceLoginOrgUUID = "login"
+disableAutoUpdates = "updates"
+autoUpdaterEnforcementHours = "updates"
+otlpEndpoint = "telemetry"
+otlpProtocol = "telemetry"
+otlpHeaders = "telemetry"
+disableEssentialTelemetry = "telemetry"
+disableNonessentialTelemetry = "telemetry"
+
+# OpenAI Codex CLI
+#   https://learn.chatgpt.com/docs/enterprise/managed-configuration
+#   https://learn.chatgpt.com/docs/config-file/config-reference
+[codex]
+format = "toml"
+notes = [
+    "requirements.toml constrains what users may choose (allowed_* keys); managed_config.toml and the MDM config payload override config.toml values.",
+    "Cloud-delivered requirements are not visible on the endpoint.",
+]
+
+[[codex.sources]]
+scope = "managed"
+os = "macos"
+plist = "com.openai.codex"
+value = "requirements_toml_base64"
+base64 = true
+
+[[codex.sources]]
+scope = "managed"
+os = "macos"
+plist = "com.openai.codex"
+value = "config_toml_base64"
+base64 = true
+
+[[codex.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/codex/requirements.toml"
+
+[[codex.sources]]
+scope = "managed"
+os = "macos"
+path = "/etc/codex/requirements.toml"
+
+[[codex.sources]]
+scope = "managed"
+os = "windows"
+path = '%ProgramData%\OpenAI\Codex\requirements.toml'
+
+[[codex.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/codex/managed_config.toml"
+
+[[codex.sources]]
+scope = "managed"
+os = "macos"
+path = "/etc/codex/managed_config.toml"
+
+[[codex.sources]]
+scope = "managed"
+os = "windows"
+path = "~/.codex/managed_config.toml"
+
+[[codex.sources]]
+scope = "user"
+path = "~/.codex/config.toml"
+
+[codex.telemetry]
+enabled = ["otel.exporter", "otel.trace_exporter"]
+endpoints = [
+    "otel.exporter.otlp-http.endpoint",
+    "otel.exporter.otlp-grpc.endpoint",
+    "otel.trace_exporter.otlp-http.endpoint",
+    "otel.trace_exporter.otlp-grpc.endpoint",
+    "otel.metrics_exporter.otlp-http.endpoint",
+    "otel.metrics_exporter.otlp-grpc.endpoint",
+]
+keys = ["otel.metrics_exporter", "otel.environment", "otel.log_user_prompt", "analytics.enabled"]
+
+[codex.sandbox]
+keys = [
+    "sandbox_mode",
+    "approval_policy",
+    "sandbox_workspace_write.network_access",
+    "sandbox_workspace_write.writable_roots",
+    "allowed_sandbox_modes",
+    "allowed_approval_policies",
+    "default_permissions",
+]
+
+[codex.categories]
+allowed_approval_policies = "permissions"
+allowed_approvals_reviewers = "permissions"
+allowed_sandbox_modes = "sandbox"
+allowed_permission_profiles = "permissions"
+default_permissions = "permissions"
+approval_policy = "permissions"
+sandbox_mode = "sandbox"
+sandbox_workspace_write = "sandbox"
+permissions = "permissions"
+rules = "permissions"
+remote_sandbox_config = "sandbox"
+mcp_servers = "mcp"
+hooks = "hooks"
+allow_managed_hooks_only = "hooks"
+features = "features"
+marketplaces = "plugins"
+allowed_web_search_modes = "web"
+allowed_login_methods = "login"
+allowed_chatgpt_workspaces = "login"
+model = "model"
+otel = "telemetry"
+analytics = "telemetry"
+
+# Cursor (cursor-agent CLI)
+#   https://cursor.com/docs/agent/hooks
+#   https://cursor.com/docs/enterprise/deployment-patterns
+#   https://cursor.com/docs/cli/reference/configuration
+#   https://cursor.com/docs/cli/reference/permissions
+[cursor]
+format = "json"
+notes = [
+    "Enterprise hooks are documented for the Cursor agent; whether cursor-agent (CLI) runs them is not documented.",
+    "Team dashboard policies (run modes, sandbox network rules, auto-review) are enforced server-side and are not visible on the endpoint.",
+    "No telemetry export settings are documented for the CLI.",
+]
+
+[[cursor.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/Cursor/hooks.json"
+
+[[cursor.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/cursor/hooks.json"
+
+[[cursor.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\ProgramData\Cursor\hooks.json'
+
+[[cursor.sources]]
+scope = "managed"
+os = "linux"
+path = "~/.cursor/policy.json"
+
+[[cursor.sources]]
+scope = "user"
+path = "~/.cursor/sandbox.json"
+
+[[cursor.sources]]
+scope = "user"
+path = "~/.cursor/cli-config.json"
+
+[[cursor.sources]]
+scope = "user"
+path = "~/.cursor/permissions.json"
+
+[cursor.sandbox]
+keys = [
+    "approvalMode",
+    "permissions.allow",
+    "permissions.deny",
+    "sandbox.mode",
+    "sandbox.networkAccess",
+    "sandbox.readBoundary",
+    "terminalAllowlist",
+    "mcpAllowlist",
+]
+
+[cursor.categories]
+hooks = "hooks"
+AllowedExtensions = "plugins"
+AllowedTeamId = "login"
+WorkspaceTrustEnabled = "permissions"
+UpdateMode = "updates"
+
+# Factory Droid
+#   https://docs.factory.com/enterprise/hierarchical-settings-and-org-control.md
+#   https://docs.factory.com/droid-cli/settings.md
+[droid]
+format = "json"
+notes = [
+    "Org settings may also arrive from a remote managed-settings endpoint, which is not visible on the endpoint.",
+]
+
+[[droid.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/Factory/settings.json"
+
+[[droid.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/factory/settings.json"
+
+[[droid.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\Program Files\Factory\settings.json'
+
+[[droid.sources]]
+scope = "user"
+path = "~/.factory/settings.json"
+
+[droid.telemetry]
+enabled = ["telemetry.enabled"]
+endpoints = ["telemetry.endpoint"]
+keys = ["telemetry.headers", "telemetry.logMessageContent", "telemetry.granularity"]
+
+[droid.sandbox]
+keys = [
+    "maxAutonomyLevel",
+    "sessionDefaultSettings.autonomyLevel",
+    "subagentAutonomyLevel",
+    "permissionRules",
+    "sandbox.enabled",
+    "sandbox.mode",
+    "sandbox.network",
+]
+
+[droid.categories]
+maxAutonomyLevel = "permissions"
+subagentAutonomyLevel = "permissions"
+permissionRules = "permissions"
+commandAllowlist = "permissions"
+commandDenylist = "permissions"
+sandbox = "sandbox"
+mcpPolicy = "mcp"
+modelPolicy = "model"
+hooks = "hooks"
+allowManagedHooksOnly = "hooks"
+hooksDisabled = "hooks"
+telemetry = "telemetry"
+
+# Gemini CLI
+#   https://geminicli.com/docs/reference/configuration/
+#   https://geminicli.com/docs/cli/enterprise/
+#   https://geminicli.com/docs/cli/telemetry/
+[gemini]
+format = "json"
+notes = [
+    "Gemini merges settings (arrays concatenate, objects merge); Praxis reports per-key precedence. Workspace .gemini/settings.json files sit between user and system settings and are not evaluated here.",
+    "telemetry.logPrompts defaults to true when telemetry is enabled.",
+]
+
+[[gemini.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/gemini-cli/settings.json"
+env_override = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+
+[[gemini.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/GeminiCli/settings.json"
+env_override = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+
+[[gemini.sources]]
+scope = "managed"
+os = "windows"
+path = 'C:\ProgramData\gemini-cli\settings.json'
+env_override = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+
+[[gemini.sources]]
+scope = "user"
+path = "~/.gemini/settings.json"
+
+[[gemini.sources]]
+scope = "defaults"
+os = "linux"
+path = "/etc/gemini-cli/system-defaults.json"
+env_override = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
+
+[[gemini.sources]]
+scope = "defaults"
+os = "macos"
+path = "/Library/Application Support/GeminiCli/system-defaults.json"
+env_override = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
+
+[[gemini.sources]]
+scope = "defaults"
+os = "windows"
+path = 'C:\ProgramData\gemini-cli\system-defaults.json'
+env_override = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
+
+[gemini.telemetry]
+enabled = ["telemetry.enabled", "$GEMINI_TELEMETRY_ENABLED"]
+endpoints = ["telemetry.otlpEndpoint", "$GEMINI_TELEMETRY_OTLP_ENDPOINT"]
+keys = [
+    "telemetry.target",
+    "telemetry.otlpProtocol",
+    "telemetry.otlpHeaders",
+    "telemetry.outfile",
+    "telemetry.logPrompts",
+    "telemetry.useCollector",
+    "privacy.usageStatisticsEnabled",
+    "$GEMINI_TELEMETRY_TARGET",
+    "$GEMINI_TELEMETRY_OUTFILE",
+    "$GEMINI_TELEMETRY_LOG_PROMPTS",
+]
+
+[gemini.sandbox]
+keys = [
+    "tools.sandbox",
+    "general.defaultApprovalMode",
+    "security.disableYoloMode",
+    "admin.secureModeEnabled",
+    "tools.core",
+    "$GEMINI_SANDBOX",
+    "$SEATBELT_PROFILE",
+]
+
+[gemini.categories]
+tools = "permissions"
+security = "permissions"
+admin = "policy"
+mcp = "mcp"
+mcpServers = "mcp"
+hooksConfig = "hooks"
+model = "model"
+telemetry = "telemetry"
+privacy = "telemetry"
+
+# Google Antigravity CLI (agy)
+#   https://antigravity.google/docs/settings?tab=cli
+#   https://antigravity.google/docs/enterprise
+[agy]
+format = "json"
+notes = [
+    "No local managed policy file, MDM domain or registry key is documented; enterprise controls are applied through the Google Cloud console.",
+    "When enabled, telemetry goes to the licensed Google Cloud project; no OpenTelemetry export settings are documented.",
+]
+
+[[agy.sources]]
+scope = "user"
+path = "~/.gemini/antigravity-cli/settings.json"
+
+[agy.telemetry]
+enabled = ["enableTelemetry"]
+
+[agy.sandbox]
+keys = ["toolPermission", "artifactReviewPolicy", "enableTerminalSandbox", "allowNonWorkspaceAccess"]
+
+# Pi coding agent
+#   https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md
+#   https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md
+[pi]
+format = "json"
+notes = [
+    "No managed policy or sandbox is documented; tools run with the permissions of the Pi process.",
+]
+
+[[pi.sources]]
+scope = "user"
+path = "~/.pi/agent/settings.json"
+
+[pi.telemetry]
+keys = ["enableInstallTelemetry", "enableAnalytics"]
+
+[pi.sandbox]
+keys = ["defaultProjectTrust"]
+
+# GitHub Copilot CLI (applies when a connector with short_name "copilot" is
+# registered)
+#   https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-for-enterprise/use-managed-settings/deploy-managed-settings
+#   https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings
+[copilot]
+format = "json"
+notes = [
+    "sandbox and permissions.* combine most-restrictively across managed sources; Praxis reports per-key precedence.",
+    "Server-managed settings (.github-private repository) are not visible on the endpoint.",
+]
+
+[[copilot.sources]]
+scope = "managed"
+os = "macos"
+plist = "com.github.copilot"
+
+[[copilot.sources]]
+scope = "managed"
+os = "windows"
+registry = 'HKLM\SOFTWARE\Policies\GitHubCopilot'
+
+[[copilot.sources]]
+scope = "managed"
+os = "linux"
+path = "/etc/github-copilot/managed-settings.json"
+
+[[copilot.sources]]
+scope = "managed"
+os = "macos"
+path = "/Library/Application Support/GitHubCopilot/managed-settings.json"
+
+[[copilot.sources]]
+scope = "managed"
+os = "windows"
+path = '%ProgramFiles%\GitHubCopilot\managed-settings.json'
+
+[[copilot.sources]]
+scope = "user"
+path = "~/.copilot/settings.json"
+
+[copilot.telemetry]
+enabled = ["telemetry.enabled"]
+endpoints = ["telemetry.endpoint"]
+keys = ["telemetry.protocol", "telemetry.headers", "telemetry.captureContent", "telemetry.capture.prompts"]
+
+[copilot.sandbox]
+keys = [
+    "permissions.disableBypassPermissionsMode",
+    "permissions.allow",
+    "permissions.ask",
+    "permissions.deny",
+    "sandbox.enabled",
+    "sandbox.allowBypass",
+    "sandbox.failIfUnavailable",
+]
+
+[copilot.categories]
+permissions = "permissions"
+sandbox = "sandbox"
+allowedMcpServers = "mcp"
+deniedMcpServers = "mcp"
+model = "model"
+autoTier = "model"
+enabledPlugins = "plugins"
+extraKnownMarketplaces = "plugins"
+strictKnownMarketplaces = "plugins"
+telemetry = "telemetry"

@@ -21,8 +21,8 @@ fn raw_arc<T: Serialize>(v: &T) -> Arc<RawValue> {
 }
 
 pub use common::acp_ext::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
-    EXT_PRAXIS_WRITE_SESSION_CONTENT,
+    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_POSTURE, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON,
+    EXT_PRAXIS_WRITE_FILE, EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +116,7 @@ pub async fn dispatch(
 ) -> Result<ExtResponse, acp::Error> {
     match req.method.as_ref() {
         EXT_PRAXIS_RECON => handle_recon(registry, req).await,
+        EXT_PRAXIS_POSTURE => handle_posture(registry, req).await,
         EXT_PRAXIS_READ_FILE => handle_read_file(registry, req).await,
         EXT_PRAXIS_WRITE_FILE => handle_write_file(req).await,
         EXT_PRAXIS_GREP_FILES => handle_grep_files(registry, req).await,
@@ -163,8 +164,61 @@ async fn handle_recon(
     };
 
     match recon.perform_recon(params.is_semantic).await {
-        Some(r) => Ok(ext_ok(&r)),
+        Some(mut r) => {
+            //
+            // Surface managed/system policy files from the shared posture
+            // definitions so they are viewable alongside the agent's own
+            // config, without each connector having to list them.
+            //
+            for item in crate::posture::policy_config_items(&params.agent_short_name) {
+                if !r.config.items.iter().any(|c| c.path == item.path) {
+                    r.config.items.push(item);
+                }
+            }
+            Ok(ext_ok(&r))
+        }
         None => Ok(ext_err("Recon produced no result (VM busy or failed)")),
+    }
+}
+
+//
+// Evaluate endpoint posture for the requested agents (default: every
+// registered agent) and the host. The service supplies the security
+// product signatures; evaluation does blocking I/O so it runs off the
+// async executor.
+//
+
+async fn handle_posture(
+    registry: &Arc<RwLock<AgentRegistry>>,
+    req: ExtRequest,
+) -> Result<ExtResponse, acp::Error> {
+    let params: common::posture::PostureParams = parse_params(&req)?;
+
+    let agents: Vec<(String, String)> = {
+        let reg = registry.read().await;
+        let all = reg.get_all();
+        match &params.agents {
+            Some(names) => names
+                .iter()
+                .map(|short| {
+                    let name = all
+                        .iter()
+                        .find(|a| a.short_name() == short)
+                        .map(|a| a.name().to_string())
+                        .unwrap_or_else(|| short.clone());
+                    (short.clone(), name)
+                })
+                .collect(),
+            None => all
+                .iter()
+                .map(|a| (a.short_name().to_string(), a.name().to_string()))
+                .collect(),
+        }
+    };
+
+    match tokio::task::spawn_blocking(move || crate::posture::evaluate(&agents, &params)).await {
+        Ok(result) => Ok(ext_ok(&result)),
+        Err(e) => Ok(ext_err(format!("Posture evaluation failed: {}", e))),
     }
 }
 
@@ -187,7 +241,16 @@ async fn handle_read_file(
 
     let content_result = match params.file_type {
         AgentFileType::Config => {
-            if let Err(error) = file_ops::canonicalize_and_validate_path(&params.path) {
+            //
+            // Known managed-policy files live outside user homes; allow
+            // reading (never writing) exactly those paths.
+            //
+            let is_policy_file = Path::new(&params.path)
+                .canonicalize()
+                .is_ok_and(|p| crate::posture::is_known_policy_path(&p));
+            if !is_policy_file
+                && let Err(error) = file_ops::canonicalize_and_validate_path(&params.path)
+            {
                 return Ok(ext_ok(&ReadFileResult {
                     file_type: params.file_type,
                     path: params.path,

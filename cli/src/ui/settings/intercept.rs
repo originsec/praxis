@@ -85,6 +85,77 @@ pub(super) fn render_intercept(f: &mut Frame, area: Rect, state: &SettingsState)
     f.render_widget(paragraph, area);
 }
 
+//
+// Posture tab: same virtual-file layout as intercept targets, listing the
+// security product signatures sent to nodes with each posture scan. Exactly
+// one status/empty line precedes the action rows when the list is empty, so
+// the mouse row mapping can treat the list as max(len, 1) rows.
+//
+
+pub(super) fn render_posture(f: &mut Frame, area: Rect, state: &SettingsState) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "Posture Signatures",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("    "),
+        Span::styled(
+            "Security product signatures (TOML virtual file on the service).",
+            Style::default().fg(MUTED),
+        ),
+    ]));
+    lines.push(Line::raw(""));
+
+    if !state.posture_signatures_loaded {
+        lines.push(Line::from(Span::styled(
+            "  Loading\u{2026}",
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
+        )));
+    } else if let Some(err) = state.posture_signatures_error.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Parse error: ",
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(err.to_string(), Style::default().fg(STATUS_FAIL)),
+        ]));
+    } else if state.posture_signatures.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No signatures configured.",
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
+        )));
+    } else {
+        for sig in &state.posture_signatures {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<36} ", sig.name), Style::default().fg(TEXT_BRIGHT)),
+                Span::styled(sig.category.clone(), Style::default().fg(MUTED)),
+            ]));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(action_row(
+        "\u{270e} Edit virtual file in $EDITOR",
+        state.selected == 0,
+        ACCENT,
+    ));
+    lines.push(action_row(
+        "\u{21bb} Reset to defaults",
+        state.selected == 1,
+        WARN,
+    ));
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
+}
+
 fn action_row(label: &str, selected: bool, active_color: ratatui::style::Color) -> Line<'_> {
     let prefix_style = if selected {
         Style::default().fg(active_color)

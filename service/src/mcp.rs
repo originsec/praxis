@@ -67,6 +67,7 @@ struct ClientState {
     pending_traffic_search:
         HashMap<String, Result<(Vec<InterceptedTrafficEntry>, usize), String>>,
     pending_recon_get: Option<Option<ReconResult>>,
+    pending_posture_get: HashMap<String, common::posture::PostureLookup>,
     pending_op_def_add: Option<Result<String, String>>,
     pending_op_def_delete: Option<Result<String, String>>,
     pending_chain_create: Option<Result<ChainDefinitionInfo, String>>,
@@ -217,6 +218,21 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
                 state.pending_recon_get = Some(recon_result);
+            }
+            ClientDirectMessage::PostureGetResponse {
+                node_id,
+                posture,
+                performed_at,
+                error,
+            } => {
+                state.pending_posture_get.insert(
+                    node_id,
+                    common::posture::PostureLookup {
+                        posture,
+                        performed_at,
+                        error,
+                    },
+                );
             }
             ClientDirectMessage::ChainTriggerListResponse { triggers } => {
                 state.chain_triggers = triggers;
@@ -851,6 +867,30 @@ impl McpClient for ServiceMcpClient {
         self.publish_signal(message).await?;
 
         self.poll_pending(50, |s| s.pending_recon_get.take(), "stored recon result")
+            .await
+    }
+
+    async fn get_posture(
+        &self,
+        node_id: &str,
+        refresh: bool,
+    ) -> Result<common::posture::PostureLookup> {
+        self.state.lock().await.pending_posture_get.remove(node_id);
+
+        let message = ClientSignalMessage::PostureGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            refresh,
+        };
+        self.publish_signal(message).await?;
+
+        //
+        // A refresh waits on the node scan (service-side timeout 120s), so
+        // allow a little longer than that before giving up.
+        //
+        let polls = if refresh { 1300 } else { 50 };
+        let node_id = node_id.to_string();
+        self.poll_pending(polls, |s| s.pending_posture_get.remove(&node_id), "posture")
             .await
     }
 

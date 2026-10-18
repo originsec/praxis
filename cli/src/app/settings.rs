@@ -9,6 +9,7 @@ pub enum SettingsTab {
     Llm,
     Agents,
     Intercept,
+    Posture,
     Service,
     About,
 }
@@ -82,6 +83,14 @@ pub struct SettingsState {
     pub intercept_targets_loaded: bool,
 
     //
+    // Posture security-product signatures: TOML virtual file on the
+    // service, mirrored here for the Posture settings tab.
+    //
+    pub posture_signatures: Vec<common::posture::SecurityProductSignature>,
+    pub posture_signatures_error: Option<String>,
+    pub posture_signatures_loaded: bool,
+
+    //
     // Connection info (read-only, set at startup).
     //
     pub rabbitmq_url: String,
@@ -149,6 +158,9 @@ impl Default for SettingsState {
             intercept_targets_text: String::new(),
             intercept_targets_error: None,
             intercept_targets_loaded: false,
+            posture_signatures: Vec::new(),
+            posture_signatures_error: None,
+            posture_signatures_loaded: false,
             dropdown_open: false,
             dropdown_selected: 0,
             dropdown_field: 0,
@@ -433,9 +445,9 @@ impl App {
                 // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 6
             }
-            SettingsTab::Intercept => {
+            SettingsTab::Intercept | SettingsTab::Posture => {
                 //
-                // Target rows are non-selectable; only the two action
+                // List rows are non-selectable; only the two action
                 // rows (edit virtual file, reset to defaults) count.
                 //
                 2
@@ -457,7 +469,7 @@ impl App {
                 // 1 = Praxis thinking effort.
                 sel == 1
             }
-            SettingsTab::Intercept => false,
+            SettingsTab::Intercept | SettingsTab::Posture => false,
             SettingsTab::Service => {
                 // 1 = MCP port, 3 = log query row limit, 4 = prompt timeout,
                 // 6 = CCRv1 port, 8 = CCRv2 port
@@ -560,7 +572,7 @@ impl App {
                     String::new()
                 }
             }
-            SettingsTab::Intercept => String::new(),
+            SettingsTab::Intercept | SettingsTab::Posture => String::new(),
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
                 3 => self.settings.log_query_row_limit.clone(),
@@ -582,6 +594,22 @@ impl App {
         if self.settings.tab == SettingsTab::Intercept && !self.settings.intercept_targets_loaded {
             self.load_intercept_targets().await;
         }
+        if self.settings.tab == SettingsTab::Posture && !self.settings.posture_signatures_loaded {
+            self.load_posture_signatures().await;
+        }
+    }
+
+    pub(crate) async fn load_posture_signatures(&mut self) {
+        if let Err(e) = self.client.request_posture_signatures().await {
+            self.settings.status_message = Some(format!("Failed to request signatures: {}", e));
+            self.settings.status_message_at = Some(std::time::Instant::now());
+        }
+    }
+
+    pub(crate) async fn poll_posture_signatures(&mut self) {
+        self.settings.posture_signatures = self.client.get_posture_signatures().await;
+        self.settings.posture_signatures_error = self.client.get_posture_signatures_error().await;
+        self.settings.posture_signatures_loaded = true;
     }
 
     pub(crate) async fn load_intercept_targets(&mut self) {
@@ -694,7 +722,8 @@ impl App {
                 let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::Agents,
                     SettingsTab::Agents => SettingsTab::Intercept,
-                    SettingsTab::Intercept => SettingsTab::Service,
+                    SettingsTab::Intercept => SettingsTab::Posture,
+                    SettingsTab::Posture => SettingsTab::Service,
                     SettingsTab::Service => SettingsTab::About,
                     SettingsTab::About => SettingsTab::Llm,
                 };
@@ -705,7 +734,8 @@ impl App {
                     SettingsTab::Llm => SettingsTab::About,
                     SettingsTab::Agents => SettingsTab::Llm,
                     SettingsTab::Intercept => SettingsTab::Agents,
-                    SettingsTab::Service => SettingsTab::Intercept,
+                    SettingsTab::Posture => SettingsTab::Intercept,
+                    SettingsTab::Service => SettingsTab::Posture,
                     SettingsTab::About => SettingsTab::Service,
                 };
                 self.switch_settings_tab(next_tab).await;
@@ -898,6 +928,16 @@ impl App {
                     _ => {}
                 }
             }
+            SettingsTab::Posture => match sel {
+                0 => self.edit_posture_signatures_in_editor().await,
+                1 => {
+                    self.confirm = Some(ConfirmAction {
+                        message: "Reset posture signatures to built-in defaults?".to_string(),
+                        action: ConfirmKind::ResetPostureSignatures,
+                    });
+                }
+                _ => {}
+            },
             SettingsTab::Service => {
                 match sel {
                     0 => {
@@ -1025,7 +1065,7 @@ impl App {
                 }
                 _ => {}
             },
-            SettingsTab::Intercept => {}
+            SettingsTab::Intercept | SettingsTab::Posture => {}
             SettingsTab::About => {}
         }
     }
@@ -1165,5 +1205,115 @@ impl App {
         self.settings.status_message_at = Some(std::time::Instant::now());
         self.settings.intercept_targets_loaded = false;
         self.load_intercept_targets().await;
+    }
+
+    //
+    // Open the posture-signatures virtual file in $EDITOR and send the
+    // result to the service, which validates it before saving.
+    //
+
+    pub(crate) async fn edit_posture_signatures_in_editor(&mut self) {
+        let initial = self.client.get_posture_signatures_text().await;
+        if initial.is_empty() {
+            self.settings.status_message =
+                Some("Failed to load signatures from the service; try again".to_string());
+            self.settings.status_message_at = Some(std::time::Instant::now());
+            self.load_posture_signatures().await;
+            return;
+        }
+        let result = self.edit_text_in_external_editor("praxis_posture_signatures_", &initial);
+        let message = match result {
+            Ok(None) => "No changes".to_string(),
+            Ok(Some(content)) => match self.client.set_posture_signatures(content).await {
+                Ok(()) => {
+                    self.settings.posture_signatures_loaded = false;
+                    "Saved".to_string()
+                }
+                Err(e) => format!("Failed to save signatures: {}", e),
+            },
+            Err(e) => e,
+        };
+        self.settings.status_message = Some(message);
+        self.settings.status_message_at = Some(std::time::Instant::now());
+    }
+
+    pub(crate) async fn reset_posture_signatures_to_defaults(&mut self) {
+        let message = match self.client.reset_posture_signatures_defaults().await {
+            Ok(()) => "Reset to defaults".to_string(),
+            Err(e) => format!("Failed to reset: {}", e),
+        };
+        self.settings.status_message = Some(message);
+        self.settings.status_message_at = Some(std::time::Instant::now());
+        self.settings.posture_signatures_loaded = false;
+    }
+
+    //
+    // Suspend the TUI, edit `initial` in $VISUAL/$EDITOR via a temp .toml
+    // file, and restore the TUI. Returns Ok(None) when the text is
+    // unchanged and Err with a user-facing message on failure.
+    //
+
+    fn edit_text_in_external_editor(
+        &mut self,
+        prefix: &str,
+        initial: &str,
+    ) -> Result<Option<String>, String> {
+        use std::io::Write;
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            });
+        let tmp = tempfile::Builder::new()
+            .prefix(prefix)
+            .suffix(".toml")
+            .tempfile()
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        tmp.as_file()
+            .write_all(initial.as_bytes())
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen,
+        )
+        .ok();
+
+        let status = std::process::Command::new(&editor).arg(tmp.path()).status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        )
+        .ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+        self.needs_full_redraw = true;
+
+        match status {
+            Ok(s) if s.success() => {
+                let content = std::fs::read_to_string(tmp.path())
+                    .map_err(|e| format!("Failed to read file: {}", e))?;
+                Ok((content != initial).then_some(content))
+            }
+            Ok(_) => Err("Editor exited with error".to_string()),
+            Err(e) => Err(format!("Failed to launch editor '{}': {}", editor, e)),
+        }
     }
 }

@@ -45,6 +45,25 @@ pub struct ReconRunParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct PostureGetParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(description = "Only report this agent (short name). Omit for all agents.")]
+    pub agent: Option<String>,
+
+    #[schemars(
+        description = "Re-run the posture scan on the node before returning (default false; a scan also runs automatically when nothing is stored)"
+    )]
+    #[serde(default)]
+    pub refresh: bool,
+
+    #[schemars(description = "Include raw managed-policy file contents (default false)")]
+    #[serde(default)]
+    pub include_raw: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct SessionPromptParams {
     pub node: String,
 

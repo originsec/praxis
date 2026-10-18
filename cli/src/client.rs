@@ -109,6 +109,10 @@ struct ClientState {
     intercept_targets_text: String,
     intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
     intercept_targets_error: Option<String>,
+    posture_signatures_text: String,
+    posture_signatures_parsed: Vec<common::posture::SecurityProductSignature>,
+    posture_signatures_error: Option<String>,
+    pending_posture: HashMap<String, oneshot::Sender<common::posture::PostureLookup>>,
 
     //
     // Intercept traffic: one-shot senders keyed by client-generated
@@ -791,6 +795,31 @@ impl Client {
                 state.intercept_targets_text = text;
                 state.intercept_targets_parsed = targets;
                 state.intercept_targets_error = error;
+            }
+
+            ClientDirectMessage::PostureSignaturesState {
+                text,
+                signatures,
+                error,
+            } => {
+                state.posture_signatures_text = text;
+                state.posture_signatures_parsed = signatures;
+                state.posture_signatures_error = error;
+            }
+
+            ClientDirectMessage::PostureGetResponse {
+                node_id,
+                posture,
+                performed_at,
+                error,
+            } => {
+                if let Some(tx) = state.pending_posture.remove(&node_id) {
+                    let _ = tx.send(common::posture::PostureLookup {
+                        posture,
+                        performed_at,
+                        error,
+                    });
+                }
             }
 
             //
@@ -2101,6 +2130,97 @@ impl Client {
 
     pub async fn reset_intercept_targets_defaults(&self) -> Result<()> {
         let message = ClientSignalMessage::InterceptTargetsResetDefaults {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Endpoint posture. A refresh makes the service re-scan the node (up to
+    // its 120s timeout), so the wait is longer than for a stored lookup.
+    // One request per node is tracked; a newer request supersedes an older
+    // one for the same node.
+    //
+
+    pub async fn fetch_posture(
+        &self,
+        node_id: &str,
+        refresh: bool,
+    ) -> Result<common::posture::PostureLookup> {
+        let (tx, rx) = oneshot::channel();
+        self.state
+            .lock()
+            .await
+            .pending_posture
+            .insert(node_id.to_string(), tx);
+        let message = ClientSignalMessage::PostureGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            refresh,
+        };
+        if let Err(e) = self.publish_signal(message).await {
+            self.state.lock().await.pending_posture.remove(node_id);
+            return Err(e);
+        }
+        let wait = if refresh {
+            Duration::from_secs(130)
+        } else {
+            Duration::from_secs(15)
+        };
+        match tokio::time::timeout(wait, rx).await {
+            Ok(Ok(lookup)) => Ok(lookup),
+            Ok(Err(_)) => Err(anyhow!("Posture request superseded")),
+            Err(_) => {
+                self.state.lock().await.pending_posture.remove(node_id);
+                Err(anyhow!("Timed out waiting for posture"))
+            }
+        }
+    }
+
+    //
+    // Get/set/reset clear the cached text first so the settings poll waits
+    // for the service's fresh PostureSignaturesState instead of re-reading
+    // the previous copy.
+    //
+
+    async fn clear_posture_signatures_cache(&self) {
+        let mut state = self.state.lock().await;
+        state.posture_signatures_text.clear();
+        state.posture_signatures_error = None;
+    }
+
+    pub async fn request_posture_signatures(&self) -> Result<()> {
+        self.clear_posture_signatures_cache().await;
+        let message = ClientSignalMessage::PostureSignaturesGet {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_posture_signatures(&self) -> Vec<common::posture::SecurityProductSignature> {
+        self.state.lock().await.posture_signatures_parsed.clone()
+    }
+
+    pub async fn get_posture_signatures_text(&self) -> String {
+        self.state.lock().await.posture_signatures_text.clone()
+    }
+
+    pub async fn get_posture_signatures_error(&self) -> Option<String> {
+        self.state.lock().await.posture_signatures_error.clone()
+    }
+
+    pub async fn set_posture_signatures(&self, text: String) -> Result<()> {
+        self.clear_posture_signatures_cache().await;
+        let message = ClientSignalMessage::PostureSignaturesSet {
+            client_id: self.client_id.clone(),
+            text,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn reset_posture_signatures_defaults(&self) -> Result<()> {
+        self.clear_posture_signatures_cache().await;
+        let message = ClientSignalMessage::PostureSignaturesResetDefaults {
             client_id: self.client_id.clone(),
         };
         self.publish_signal(message).await

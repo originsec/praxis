@@ -9,6 +9,7 @@ pub mod log_query_schema;
 pub mod logging;
 pub mod mcp;
 pub mod messaging;
+pub mod posture;
 pub mod remote_nodes;
 
 pub use logging::{init as init_logging, is_initialized as is_logging_initialized, send_event};

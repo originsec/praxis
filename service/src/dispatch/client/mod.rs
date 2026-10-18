@@ -13,6 +13,7 @@ mod lua_scripts;
 mod nodes;
 mod opdefs;
 mod payloads;
+mod posture;
 mod semantic_ops;
 mod toolkit;
 mod traffic;
@@ -28,6 +29,7 @@ use lua_scripts::*;
 use nodes::*;
 use opdefs::*;
 use payloads::*;
+use posture::*;
 use semantic_ops::*;
 use toolkit::*;
 use traffic::*;
@@ -264,6 +266,20 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             node_id,
             agent_short_name,
         } => handle_recon_get(ctx, client_id, node_id, agent_short_name).await,
+        ClientSignalMessage::PostureGet {
+            client_id,
+            node_id,
+            refresh,
+        } => handle_posture_get(ctx, client_id, node_id, refresh).await,
+        ClientSignalMessage::PostureSignaturesGet { client_id } => {
+            handle_posture_signatures_get(ctx, client_id).await
+        }
+        ClientSignalMessage::PostureSignaturesSet { client_id, text } => {
+            handle_posture_signatures_set(ctx, client_id, text).await
+        }
+        ClientSignalMessage::PostureSignaturesResetDefaults { client_id } => {
+            handle_posture_signatures_reset(ctx, client_id).await
+        }
         ClientSignalMessage::ToolkitList { client_id } => handle_toolkit_list(ctx, client_id).await,
         ClientSignalMessage::ToolkitRecon {
             client_id,

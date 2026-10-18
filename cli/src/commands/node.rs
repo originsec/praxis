@@ -20,6 +20,21 @@ pub enum NodeCommand {
         /// Node ID prefix
         node: String,
     },
+
+    /// Show endpoint posture: managed policy, telemetry, sandbox, security products
+    Posture {
+        /// Node ID prefix
+        node: String,
+        /// Only show this agent (short name)
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// Re-scan the node instead of showing the stored result
+        #[arg(short, long)]
+        refresh: bool,
+        /// Print JSON (includes raw managed-policy contents)
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn execute(client: &Client, command: NodeCommand) -> Result<()> {
@@ -27,6 +42,12 @@ pub async fn execute(client: &Client, command: NodeCommand) -> Result<()> {
         NodeCommand::List => list_nodes(client).await,
         NodeCommand::Select { node } => select_node(client, &node).await,
         NodeCommand::Reset { node } => reset_node(client, &node).await,
+        NodeCommand::Posture {
+            node,
+            agent,
+            refresh,
+            json,
+        } => show_posture(client, &node, agent.as_deref(), refresh, json).await,
     }
 }
 
@@ -104,5 +125,128 @@ async fn reset_node(client: &Client, prefix: &str) -> Result<()> {
         format_short_id(&node.node_id),
         node.machine_name
     ));
+    Ok(())
+}
+
+async fn show_posture(
+    client: &Client,
+    prefix: &str,
+    agent: Option<&str>,
+    refresh: bool,
+    json: bool,
+) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
+    let node = super::find_node(&state, prefix)
+        .map_err(|e| anyhow!("Node '{}': {}", prefix, e))?;
+
+    let mut lookup = client.fetch_posture(&node.node_id, refresh).await?;
+    if lookup.posture.is_none() && lookup.error.is_none() && !refresh {
+        lookup = client.fetch_posture(&node.node_id, true).await?;
+    }
+    let Some(posture) = lookup.posture.as_ref() else {
+        return Err(anyhow!(
+            "{}",
+            lookup
+                .error
+                .unwrap_or_else(|| "No posture available for this node".to_string())
+        ));
+    };
+    let posture = posture.filtered(agent, json);
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "node_id": node.node_id,
+                "performed_at": lookup.performed_at,
+                "error": lookup.error,
+                "posture": posture,
+            }))?
+        );
+        return Ok(());
+    }
+
+    print_header(&format!(
+        "Posture: {} ({})",
+        format_short_id(&node.node_id),
+        node.machine_name
+    ));
+    if let Some(at) = &lookup.performed_at {
+        println!("  Scanned: {}", at);
+    }
+    if let Some(err) = &lookup.error {
+        println!("  Refresh failed (showing stored result): {}", err);
+    }
+
+    println!();
+    println!("Host security products ({}):", posture.host.os);
+    if posture.host.signatures_evaluated == 0 {
+        println!("  (no signatures were evaluated)");
+    } else if posture.host.security_products.is_empty() {
+        println!(
+            "  none detected ({} signatures checked)",
+            posture.host.signatures_evaluated
+        );
+    }
+    for p in &posture.host.security_products {
+        println!(
+            "  {} [{}] {} - {}",
+            p.name,
+            p.category,
+            if p.running { "running" } else { "installed" },
+            p.evidence.join("; ")
+        );
+    }
+
+    for a in &posture.agents {
+        println!();
+        println!("{} ({})", a.agent_name, a.agent_short_name);
+        println!(
+            "  Managed policy: {}",
+            if a.managed_policy {
+                "PRESENT - user-level edits to enforced keys will not take effect"
+            } else {
+                "none found"
+            }
+        );
+        for src in a.policy_sources.iter().filter(|s| s.present) {
+            println!("    {}", src.location);
+            if let Some(err) = &src.error {
+                println!("      error: {}", err);
+            }
+            for k in &src.keys {
+                println!("      [{}] {} = {}", k.category, k.key, k.summary);
+            }
+        }
+        let telemetry = match a.telemetry.enabled {
+            Some(true) => "enabled",
+            Some(false) => "disabled",
+            None => "not configured",
+        };
+        print!("  Telemetry: {}", telemetry);
+        if !a.telemetry.endpoints.is_empty() {
+            print!(" -> {}", a.telemetry.endpoints.join(", "));
+        }
+        println!();
+        for st in &a.settings {
+            println!(
+                "    {} [{}] {} = {} ({}: {})",
+                if st.effective { "*" } else { " " },
+                st.category.as_str(),
+                st.key,
+                st.value,
+                st.scope.as_str(),
+                st.source
+            );
+        }
+        for note in &a.notes {
+            println!("  note: {}", note);
+        }
+    }
+    println!();
+    println!("* = effective at precedence");
     Ok(())
 }

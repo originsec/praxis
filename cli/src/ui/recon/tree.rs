@@ -45,6 +45,7 @@ pub fn expand_id_for(id: &ReconNodeId) -> Option<ReconExpandId> {
         ReconNodeId::McpServer(i) => Some(ReconExpandId::McpServer(*i)),
         ReconNodeId::ConfigType(t) => Some(ReconExpandId::ConfigType(t.clone())),
         ReconNodeId::SessionProject(p) => Some(ReconExpandId::SessionProject(p.clone())),
+        ReconNodeId::PostureSection(k) => Some(ReconExpandId::PostureSection(*k)),
         _ => None,
     }
 }
@@ -122,6 +123,9 @@ fn is_expanded(overlay: &ReconOverlay, eid: &ReconExpandId, force: bool) -> bool
 }
 
 pub fn build_visible_rows(overlay: &ReconOverlay) -> Vec<VisibleRow> {
+    if overlay.active_tab == ReconTab::Posture {
+        return super::posture_tab::build_rows(overlay);
+    }
     let Some(result) = overlay.recon_result.as_ref() else {
         return Vec::new();
     };
@@ -130,6 +134,7 @@ pub fn build_visible_rows(overlay: &ReconOverlay) -> Vec<VisibleRow> {
         ReconTab::Tools => build_tools_rows(overlay, result, filter),
         ReconTab::Config => build_config_rows(overlay, result, filter),
         ReconTab::Sessions => build_sessions_rows(overlay, result, filter),
+        ReconTab::Posture => Vec::new(),
     }
 }
 
@@ -727,6 +732,10 @@ pub fn detail_title(overlay: &ReconOverlay) -> String {
             .get(*i)
             .map(|s| format!(" {} ", s.session_id))
             .unwrap_or_else(|| " Session ".to_string()),
+        ReconNodeId::PostureSection(_)
+        | ReconNodeId::PosturePolicy(_)
+        | ReconNodeId::PostureSetting(_)
+        | ReconNodeId::PostureProduct(_) => super::posture_tab::detail_title(overlay),
     }
 }
 

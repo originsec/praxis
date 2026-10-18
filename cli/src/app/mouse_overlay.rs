@@ -609,7 +609,18 @@ impl App {
 
     async fn dispatch_recon_hint(&mut self, hint: ReconHintAction) {
         match hint {
-            ReconHintAction::Refresh => self.trigger_recon_refresh(false).await,
+            ReconHintAction::Refresh => {
+                if self
+                    .nodes
+                    .recon
+                    .as_ref()
+                    .is_some_and(|r| r.active_tab == ReconTab::Posture)
+                {
+                    self.load_posture(true);
+                } else {
+                    self.trigger_recon_refresh(false).await;
+                }
+            }
             ReconHintAction::Discover => self.trigger_recon_refresh(true).await,
             ReconHintAction::Edit => {
                 if self
@@ -678,6 +689,20 @@ impl App {
                     Some(4 + sc)
                 } else if rel_row == 11 + sc {
                     Some(4 + sc + 1)
+                } else {
+                    None
+                }
+            }
+            SettingsTab::Posture => {
+                //
+                // Header, blank, one row per signature, blank, then the
+                // two action rows (see ui::settings::intercept).
+                //
+                let sc = self.settings.posture_signatures.len().max(1);
+                if rel_row == 3 + sc {
+                    Some(0)
+                } else if rel_row == 4 + sc {
+                    Some(1)
                 } else {
                     None
                 }

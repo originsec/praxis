@@ -393,6 +393,40 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 
     #[tool(
+        description = "Get endpoint posture for a node: per agent, whether managed/enterprise policy overrides user config (and which keys it enforces), telemetry export settings and destinations (host only), sandbox/permission mode at effective precedence, plus detected host security products (EDR, AI-agent governance)."
+    )]
+    async fn posture_get(
+        &self,
+        Parameters(params): Parameters<PostureGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
+
+        let mut lookup = client
+            .get_posture(&node_id, params.refresh)
+            .await
+            .map_err(mcp_err)?;
+        if lookup.posture.is_none() && lookup.error.is_none() && !params.refresh {
+            lookup = client.get_posture(&node_id, true).await.map_err(mcp_err)?;
+        }
+        let Some(posture) = lookup.posture else {
+            return Err(mcp_err(
+                lookup
+                    .error
+                    .unwrap_or_else(|| "No posture available for this node".to_string()),
+            ));
+        };
+
+        json_result(json!({
+            "node_id": node_id,
+            "performed_at": lookup.performed_at,
+            "error": lookup.error,
+            "posture": posture.filtered(params.agent.as_deref(), params.include_raw),
+        }))
+    }
+
+    #[tool(
         description = "List stored recon data. Section: all, sessions, tools, projects, configs (default: all)"
     )]
     async fn recon_list(

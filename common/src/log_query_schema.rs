@@ -111,6 +111,49 @@ pub const TABLES: &[TableSchema] = &[
         ],
     },
     TableSchema {
+        name: "PostureLogs",
+        description: "Endpoint posture per node+agent",
+        source: "DB",
+        columns: &[
+            ColumnSchema {
+                name: "timestamp",
+                description: "Posture scan time",
+            },
+            ColumnSchema {
+                name: "node_id",
+                description: "Node identifier",
+            },
+            ColumnSchema {
+                name: "agent_short_name",
+                description: "Agent short name (null for host rows)",
+            },
+            ColumnSchema {
+                name: "kind",
+                description: "summary, policy, telemetry, sandbox, or security_product",
+            },
+            ColumnSchema {
+                name: "name",
+                description: "Key, setting, or product name",
+            },
+            ColumnSchema {
+                name: "value",
+                description: "Sanitised value, policy summary, or product evidence",
+            },
+            ColumnSchema {
+                name: "scope",
+                description: "managed, user, defaults, or process",
+            },
+            ColumnSchema {
+                name: "source",
+                description: "File, plist, registry, or environment source",
+            },
+            ColumnSchema {
+                name: "effective",
+                description: "Effective at precedence (running, for products)",
+            },
+        ],
+    },
+    TableSchema {
         name: "ReconLogs",
         description: "Recon summary per node+agent",
         source: "DB",

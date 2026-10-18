@@ -161,6 +161,13 @@ pub struct ReconOverlay {
     // in the recon header and auto-clears after a few seconds.
     //
     pub config_edit_status: Option<(String, std::time::Instant)>,
+
+    //
+    // Endpoint posture for the overlay's node (Posture tab). Loaded lazily
+    // on first visit to the tab; `r` on the tab re-scans the node.
+    //
+    pub posture: Option<common::posture::PostureLookup>,
+    pub posture_loading: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -168,6 +175,15 @@ pub enum ReconTab {
     Config,
     Tools,
     Sessions,
+    Posture,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PostureSectionKind {
+    Policy,
+    Telemetry,
+    Sandbox,
+    Host,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -189,6 +205,10 @@ pub enum ReconNodeId {
     ConfigItem(usize),
     SessionProject(String),
     SessionItem(usize),
+    PostureSection(PostureSectionKind),
+    PosturePolicy(usize),
+    PostureSetting(usize),
+    PostureProduct(usize),
 }
 
 /// Keys for expand/collapse state (subset of branch nodes).
@@ -200,6 +220,7 @@ pub enum ReconExpandId {
     McpServer(usize),
     ConfigType(String),
     SessionProject(String),
+    PostureSection(PostureSectionKind),
 }
 
 pub struct TerminalState {
@@ -905,7 +926,19 @@ impl App {
                     if recon.node_id == node_id && recon.agent_short_name == agent_short_name {
                         recon.is_loading = false;
                         if let Some(result) = recon_result {
-                            recon.expanded = crate::ui::recon::tree::default_expanded(&result);
+                            //
+                            // Keep Posture tab expansion: posture loads
+                            // independently and may already be shown.
+                            //
+                            let mut expanded = crate::ui::recon::tree::default_expanded(&result);
+                            expanded.extend(
+                                recon
+                                    .expanded
+                                    .iter()
+                                    .filter(|e| matches!(e, ReconExpandId::PostureSection(_)))
+                                    .cloned(),
+                            );
+                            recon.expanded = expanded;
                             recon.recon_result = Some(result);
                             recon.performed_at = performed_at;
                             recon.is_semantic = is_semantic.unwrap_or(false);
@@ -916,6 +949,31 @@ impl App {
                         } else if recon.recon_result.is_none() {
                             recon.error = Some("No recon data available".to_string());
                         }
+                    }
+                }
+                true
+            }
+            AppEvent::PostureLoaded { node_id, result } => {
+                if let Some(ref mut recon) = self.nodes.recon
+                    && recon.node_id == node_id
+                {
+                    recon.posture_loading = false;
+                    recon.posture = Some(result.unwrap_or_else(|e| {
+                        common::posture::PostureLookup {
+                            error: Some(e),
+                            ..Default::default()
+                        }
+                    }));
+                    for kind in [
+                        PostureSectionKind::Policy,
+                        PostureSectionKind::Telemetry,
+                        PostureSectionKind::Sandbox,
+                        PostureSectionKind::Host,
+                    ] {
+                        recon.expanded.insert(ReconExpandId::PostureSection(kind));
+                    }
+                    if recon.active_tab == ReconTab::Posture {
+                        Self::recon_select_first_visible(recon);
                     }
                 }
                 true
@@ -1034,6 +1092,18 @@ impl App {
                     let scripts = self.client.get_lua_agent_scripts().await;
                     if !scripts.is_empty() {
                         self.poll_agent_scripts(scripts);
+                        redraw = true;
+                    }
+                }
+
+                if self.active_window == Window::Settings
+                    && self.settings.tab == SettingsTab::Posture
+                    && !self.settings.posture_signatures_loaded
+                {
+                    let text = self.client.get_posture_signatures_text().await;
+                    let err = self.client.get_posture_signatures_error().await;
+                    if !text.is_empty() || err.is_some() {
+                        self.poll_posture_signatures().await;
                         redraw = true;
                     }
                 }
@@ -1406,6 +1476,8 @@ impl App {
             recon_split_percent: 30,
             recon_dragging: false,
             config_edit_status: None,
+            posture: None,
+            posture_loading: false,
         });
 
         let client = self.client.clone();
@@ -1534,6 +1606,7 @@ impl App {
             return;
         }
         recon.active_tab = tab;
+        let load_posture = tab == ReconTab::Posture && recon.posture.is_none();
         recon.selected = None;
         recon.tree_scroll = 0;
         recon.hovered_row = None;
@@ -1545,6 +1618,44 @@ impl App {
         recon.config_loading = false;
         recon.session_loading = false;
         Self::recon_select_first_visible(recon);
+        if load_posture {
+            self.load_posture(false);
+        }
+    }
+
+    //
+    // Fetch posture for the recon overlay's node off the event loop. A
+    // stored result is shown when available; otherwise (or with `refresh`)
+    // the service re-scans the node, which can take a while.
+    //
+
+    pub(crate) fn load_posture(&mut self, refresh: bool) {
+        let Some(recon) = self.nodes.recon.as_mut() else {
+            return;
+        };
+        if recon.posture_loading {
+            return;
+        }
+        recon.posture_loading = true;
+        let node_id = recon.node_id.clone();
+        let client = self.client.clone();
+        let Some(tx) = self.event_tx.clone() else {
+            return;
+        };
+        tokio::spawn(async move {
+            let mut result = client.fetch_posture(&node_id, refresh).await;
+            if let Ok(lookup) = &result
+                && !refresh
+                && lookup.posture.is_none()
+                && lookup.error.is_none()
+            {
+                result = client.fetch_posture(&node_id, true).await;
+            }
+            let _ = tx.send(AppEvent::PostureLoaded {
+                node_id,
+                result: result.map_err(|e| e.to_string()),
+            });
+        });
     }
 
     fn recon_select_first_visible(recon: &mut ReconOverlay) {
@@ -1624,19 +1735,22 @@ impl App {
             KeyCode::Char('1') => self.recon_switch_tab(ReconTab::Config),
             KeyCode::Char('2') => self.recon_switch_tab(ReconTab::Tools),
             KeyCode::Char('3') => self.recon_switch_tab(ReconTab::Sessions),
+            KeyCode::Char('4') => self.recon_switch_tab(ReconTab::Posture),
             KeyCode::Tab => {
                 let next = match recon.active_tab {
                     ReconTab::Config => ReconTab::Tools,
                     ReconTab::Tools => ReconTab::Sessions,
-                    ReconTab::Sessions => ReconTab::Config,
+                    ReconTab::Sessions => ReconTab::Posture,
+                    ReconTab::Posture => ReconTab::Config,
                 };
                 self.recon_switch_tab(next);
             }
             KeyCode::BackTab => {
                 let prev = match recon.active_tab {
-                    ReconTab::Config => ReconTab::Sessions,
+                    ReconTab::Config => ReconTab::Posture,
                     ReconTab::Tools => ReconTab::Config,
                     ReconTab::Sessions => ReconTab::Tools,
+                    ReconTab::Posture => ReconTab::Sessions,
                 };
                 self.recon_switch_tab(prev);
             }
@@ -1753,7 +1867,11 @@ impl App {
             // ^e = edit config. Avoid ^d here — that is delete elsewhere.
             //
             KeyCode::Char('r') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.trigger_recon_refresh(false).await;
+                if recon.active_tab == ReconTab::Posture {
+                    self.load_posture(true);
+                } else {
+                    self.trigger_recon_refresh(false).await;
+                }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.trigger_recon_refresh(true).await;

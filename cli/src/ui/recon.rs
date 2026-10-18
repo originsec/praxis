@@ -1,4 +1,5 @@
 mod config_tab;
+mod posture_tab;
 mod sessions_tab;
 mod tools_tab;
 pub mod tree;
@@ -44,6 +45,7 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
         ReconTab::Config => config_tab::render(f, chunks[4], app, overlay),
         ReconTab::Tools => tools_tab::render(f, chunks[4], app, overlay),
         ReconTab::Sessions => sessions_tab::render(f, chunks[4], app, overlay),
+        ReconTab::Posture => posture_tab::render(f, chunks[4], app, overlay),
     }
     register_split_border_hit(app, chunks[4], overlay);
     register_hint_hits(app, chunks[5], overlay);
@@ -52,33 +54,43 @@ pub fn render_recon(f: &mut Frame, area: Rect, app: &App, overlay: &ReconOverlay
 }
 
 fn register_tab_hits(app: &App, area: Rect, overlay: &ReconOverlay) {
-    let counts = [
-        overlay
-            .recon_result
-            .as_ref()
-            .map_or(0, |r| r.config.items.len()),
-        overlay.recon_result.as_ref().map_or(0, |r| {
-            r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
-        }),
-        overlay
-            .recon_result
-            .as_ref()
-            .map_or(0, |r| r.sessions.items.len()),
+    let counts = tab_counts(overlay);
+    let labels = ["Config", "Tools", "Sessions", "Posture"];
+    let tabs = [
+        ReconTab::Config,
+        ReconTab::Tools,
+        ReconTab::Sessions,
+        ReconTab::Posture,
     ];
-    let labels = ["Config", "Tools", "Sessions"];
-    let tabs = [ReconTab::Config, ReconTab::Tools, ReconTab::Sessions];
     let mut x = 0u16;
-    for i in 0..3 {
-        let w = chrome::tab_width(labels[i], Some(counts[i]));
+    for i in 0..tabs.len() {
+        let w = chrome::tab_width(labels[i], counts[i]);
         app.hits_register(
             Rect::new(area.x.saturating_add(x), area.y, w, 1),
             MouseAction::ReconTab(tabs[i]),
         );
         x = x.saturating_add(w);
-        if i < 2 {
+        if i + 1 < tabs.len() {
             x = x.saturating_add(chrome::tab_sep_width());
         }
     }
+}
+
+//
+// Per-tab counts for the tab bar. Posture has no count (it is a node-level
+// report, not a list), so its slot is None.
+//
+
+fn tab_counts(overlay: &ReconOverlay) -> [Option<usize>; 4] {
+    let r = overlay.recon_result.as_ref();
+    [
+        Some(r.map_or(0, |r| r.config.items.len())),
+        Some(r.map_or(0, |r| {
+            r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
+        })),
+        Some(r.map_or(0, |r| r.sessions.items.len())),
+        None,
+    ]
 }
 
 fn register_content_hits(app: &App, content: Rect, overlay: &ReconOverlay) {
@@ -234,36 +246,21 @@ fn render_hints(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
-    let config_count = overlay
-        .recon_result
-        .as_ref()
-        .map_or(0, |r| r.config.items.len());
-    let tools_count = overlay.recon_result.as_ref().map_or(0, |r| {
-        r.tools.mcp_servers.len() + r.tools.skills.len() + r.tools.internal_tools.len()
-    });
-    let sessions_count = overlay
-        .recon_result
-        .as_ref()
-        .map_or(0, |r| r.sessions.items.len());
+    let counts = tab_counts(overlay);
+    let tabs = [
+        ("Config", ReconTab::Config),
+        ("Tools", ReconTab::Tools),
+        ("Sessions", ReconTab::Sessions),
+        ("Posture", ReconTab::Posture),
+    ];
 
     let mut spans = Vec::new();
-    spans.extend(chrome::tab(
-        "Config",
-        Some(config_count),
-        overlay.active_tab == ReconTab::Config,
-    ));
-    spans.push(chrome::tab_sep());
-    spans.extend(chrome::tab(
-        "Tools",
-        Some(tools_count),
-        overlay.active_tab == ReconTab::Tools,
-    ));
-    spans.push(chrome::tab_sep());
-    spans.extend(chrome::tab(
-        "Sessions",
-        Some(sessions_count),
-        overlay.active_tab == ReconTab::Sessions,
-    ));
+    for (i, (label, tab)) in tabs.iter().enumerate() {
+        if i > 0 {
+            spans.push(chrome::tab_sep());
+        }
+        spans.extend(chrome::tab(label, counts[i], overlay.active_tab == *tab));
+    }
     spans.push(Span::raw("      "));
     spans.push(Span::styled("tab", Style::default().fg(TEXT_BRIGHT)));
     spans.push(Span::styled(" switch", Style::default().fg(MUTED)));
@@ -317,7 +314,7 @@ pub fn render_tree_left(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if overlay.recon_result.is_none() {
+    if overlay.active_tab != ReconTab::Posture && overlay.recon_result.is_none() {
         let msg = if overlay.is_loading {
             " Loading recon data..."
         } else if overlay.error.is_some() {

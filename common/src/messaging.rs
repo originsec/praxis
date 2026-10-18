@@ -2088,6 +2088,29 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Endpoint posture. PostureGet returns the stored result for a node;
+    // with `refresh` the service first runs `_praxis/posture` on the node
+    // (supplying the security product signatures) and stores the result.
+    // The signature list is a TOML virtual file like intercept targets.
+    //
+    PostureGet {
+        client_id: String,
+        node_id: String,
+        #[serde(default)]
+        refresh: bool,
+    },
+    PostureSignaturesGet {
+        client_id: String,
+    },
+    PostureSignaturesSet {
+        client_id: String,
+        text: String,
+    },
+    PostureSignaturesResetDefaults {
+        client_id: String,
+    },
+
+    //
     // LogQuery - KQL query interface over captured logs.
     //
     LogQuery {
@@ -2551,6 +2574,25 @@ pub enum ClientDirectMessage {
     InterceptTargetsState {
         text: String,
         targets: Vec<InterceptTargetConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    //
+    // Endpoint posture responses. `posture` is None when nothing is stored
+    // (or a refresh failed, in which case `error` says why).
+    //
+    PostureGetResponse {
+        node_id: String,
+        posture: Option<crate::posture::PostureResult>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        performed_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    PostureSignaturesState {
+        text: String,
+        signatures: Vec<crate::posture::SecurityProductSignature>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
