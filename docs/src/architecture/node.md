@@ -169,9 +169,9 @@ Sessions allow direct interaction with agents:
 
 ### CLI Agents (ACP)
 
-Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY. The node uses the `agent-client-protocol` crate's builder API (`acp::Client::builder()`) for typed, async communication:
+Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (Cursor, Gemini and the [ACP harnesses](../connectors/acp.md) such as Copilot CLI, OpenCode and Goose) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY. The node uses the `agent-client-protocol` crate's builder API (`acp::Client::builder()`) for typed, async communication:
 
-1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`) via `tokio::process::Command`
+1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`, `copilot --acp`) via `tokio::process::Command`, with any extra environment the connector passes
 2. A byte-stream transport (`acp::ByteStreams`) wraps the subprocess stdin/stdout, and the builder connects over it via `connect_with`
 3. Initialize handshake via typed `InitializeRequest`/`InitializeResponse`
 4. Prompts sent via typed `PromptRequest`, responses received as `PromptResponse` with `StopReason`
@@ -179,7 +179,7 @@ Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/
 6. Permission requests handled via an `on_receive_request` callback registered on the builder
 7. Cancellation via `CancelNotification`
 
-The driver runs on a dedicated OS thread with its own single-threaded (`current_thread`) Tokio runtime, spawned by `spawn_acp_client`, so synchronous Lua callers can block on replies without occupying the caller's runtime. An `AcpHandle` provides a `Send`-safe interface for the Lua runtime via channels.
+The driver runs on a dedicated OS thread with its own single-threaded (`current_thread`) Tokio runtime, spawned by `spawn_acp_client`, so synchronous Lua callers can block on replies without occupying the caller's runtime. An `AcpHandle` provides a `Send`-safe interface for the Lua runtime via channels. The driver is written against a generic byte-stream transport, so its unit tests run it against an in-process mock ACP agent instead of a subprocess.
 
 ### Browser-based Agents
 

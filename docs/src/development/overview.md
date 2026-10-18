@@ -45,7 +45,7 @@ node/src/
 └── runtime.rs           # Main event loop
 ```
 
-Lua-based agent scripts (Agy/Antigravity, Claude Code, Claude Desktop, Codex, Cursor, Droid, Gemini, M365 Copilot, Pi) live in `agents/` at the project root and are embedded into the binary at build time.
+Lua-based agent scripts (Agy/Antigravity, Claude Code, Claude Desktop, Codex, Cursor, Droid, Gemini, M365 Copilot, Pi, and the [ACP harnesses](../connectors/acp.md)) live in `agents/` at the project root and are embedded into the binary at build time.
 
 ### Service (`service/`)
 

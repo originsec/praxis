@@ -58,7 +58,8 @@ When you send a prompt:
 2. The node's per-session Lua VM handles the prompt — spawning a
    one-shot non-interactive subprocess (`claudecode`, `codex`), driving
    the connector via Chrome DevTools Protocol (`m365-copilot`), or
-   talking to the connector's embedded ACP subprocess (`cursor`, `gemini`)
+   talking to the connector's embedded ACP subprocess (`cursor`, `gemini` and the
+   [ACP harnesses](../connectors/acp.md) such as `copilot`, `opencode`, `goose`)
 3. Streaming updates (`session/update` notifications) flow back as the
    agent generates text, calls tools, and builds plans
 4. The final `session/prompt` response carries a `stopReason`
@@ -67,7 +68,7 @@ When you send a prompt:
 ### Streaming Sessions (ACP)
 
 All sessions are wrapped in ACP externally, but for agents that natively
-speak ACP inside the node (currently Cursor and Gemini) you also get
+speak ACP inside the node (Cursor, Gemini and the ACP harnesses) you also get
 typed streaming updates end-to-end. Regardless of the underlying
 transport, `session/update` notifications relay:
 

@@ -249,6 +249,13 @@ Each agent connector may have specific configuration. See individual connector d
 - Config path: `~/.gemini/antigravity-cli/settings.json`
 - Sessions: `~/.gemini/antigravity-cli/brain/`
 
+#### ACP Harnesses
+
+Copilot CLI, OpenCode, Goose, Kiro, Kilo, Junie, Qwen Code, Cline, Auggie,
+Kimi, Mistral Vibe, Qoder, CodeBuddy, Devin and Grok Build need no
+configuration. Their config, MCP and session paths are listed per agent in
+[ACP Harnesses](../connectors/acp.md#per-agent-details).
+
 ## Operation Definitions
 
 Operations are defined in JSON and stored in the service database.

@@ -12,23 +12,40 @@ A connector handles four main capabilities:
 
 **Reconnaissance** - Discovering the agent's configuration, tools, and session history. This includes parsing config files, finding MCP server definitions, and locating past conversations.
 
-**Sessions** - Creating interactive sessions where prompts can be sent and responses received. Different agents need different approaches-CLI agents can be spawned in a PTY, browser-based agents need DevTools or UI automation.
+**Sessions** - Creating interactive sessions where prompts can be sent and responses received. Different agents need different approaches: CLI agents can be spawned per prompt, agents that speak the Agent Client Protocol are driven over ACP, and browser-based agents need DevTools or UI automation.
 
 ## Current Connectors
 
 | Connector | Agent | Platform | Session Mode | Type |
 |-----------|-------|----------|--------------|------|
 | [`agy`](./agy.md) | Antigravity CLI | macOS, Linux, Windows | CLI | Lua |
+| [`auggie`](./acp.md#augment-auggie-cli-auggie) | Augment Auggie CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
 | [`claude-bridge`](./claude-bridge.md) | Claude Code (inbound) | Any | CCRv1 (WS) / CCRv2 (HTTP+SSE) | Native |
 | [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI | Lua |
 | [`claudedesktop`](./claude-desktop.md) | Claude Desktop | Windows only | DevTools (Electron) | Lua |
+| [`cline`](./acp.md#cline-cli-cline) | Cline CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`codebuddy`](./acp.md#codebuddy-code-codebuddy) | Tencent CodeBuddy Code | Linux, macOS, Windows | ACP | Lua (ACP harness) |
 | [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
-| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
+| [`copilot`](./acp.md#github-copilot-cli-copilot) | GitHub Copilot CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | ACP | Lua |
+| [`devin`](./acp.md#devin-cli-devin) | Devin CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
 | [`droid`](./droid.md) | Droid CLI (Factory) | Linux, macOS, Windows | CLI | Lua |
-| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
+| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | ACP | Lua |
+| [`goose`](./acp.md#goose-goose) | Goose | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`grok`](./acp.md#grok-build-grok) | xAI Grok Build | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`junie`](./acp.md#jetbrains-junie-cli-junie) | JetBrains Junie CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`kilo`](./acp.md#kilo-code-cli-kilo) | Kilo Code CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`kimi`](./acp.md#kimi-code-cli-kimi) | Kimi Code CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`kiro`](./acp.md#kiro-cli-kiro) | Kiro CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
 | [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools | Lua |
+| [`opencode`](./acp.md#opencode-opencode) | OpenCode | Linux, macOS, Windows | ACP | Lua (ACP harness) |
 | [`pi`](./pi.md) | Pi Coding Agent (`@mariozechner/pi-coding-agent`) | Linux, Windows | CLI | Lua |
 | [`praxis`](./praxis.md) | Native LLM agent (provider-agnostic) | Any | ACP (native streaming) | Native |
+| [`qoder`](./acp.md#qoder-cli-qoder) | Qoder CLI | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`qwen`](./acp.md#qwen-code-qwen) | Qwen Code | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+| [`vibe`](./acp.md#mistral-vibe-vibe) | Mistral Vibe | Linux, macOS, Windows | ACP | Lua (ACP harness) |
+
+The ACP harnesses are small connectors for agents that speak the Agent Client Protocol natively; see [ACP Harnesses](./acp.md) for how they work and what each one discovers.
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
@@ -125,7 +142,7 @@ When a node starts, it runs fingerprinting for all registered connectors. Any ag
 
 All registered connectors are re-fingerprinted together on each cycle (roughly every 30 seconds), so both newly-installed and newly-removed agents are picked up on the next pass.
 
-Most connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, Pi) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction. The Praxis Agent and the Claude Bridge are native (Rust) connectors — the Praxis Agent is gated by service config (it appears only when enabled and a model definition is selected), and Claude Bridge is always present.
+Most connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, Pi and the [ACP harnesses](./acp.md)) are Lua-based and loaded from embedded scripts or the service database. Agents that speak the Agent Client Protocol (the ACP harnesses, Cursor and Gemini) use the `praxis.acp_*` native API through `helpers.acp_session`. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction. The Praxis Agent and the Claude Bridge are native (Rust) connectors — the Praxis Agent is gated by service config (it appears only when enabled and a model definition is selected), and Claude Bridge is always present.
 
 ## Development Builds
 

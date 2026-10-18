@@ -10,6 +10,9 @@
 #   domains     = ["host1", "host2"]               (required, one or more)
 #   url_pattern = "regex matched against URL path" (optional)
 
+[auggie]
+domains = ["api.augmentcode.com"]
+
 [claudecode]
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
@@ -17,6 +20,17 @@ url_pattern = "messages"
 [claudedesktop]
 domains = ["api.anthropic.com", "a-api.anthropic.com"]
 url_pattern = "messages"
+
+[cline]
+domains = ["api.cline.bot"]
+
+[copilot]
+domains = [
+    "api.githubcopilot.com",
+    "individual.githubcopilot.com",
+    "business.githubcopilot.com",
+    "enterprise.githubcopilot.com",
+]
 
 [cursor]
 domains = ["agent.api5.cursor.sh", "api2.cursor.sh", "cursor.sh"]
@@ -32,6 +46,32 @@ domains = [
 [gemini]
 domains = ["generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"]
 
+[grok]
+domains = ["cli-chat-proxy.grok.com", "api.x.ai"]
+
+[junie]
+domains = ["ingrazzio-cloud-prod.labs.jb.gg"]
+
+[kilo]
+domains = ["ai-gateway.kilo.ai"]
+
+[kimi]
+domains = ["api.kimi.com", "api.moonshot.ai", "api.moonshot.cn"]
+
+[kiro]
+domains = [
+    "q.us-east-1.amazonaws.com",
+    "q.eu-central-1.amazonaws.com",
+    "runtime.us-east-1.kiro.dev",
+    "runtime.eu-central-1.kiro.dev",
+]
+
 [m365copilot]
 domains = ["substrate.office.com"]
 url_pattern = "m365Copilot/Chathub"
+
+[qwen]
+domains = ["chat.qwen.ai", "dashscope.aliyuncs.com", "maas.aliyuncs.com"]
+
+[vibe]
+domains = ["api.mistral.ai"]

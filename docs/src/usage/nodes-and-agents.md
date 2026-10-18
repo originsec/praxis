@@ -89,6 +89,7 @@ Agents are the AI assistants detected on each node. When a node fingerprints suc
 - **Gemini CLI** - Google's CLI assistant
 - **M365 Copilot** - Microsoft 365 Copilot (Windows only)
 - **[Pi Coding Agent](../connectors/pi.md)** - minimal terminal coding harness (`pi`)
+- **[ACP harnesses](../connectors/acp.md)** - agents driven over the Agent Client Protocol: GitHub Copilot CLI, OpenCode, Goose, Kiro CLI, Kilo Code CLI, JetBrains Junie CLI, Qwen Code, Cline CLI, Augment Auggie CLI, Kimi Code CLI, Mistral Vibe, Qoder CLI, CodeBuddy Code, Devin CLI and Grok Build
 
 See [Agent Connectors](../connectors/overview.md) for the full connector list and platform notes.
 
@@ -137,14 +138,17 @@ change, restart the node or use its reset action so it fingerprints again.
 
 Different agents support different features:
 
-| Feature | Claude Code | Claude Bridge | Claude Desktop | Antigravity | Codex | Cursor | Droid | Gemini | M365 Copilot | Pi |
-|---------|-------------|---------------|----------------|-------------|-------|--------|-------|--------|--------------|----|
-| Static Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Semantic Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (ACP) | ✓ | ✓ (ACP) | ✓ | ✓ |
-| Config Editing | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | ✓ |
-| MCP Discovery | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | - |
-| Traffic Intercept | ✓ | - | ✓ | - | - | ✓ | ✓ | ✓ | ✓ | - |
+| Feature | Claude Code | Claude Bridge | Claude Desktop | Antigravity | Codex | Cursor | Droid | Gemini | M365 Copilot | Pi | ACP harnesses |
+|---------|-------------|---------------|----------------|-------------|-------|--------|-------|--------|--------------|----|---------------|
+| Static Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Semantic Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (ACP) | ✓ | ✓ (ACP) | ✓ | ✓ | ✓ (ACP) |
+| Config Editing | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | ✓ | ✓ |
+| MCP Discovery | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - | - | ✓ |
+| Traffic Intercept | ✓ | - | ✓ | - | - | ✓ | ✓ | ✓ | ✓ | - | ✓¹ |
+
+¹ ACP harnesses ship default intercept targets where the agent talks to a
+vendor-hosted endpoint; see [ACP Harnesses](../connectors/acp.md#harnesses).
 
 Codex traffic interception is not yet supported; implementation is tracked in
 [issue #259](https://github.com/originsec/praxis/issues/259).

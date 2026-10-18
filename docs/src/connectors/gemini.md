@@ -77,13 +77,13 @@ When semantic recon is enabled, the connector also creates a session and queries
 
 ## Session Management
 
-Sessions use the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio. Praxis uses the `agent-client-protocol` crate's `ClientSideConnection` for typed, async communication.
+Sessions use the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 protocol over NDJSON stdio, through the same shared `helpers.acp_session` path as the [ACP harnesses](./acp.md). Earlier versions ran `gemini` once per prompt and resumed the conversation with `-r <session id>`; that mode has been removed.
 
 ### Session Context
 
 When creating a session, you can specify:
 
-**Working Directory** - Where Gemini should operate.
+**Working Directory** - Where Gemini should operate. Defaults to the first user home containing `~/.gemini`.
 
 **YOLO Mode** - When enabled, tool permission requests are auto-approved.
 
@@ -91,15 +91,15 @@ When creating a session, you can specify:
 
 ### Transacting
 
-1. `gemini --acp` is spawned as an async subprocess
-2. `ClientSideConnection` established, `InitializeRequest` handshake performed
-3. `PromptRequest` sends the prompt; the agent streams back `SessionUpdate` notifications (text chunks, tool calls, plans, tool results)
-4. Permission requests handled via the `Client` trait callback
-5. `PromptResponse` returned with `StopReason` on completion
+1. `gemini --acp` is spawned as a long-lived subprocess and the `initialize` handshake is performed
+2. `session/new` opens a session in the working directory
+3. Each prompt is a `session/prompt`; the agent streams back `session/update` notifications (text chunks, tool calls, tool results) which are forwarded to the client in real time
+4. `session/request_permission` requests are handled according to YOLO / interactive mode
+5. The turn ends with a `stopReason`; the assembled agent text is the prompt's response
 
 ### Cancellation
 
-Sessions support mid-prompt cancellation via `CancelNotification`. The agent responds with `StopReason::Cancelled` and any partial output is preserved.
+Sessions support mid-prompt cancellation via `session/cancel`. The agent responds with `stopReason: cancelled` and any partial output is preserved.
 
 ## Config Editing
 
@@ -150,5 +150,5 @@ The connector supports both static and semantic recon. Static recon parses confi
 ### "Session creation failed"
 
 - Check that Gemini CLI can run normally from terminal
-- Verify Google API credentials are configured
+- Verify Google API credentials are configured. `session/new` fails with the agent's own error if the account cannot be used (for example, Google has retired Gemini Code Assist for individuals for Gemini CLI and points those users to Antigravity)
 - Look at node logs for detailed errors

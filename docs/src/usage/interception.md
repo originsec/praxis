@@ -60,8 +60,11 @@ multi-agent attribution.
 Lines starting with `#` are ignored. To disable a target without
 deleting it, comment out the entire section. Praxis ships built-in
 targets for the bundled connectors (Claude Code, Claude Desktop,
-Cursor, Droid, Gemini, M365 Copilot); the defaults are seeded on first
-boot.
+Cursor, Droid, Gemini, M365 Copilot, and the ACP harnesses that use a
+vendor-hosted endpoint, listed in [ACP Harnesses](../connectors/acp.md#harnesses));
+the defaults are seeded on first boot. An install that already saved its
+targets file keeps it, so use **Reset to defaults** to pick up targets added
+in a later release.
 
 ### Managing targets
 

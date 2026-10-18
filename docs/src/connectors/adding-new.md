@@ -12,13 +12,13 @@ Lua agent scripts live in `agents/` at the project root and are embedded into bi
 
 ### CLI Agents vs Browser-Based Agents
 
-For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout. For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), use the `praxis.acp_*` APIs for long-lived subprocess sessions with real-time streaming (see [ACP Sessions](#acp-sessions-streaming-agents) below).
+For **CLI agents** (e.g. Claude Code, Codex CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout. For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), use the `praxis.acp_*` APIs for long-lived subprocess sessions with real-time streaming (see [ACP Sessions](#acp-sessions-streaming-agents) below).
 
 For **browser-based agents** (e.g. M365 Copilot), use the `praxis.devtools` library and `praxis.cdp_*` native API to drive the agent via Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
 ### Script Structure
 
-A Lua connector returns a table with `name`, `short_name`, and callback functions. For CLI agents, follow the same high-level structure used by `agents/gemini.lua`:
+A Lua connector returns a table with `name`, `short_name`, and callback functions. For CLI agents driven one prompt at a time, follow the same high-level structure used by `agents/codex.lua` (agents that speak ACP are simpler still, see [Adding an ACP Harness](#adding-an-acp-harness)):
 
 ```lua
 local helpers = require("praxis.helpers")
@@ -190,7 +190,7 @@ The `praxis` global provides:
 
 This list is not exhaustive — see `node/src/agent_connectors/lua/runtime.rs` for every registered function.
 
-The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, `make_verify_version_flag`, `has_any_env_var`, `subprocess_session`, `acp_session`, `discover_command_skills`, `discover_skill_md_skills`, `dedup_skills`, `auth_via_env_or_files`, `resolve_working_dir`, `discover_jsonl_sessions`, `find_latest_session_file`, `add_config_if_exists`, `find_project_directories`, `parse_frontmatter_field`, `first_meaningful_line`, `strip_extension`, `discover_dot_dir_skills`, `project_paths_from_sessions`, `sqlite_json_rows`, `parse_jsonc`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible` (both accept JSONC), `parse_mcp_from_opencode_json`, and `parse_mcp_from_toml`. `find_executable` also takes `npm = true` to search the usual global npm/bun/volta/mise/nvm install locations. This list is also not exhaustive — see `node/src/agent_connectors/lua/lib/helpers.lua` for the complete set.
 
 The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol, plus a `renderer_ops` backend for Electron apps whose renderer DOM isn't reachable from the main-process CDP connection. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
@@ -203,15 +203,53 @@ The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transa
 
 ## ACP Sessions (Streaming Agents)
 
-For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), sessions use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio. Praxis uses the `agent-client-protocol` crate internally, providing typed `ClientSideConnection` communication with `Client` trait callbacks for real-time streaming updates (text chunks, tool calls, plans, permission requests).
+For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), sessions use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio. The node acts as the ACP *client*: it spawns the agent's ACP mode, runs `initialize` → `session/new` → `session/prompt`, streams `session/update` notifications (text chunks, tool calls, tool results) back to the caller in real time, and answers `session/request_permission` (auto-allow in YOLO sessions, forwarded to the user in interactive sessions, rejected otherwise). It uses the `agent-client-protocol` crate internally.
+
+Many coding agents speak ACP natively, so this is usually the least code: Praxis ships a set of ACP harnesses that are nothing more than fingerprint + recon in Lua with sessions delegated to ACP. See [ACP Harnesses](./acp.md) for the list.
+
+### Adding an ACP Harness
+
+1. Find the agent's ACP launch command. The [ACP registry](https://github.com/agentclientprotocol/registry) lists one `agent.json` per agent with the exact command and arguments (`--acp`, `acp`, `--acp=true`, ...). Cross-check it against the vendor's docs.
+2. Copy a small harness such as `agents/qwen.lua` or `agents/copilot.lua` and change the name, `find_executable` config, recon paths and the ACP arguments.
+3. Build the session callbacks with `helpers.acp_session` and pass the same triple to `run_standard_recon` as `session_fns` so semantic recon can interrogate the agent over ACP too:
+
+```lua
+local session_fns = helpers.acp_session({
+  home_dir = ".example",      -- dot-dir used to default the working directory
+  args = { "--acp" },         -- ACP launch arguments from the registry
+  -- env = { EXAMPLE_NO_UPDATE = "1" },  -- optional extra environment
+})
+
+-- in the returned connector table:
+create_session = function(ctx)
+  return session_fns.create(ctx)
+end,
+
+session_transact = function(_ctx, state, prompt)
+  return session_fns.transact(state, prompt)
+end,
+
+session_close = function(_ctx, state)
+  session_fns.close(state)
+end,
+```
+
+4. If the agent talks to a vendor-hosted LLM endpoint, add a section for its `short_name` to `service/src/intercept_targets/default_intercept_targets.toml`.
+5. Add a row to the table in [ACP Harnesses](./acp.md) and to the [connector overview](./overview.md).
+
+Do not add an ACP harness for an agent that already has its own connector, otherwise the same binary is fingerprinted twice.
 
 ### ACP Lua API
+
+`helpers.acp_session` is a thin wrapper over the native API, which can also be used directly:
 
 | Function | Arguments | Returns | Description |
 |----------|-----------|---------|-------------|
 | `praxis.acp_start` | spec table | handle (string) | Spawn an ACP subprocess and perform the initialize handshake |
-| `praxis.acp_create_session` | handle, cwd | session_id (string) | Create an ACP session with a working directory |
+| `praxis.acp_create_session` | handle, cwd | session_id (string) | Create an ACP session with a working directory (`session/new`; ACP requires an absolute path) |
 | `praxis.acp_prompt` | handle, prompt, yolo, interactive | response (string) | Send a prompt and wait for the streamed response. `yolo` auto-approves permission requests; `interactive` forwards them to the user |
+| `praxis.acp_cancel` | handle | — | Send `session/cancel` for the in-flight prompt |
+| `praxis.acp_is_alive` | handle | boolean | Whether the agent subprocess is still running |
 | `praxis.acp_close` | handle | — | Close the ACP session and terminate the subprocess |
 
 The `acp_start` spec table:
@@ -220,45 +258,12 @@ The `acp_start` spec table:
 |-------|------|-------------|
 | `program` | string | Path to the agent executable |
 | `args` | table | Command-line arguments (e.g. `{ "acp" }` or `{ "--acp" }`) |
+| `env` | table | Optional extra environment variables (`{ NAME = "value" }`) |
 | `cwd` | string | Working directory for the subprocess |
 
-### Example
+The session state returned by `create_session` must carry the handle as `acp_handle`: the node uses it to register the streaming update and permission channels before each prompt, and to cancel and close the subprocess.
 
-```lua
-create_session = function(ctx)
-  local acp_handle = praxis.acp_start({
-    program = ctx.process_path,
-    args = { "--acp" },
-    cwd = ctx.working_dir or "",
-  })
-
-  local session_id = praxis.acp_create_session(acp_handle, ctx.working_dir or "")
-
-  return {
-    acp_handle = acp_handle,
-    acp_session_id = session_id,
-    yolo_mode = ctx.yolo_mode == true,
-    interactive = ctx.interactive == true,
-  }
-end,
-
-session_transact = function(_ctx, state, prompt)
-  local response = praxis.acp_prompt(
-    state.acp_handle, prompt,
-    state.yolo_mode or false,
-    state.interactive or false
-  )
-  return { response = response, state = state }
-end,
-
-session_close = function(_ctx, state)
-  if state.acp_handle then
-    praxis.acp_close(state.acp_handle)
-  end
-end,
-```
-
-During `acp_prompt`, streaming updates (text, tool calls, tool results) are automatically forwarded to the client (the praxis TUI) in real time. The function blocks until the full response is assembled and returns the final text.
+During `acp_prompt`, streaming updates (text, tool calls, tool results) are automatically forwarded to the client (the praxis TUI) in real time. The function blocks until the turn ends and returns the assembled agent message text.
 
 ---
 
