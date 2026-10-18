@@ -159,6 +159,32 @@ device-login exchange, and verify that the CA must be trusted. They do not
 change system certificates, routes, or proxy settings. Host configuration and
 enable/disable behavior require separate platform checks.
 
+On Windows, these opt-in checks exercise installed applications. Run them from
+a normal console with output capture disabled:
+
+```powershell
+cargo test -p praxis_cli editor::tests::windows_notepad_roundtrip_manual -- --ignored --exact --nocapture --test-threads=1
+```
+
+In Notepad, replace the file contents with `praxis-editor-ok`, save, and close
+the editor. Press Enter once at the terminal confirmation, then press `r` to
+verify that terminal input resumed. Ctrl+C cancels the check.
+
+To check M365 Copilot session creation, first sign in to the installed app:
+
+```powershell
+$package = Get-AppxPackage -Name Microsoft.MicrosoftOfficeHub | Select-Object -First 1
+$env:PRAXIS_TEST_M365_PATH = Join-Path $package.InstallLocation M365Copilot.exe
+$env:PRAXIS_NOT_HIDDEN = '1'
+cargo test -p praxis_node agent_connectors::lua::tests::m365_real_session_connects_to_chat_input -- --ignored --exact --nocapture --test-threads=1
+```
+
+This uses the production connector to close existing Copilot processes, launch
+the app, create a CDP session, and check for the chat input. It closes the test
+session afterward. It does not send a prompt or read account or chat contents.
+A connected session with no chat input is reported separately from a connection
+failure; check sign-in and chat navigation before retrying.
+
 ### Testing Connectors
 
 1. Install the target agent

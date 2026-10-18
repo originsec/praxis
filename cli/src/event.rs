@@ -184,6 +184,28 @@ pub(crate) struct TerminalPause {
 }
 
 impl TerminalInput {
+    pub(crate) fn start(
+        forward: impl FnMut(Event) -> bool + Send + 'static,
+        closed: impl Fn() -> bool + Send + 'static,
+    ) -> (Self, std::thread::JoinHandle<()>) {
+        let (commands, command_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            run_terminal_reader(
+                command_rx,
+                |timeout| {
+                    if crossterm::event::poll(timeout)? {
+                        crossterm::event::read().map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                },
+                forward,
+                closed,
+            );
+        });
+        (Self { commands }, worker)
+    }
+
     pub(crate) fn pause(&self) -> std::io::Result<TerminalPause> {
         let pause = TerminalPause {
             input: self.clone(),
@@ -299,24 +321,12 @@ impl EventHandler {
         let (tx, rx) = mpsc::unbounded_channel();
         let (intercept_tx, intercept_rx) = mpsc::channel(INTERCEPT_LIVE_CAPACITY);
         let intercept_drop_counter = Arc::new(AtomicU64::new(0));
-        let (commands, command_rx) = std::sync::mpsc::channel();
-        let terminal_input = TerminalInput { commands };
         let tx_term = tx.clone();
         let tx_closed = tx.clone();
-        std::thread::spawn(move || {
-            run_terminal_reader(
-                command_rx,
-                |timeout| {
-                    if crossterm::event::poll(timeout)? {
-                        crossterm::event::read().map(Some)
-                    } else {
-                        Ok(None)
-                    }
-                },
-                |event| tx_term.send(AppEvent::Terminal(event)).is_ok(),
-                || tx_closed.is_closed(),
-            );
-        });
+        let (terminal_input, _) = TerminalInput::start(
+            move |event| tx_term.send(AppEvent::Terminal(event)).is_ok(),
+            move || tx_closed.is_closed(),
+        );
 
         //
         // Terminal output from node PTY sessions.
