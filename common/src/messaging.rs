@@ -416,6 +416,68 @@ pub struct SessionItem {
 // keeping the shape of ReconResult straightforward.
 //
 
+/// Lifecycle hook registered with an agent (event -> matcher -> command).
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct HookItem {
+    /// Agent lifecycle event (e.g. PreToolUse, BeforeTool, beforeShellExecution).
+    pub event: String,
+    /// Tool/event matcher, if the hook is scoped to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+    /// Hook handler kind as declared by the agent (command, http, prompt, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_type: Option<String>,
+    /// Command line (or URL / prompt for non-command handlers).
+    #[serde(default)]
+    pub command: String,
+    /// Where the hook is declared: user, project, local, managed, plugin, extension.
+    #[serde(default)]
+    pub scope: String,
+    /// File the hook was read from.
+    #[serde(default)]
+    pub source_path: String,
+    /// Project this hook belongs to (None = global).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_path: Option<String>,
+}
+
+/// Installed agent plugin / extension.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct PluginItem {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Marketplace or install source the plugin came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    /// Install scope (user, project, local, managed, workspace).
+    #[serde(default)]
+    pub scope: String,
+    /// Install directory or manifest path.
+    #[serde(default)]
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_path: Option<String>,
+}
+
+/// Configured plugin marketplace source.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct MarketplaceItem {
+    pub name: String,
+    /// Where the marketplace is fetched from (git URL, GitHub repo, path).
+    #[serde(default)]
+    pub source: String,
+    /// Config file that declares the marketplace.
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_path: Option<String>,
+}
+
 /// Tools discovered during agent reconnaissance.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ReconTools {
@@ -429,17 +491,64 @@ pub struct ReconTools {
     /// Populated only when recon runs in semantic mode.
     #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
+    /// Lifecycle hooks across user, project, managed and plugin scopes.
+    #[serde(default)]
+    pub hooks: Vec<HookItem>,
+    /// Installed plugins / extensions.
+    #[serde(default)]
+    pub plugins: Vec<PluginItem>,
+    /// Configured plugin marketplaces.
+    #[serde(default)]
+    pub marketplaces: Vec<MarketplaceItem>,
 }
 
 impl ReconTools {
     pub fn is_empty(&self) -> bool {
-        self.mcp_servers.is_empty() && self.skills.is_empty() && self.internal_tools.is_empty()
+        self.mcp_servers.is_empty()
+            && self.skills.is_empty()
+            && self.internal_tools.is_empty()
+            && self.hooks.is_empty()
+            && self.plugins.is_empty()
+            && self.marketplaces.is_empty()
+    }
+
+    /// Item count shown on the Tools tab.
+    pub fn total_count(&self) -> usize {
+        self.mcp_servers.len()
+            + self.skills.len()
+            + self.internal_tools.len()
+            + self.hooks.len()
+            + self.plugins.len()
+            + self.marketplaces.len()
     }
 
     /// Total number of MCP tools across all servers.
     pub fn mcp_tool_count(&self) -> usize {
         self.mcp_servers.iter().map(|s| s.tools.len()).sum()
     }
+}
+
+//
+// Credential store metadata. Recon reports where an agent keeps credentials
+// and non-secret facts about them (account email, plan, expiry) — never the
+// secret material itself. `exists` is None when presence cannot be checked
+// statically (e.g. an OS keychain entry). Metadata is passed through
+// CredentialItem::redact before it leaves the node.
+//
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CredentialItem {
+    /// File path, `env:<VAR>` or `keychain:<service>`.
+    pub path: String,
+    /// oauth_token_file, api_key_in_config, encrypted_store, os_keychain, env_var.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exists: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    /// Non-secret metadata (email, plan, expiry, auth mode, which fields are present).
+    #[serde(default)]
+    pub metadata: std::collections::BTreeMap<String, String>,
 }
 
 /// Configuration items + the project paths in which they were discovered.
@@ -450,11 +559,48 @@ pub struct ReconConfig {
     /// Project directories where agent-scoped config was discovered.
     #[serde(default)]
     pub project_paths: Vec<String>,
+    /// Credential stores (metadata only).
+    #[serde(default)]
+    pub credentials: Vec<CredentialItem>,
 }
 
 impl ReconConfig {
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.project_paths.is_empty()
+        self.items.is_empty() && self.project_paths.is_empty() && self.credentials.is_empty()
+    }
+}
+
+//
+// Connectors may encode a project root into config_type
+// (`project_instructions:/home/u/proj`). The group is the type prefix so
+// consumers can bucket items without caring about the path suffix.
+//
+
+pub fn config_type_group(config_type: &str) -> &str {
+    if let Some((prefix, rest)) = config_type.split_once(':') {
+        let rest = rest.trim();
+        if rest.starts_with('/')
+            || rest.starts_with('~')
+            || rest.starts_with('.')
+            || rest.get(1..3) == Some(":\\")
+            || rest.get(1..3) == Some(":/")
+        {
+            return prefix.trim();
+        }
+    }
+    config_type
+}
+
+impl ConfigItem {
+    /// Agent persistent memory (auto-memory files, saved memories).
+    pub fn is_memory(&self) -> bool {
+        config_type_group(&self.config_type).ends_with("memory")
+    }
+
+    /// Instruction / rules files (AGENTS.md, CLAUDE.md, GEMINI.md, rules, imports).
+    pub fn is_instructions(&self) -> bool {
+        let group = config_type_group(&self.config_type);
+        group.ends_with("instructions") || group.ends_with("rules")
     }
 }
 

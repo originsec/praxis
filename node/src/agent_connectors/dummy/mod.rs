@@ -226,6 +226,7 @@ impl AgentRecon for DummyAgent {
             mcp_servers: self.get_demo_mcp_servers(),
             skills: self.get_demo_skills(),
             internal_tools: Vec::new(),
+            ..Default::default()
         };
 
         if is_semantic {
@@ -235,6 +236,7 @@ impl AgentRecon for DummyAgent {
         let config = ReconConfig {
             items: self.get_demo_config(),
             project_paths: Vec::new(),
+            ..Default::default()
         };
 
         common::log_info!(

@@ -85,7 +85,7 @@ pub struct ReconListParams {
     pub agent: String,
 
     #[schemars(
-        description = "Section to list: all, sessions, tools, projects, configs (default: all)"
+        description = "Section to list: all, sessions, tools, projects, configs, hooks, plugins, credentials, memory, instructions (default: all)"
     )]
     pub section: Option<String>,
 }
