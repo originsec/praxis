@@ -90,7 +90,19 @@ local function discover_trusted_workspaces(home)
     ::continue::
   end
 
-  return paths
+  --
+  -- ACP sessions record their cwd in acp-sessions/<uuid>/meta.json.
+  --
+
+  local acp_glob = praxis.path_join({ home, ".config", "cursor", "acp-sessions", "*", "meta.json" })
+  for _, meta_path in ipairs(praxis.glob_files(acp_glob) or {}) do
+    local meta = helpers.parse_json(praxis.read_file(meta_path))
+    if meta and type(meta.cwd) == "string" and praxis.path_is_dir(meta.cwd) then
+      table.insert(paths, meta.cwd)
+    end
+  end
+
+  return helpers.dedup(paths)
 end
 
 --
@@ -460,11 +472,152 @@ local function discover_skills(home, project_paths)
   return skills
 end
 
+--
+-- Plugins: local dev plugins in ~/.cursor/plugins/local/<name>/ and
+-- marketplace installs under ~/.cursor/plugins/cache/, each with a
+-- .cursor-plugin/, .claude-plugin/ or root plugin.json manifest. Cursor
+-- keeps no local enabled flag for marketplace plugins, so installed
+-- plugins are reported as enabled.
+--
+
+local PLUGIN_MANIFEST_SUFFIXES = {
+  "/.cursor-plugin/plugin.json",
+  "/.claude-plugin/plugin.json",
+}
+
+local function plugin_from_manifest(manifest_path, root, scope)
+  local manifest = helpers.parse_json(praxis.read_file(manifest_path)) or {}
+  local name = type(manifest.name) == "string" and manifest.name
+      or (helpers.norm(root):match("([^/]+)$") or root)
+  return {
+    name = name,
+    version = type(manifest.version) == "string" and manifest.version or nil,
+    enabled = true,
+    scope = scope,
+    path = root,
+  }, manifest
+end
+
+local function discover_plugins(home, project_paths)
+  local found = { plugins = {}, marketplaces = {}, hooks = {} }
+  local plugins_dir = praxis.path_join({ home, ".cursor", "plugins" })
+
+  local function add_plugin(manifest_path, root, scope)
+    local item = plugin_from_manifest(manifest_path, root, scope)
+    table.insert(found.plugins, item)
+    for _, h in ipairs(helpers.collect_file_hooks({
+      { path = praxis.path_join({ root, "hooks", "hooks.json" }), scope = "plugin" },
+    })) do
+      table.insert(found.hooks, h)
+    end
+  end
+
+  for _, sub in ipairs({ "local", "cache" }) do
+    local base = praxis.path_join({ plugins_dir, sub })
+    if praxis.path_is_dir(base) then
+      for _, file in ipairs(praxis.walk_files(base, 6) or {}) do
+        local nf = helpers.norm(file)
+        for _, suffix in ipairs(PLUGIN_MANIFEST_SUFFIXES) do
+          if helpers.ends_with(nf, suffix) then
+            add_plugin(file, nf:sub(1, #nf - #suffix), sub == "local" and "local" or "user")
+          end
+        end
+      end
+    end
+  end
+
+  local mkt_path = praxis.path_join({ plugins_dir, "local-marketplaces.json" })
+  local mkts = helpers.parse_json(praxis.read_file(mkt_path))
+  for _, m in ipairs(mkts and type(mkts.marketplaces) == "table" and mkts.marketplaces or {}) do
+    if type(m) == "table" and type(m.name) == "string" then
+      table.insert(found.marketplaces, {
+        name = m.name,
+        source = type(m.source) == "string" and m.source or praxis.json_encode(m.source or ""),
+        path = mkt_path,
+        scope = "user",
+      })
+    end
+  end
+
+  --
+  -- With third-party extensibility (on by default) Cursor also runs Claude
+  -- Code hooks from .claude/settings*.json. Only the hooks are read; the
+  -- files belong to Claude Code's own recon.
+  --
+
+  local compat = {
+    { path = praxis.path_join({ home, ".claude", "settings.json" }), scope = "claude-compat" },
+  }
+  for _, proj in ipairs(project_paths or {}) do
+    for _, name in ipairs({ "settings.json", "settings.local.json" }) do
+      table.insert(compat, {
+        path = praxis.path_join({ proj, ".claude", name }),
+        scope = "claude-compat",
+        context_path = proj,
+      })
+    end
+  end
+  for _, h in ipairs(helpers.collect_file_hooks(compat)) do
+    table.insert(found.hooks, h)
+  end
+
+  return found
+end
+
+local CURSOR_SKILL_DIRS = {
+  ".cursor/skills",
+  helpers.SHARED_SKILL_DIRS,
+  ".claude/skills",
+  ".codex/skills",
+}
+
+local function keychain_credentials(_home)
+  if praxis.os_name() ~= "macos" then
+    return {}
+  end
+  return {
+    helpers.credential_keychain("cursor-access-token"),
+    helpers.credential_keychain("cursor-refresh-token"),
+    helpers.credential_keychain("cursor-api-key"),
+  }
+end
+
+local AUTH_FILE_FIELDS = {
+  presence = { "accessToken", "refreshToken", "apiKey", "bedrockCredentials" },
+}
+
+local CLI_CONFIG_ACCOUNT = {
+  kind = "account_config",
+  require_any = true,
+  fields = {
+    email = "authInfo.email",
+    display_name = "authInfo.displayName",
+    user_id = "authInfo.userId",
+    privacy_mode = "privacyCache.privacyMode",
+  },
+  presence = { "authInfo" },
+}
+
+local function with_path(spec, path)
+  local out = { path = path }
+  for k, v in pairs(spec) do
+    out[k] = v
+  end
+  out.kind = out.kind or "oauth_token_file"
+  return out
+end
+
 local recon_config = {
   home_dir = ".cursor",
 
   home_configs = {
     { path = ".cursor/cli-config.json", type = "global_settings", mcp = true },
+    { path = ".config/cursor/cli-config.json", type = "global_settings", mcp = true },
+    { path = ".cursor/hooks.json", type = "global_hooks", hooks = true },
+    { path = ".cursor/managed/active-team-hooks/hooks.json", type = "team_hooks",
+      hooks = true, hook_scope = "team" },
+    { path = ".cursor/rules/*.mdc", type = "global_rules" },
+    { path = ".cursor/projects/*/agent-notes/*.md", type = "agent_notes_memory" },
   },
 
   project_markers = { "/.cursor/cli.json", "/.cursor/mcp.json" },
@@ -473,7 +626,34 @@ local recon_config = {
   project_configs = {
     { path = ".cursor/cli.json", type = "project_settings", mcp = true },
     { path = ".cursor/mcp.json", type = "project_mcp", mcp = true },
+    { path = ".cursor/hooks.json", type = "project_hooks", hooks = true },
+    { path = ".cursor/rules/**/*.mdc", type = "project_rules" },
+    { path = ".cursorrules", type = "project_rules" },
+    { path = "AGENTS.md", type = "project_instructions" },
+    { path = "CLAUDE.md", type = "project_instructions" },
+    { path = "CLAUDE.local.md", type = "project_local_instructions" },
   },
+
+  managed_hooks = {
+    linux = { { path = "/etc/cursor/hooks.json", scope = "managed" } },
+    macos = { { path = "/Library/Application Support/Cursor/hooks.json", scope = "managed" } },
+    windows = { { path = "C:/ProgramData/Cursor/hooks.json", scope = "managed" } },
+  },
+  skill_dirs = {
+    home = { ".cursor/skills-cursor", table.unpack(CURSOR_SKILL_DIRS) },
+    project = CURSOR_SKILL_DIRS,
+  },
+  plugin_discovery = discover_plugins,
+
+  credentials = {
+    with_path(AUTH_FILE_FIELDS, ".config/cursor/auth.json"),
+    with_path(AUTH_FILE_FIELDS, ".cursor/auth.json"),
+    with_path(AUTH_FILE_FIELDS, "AppData/Roaming/Cursor/auth.json"),
+    with_path(CLI_CONFIG_ACCOUNT, ".config/cursor/cli-config.json"),
+    with_path(CLI_CONFIG_ACCOUNT, ".cursor/cli-config.json"),
+  },
+  credential_env_vars = { "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_IDENTITY_TOKEN" },
+  credential_discovery = keychain_credentials,
 
   mcp_parsers = {
     default = helpers.parse_mcp_from_json_flexible,

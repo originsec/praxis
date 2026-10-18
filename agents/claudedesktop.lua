@@ -327,6 +327,41 @@ local function run_session_close(state)
   end
 end
 
+--
+-- Desktop extensions (.mcpb, formerly .dxt) unpack into "Claude
+-- Extensions/<id>/manifest.json". Per-extension state lives in "Claude
+-- Extensions Settings/<id>.json"; an explicit isEnabled = false there marks
+-- the extension disabled, otherwise an installed extension is treated as
+-- enabled.
+--
+
+local function discover_extensions(home, _project_paths)
+  local found = { plugins = {} }
+  local base = praxis.path_join({ home, CLAUDE_CONFIG_REL })
+  local ext_dir = praxis.path_join({ base, "Claude Extensions" })
+  if not praxis.path_is_dir(ext_dir) then
+    return found
+  end
+  for _, entry in ipairs(praxis.read_dir(ext_dir) or {}) do
+    if entry.is_dir then
+      local manifest = helpers.parse_json(praxis.read_file(
+        praxis.path_join({ entry.path, "manifest.json" }))) or {}
+      local settings = helpers.parse_json(praxis.read_file(praxis.path_join({
+        base, "Claude Extensions Settings", entry.name .. ".json",
+      }))) or {}
+      table.insert(found.plugins, {
+        name = type(manifest.name) == "string" and manifest.name or entry.name,
+        version = type(manifest.version) == "string" and manifest.version or nil,
+        source = "extension",
+        enabled = settings.isEnabled ~= false,
+        scope = "user",
+        path = entry.path,
+      })
+    end
+  end
+  return found
+end
+
 local recon_config = {
   home_dir = CLAUDE_CONFIG_REL,
 
@@ -350,6 +385,18 @@ local recon_config = {
 
   mcp_parsers = {
     default = helpers.parse_mcp_from_json,
+  },
+
+  plugin_discovery = discover_extensions,
+
+  --
+  -- The OAuth token cache in config.json is an Electron safeStorage blob
+  -- (DPAPI / Keychain wrapped); only its presence is reported.
+  --
+
+  credentials = {
+    { path = praxis.path_join({ CLAUDE_CONFIG_REL, "config.json" }), kind = "encrypted_store",
+      require_any = true, presence = { "oauth:tokenCacheV2", "oauth:tokenCache" } },
   },
 
   auth_check = function(path)

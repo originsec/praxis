@@ -139,19 +139,230 @@ local session_fns = helpers.subprocess_session({
   end,
 })
 
+--
+-- Pi's session header line ({"type":"session", "cwd": ...}) records the
+-- real working directory; read the newest session per directory.
+--
+
+local function discover_session_projects(home)
+  local paths = {}
+  local base = praxis.path_join({ home, ".pi", "agent", "sessions" })
+  for _, dir in ipairs(praxis.path_is_dir(base) and (praxis.read_dir(base) or {}) or {}) do
+    if dir.is_dir then
+      local latest = helpers.find_latest_session_file(dir.path)
+      local header = latest and helpers.parse_json(
+        (praxis.read_file_prefix(latest, 16 * 1024) or ""):match("^[^\r\n]+") or "")
+      if header and type(header.cwd) == "string" and praxis.path_is_dir(header.cwd) then
+        table.insert(paths, header.cwd)
+      end
+    end
+  end
+  local trust = helpers.parse_json(praxis.read_file(praxis.path_join({ home, ".pi", "agent", "trust.json" })))
+  for path, trusted in pairs(trust or {}) do
+    if trusted == true and praxis.path_is_dir(path) then
+      table.insert(paths, path)
+    end
+  end
+  return helpers.dedup(paths)
+end
+
+--
+-- Pi has no declarative hooks file: extensions (TypeScript/JavaScript
+-- modules) subscribe to agent events with pi.on("<event>", handler).
+-- Extensions are reported as plugins and each subscription as a hook
+-- whose command is the extension file. Packages listed in settings
+-- (npm:/git: specs) are reported as plugins too.
+--
+
+local function extension_files(dir)
+  local files = {}
+  for _, entry in ipairs(praxis.path_is_dir(dir) and (praxis.read_dir(dir) or {}) or {}) do
+    if entry.is_file and (entry.name:match("%.ts$") or entry.name:match("%.js$")) then
+      table.insert(files, { name = helpers.strip_extension(entry.name), path = entry.path })
+    elseif entry.is_dir then
+      for _, index in ipairs({ "index.ts", "index.js" }) do
+        local p = praxis.path_join({ entry.path, index })
+        if praxis.path_exists(p) then
+          table.insert(files, { name = entry.name, path = p })
+          break
+        end
+      end
+    end
+  end
+  return files
+end
+
+local function extension_hooks(file, scope, context_path)
+  local hooks = {}
+  local seen = {}
+  local content = praxis.read_file(file.path) or ""
+  for event in content:gmatch("%.on%(%s*[\"']([%w_]+)[\"']") do
+    if not seen[event] then
+      seen[event] = true
+      table.insert(hooks, {
+        event = event,
+        hook_type = "extension",
+        command = file.name,
+        scope = scope,
+        source_path = file.path,
+        context_path = context_path,
+      })
+    end
+  end
+  return hooks
+end
+
+local function discover_extensions(home, project_paths)
+  local found = { plugins = {}, hooks = {} }
+  local locations = {
+    { dir = praxis.path_join({ home, ".pi", "agent", "extensions" }), scope = "user" },
+  }
+  for _, proj in ipairs(project_paths or {}) do
+    table.insert(locations, {
+      dir = praxis.path_join({ proj, ".pi", "extensions" }),
+      scope = "project",
+      context_path = proj,
+    })
+  end
+  for _, loc in ipairs(locations) do
+    for _, file in ipairs(extension_files(loc.dir)) do
+      table.insert(found.plugins, {
+        name = file.name,
+        source = "extension",
+        enabled = true,
+        scope = loc.scope,
+        path = file.path,
+        context_path = loc.context_path,
+      })
+      for _, h in ipairs(extension_hooks(file, loc.scope, loc.context_path)) do
+        table.insert(found.hooks, h)
+      end
+    end
+  end
+
+  local settings_path = praxis.path_join({ home, ".pi", "agent", "settings.json" })
+  local settings = helpers.parse_json(praxis.read_file(settings_path))
+  for _, pkg in ipairs(settings and type(settings.packages) == "table" and settings.packages or {}) do
+    local spec = type(pkg) == "string" and pkg or (type(pkg) == "table" and pkg.source) or nil
+    if type(spec) == "string" then
+      table.insert(found.plugins, {
+        name = spec,
+        source = spec:match("^(%a+):") or "path",
+        enabled = true,
+        scope = "user",
+        path = settings_path,
+      })
+    end
+  end
+  return found
+end
+
+local function discover_prompts(home, project_paths)
+  local skills = helpers.discover_command_skills(praxis.path_join({ home, ".pi", "agent" }), {
+    dir = "prompts",
+    pattern = "%.md$",
+    name_prefix = "/",
+    parse = "markdown",
+  })
+  for _, proj in ipairs(project_paths or {}) do
+    for _, s in ipairs(helpers.discover_command_skills(praxis.path_join({ proj, ".pi" }), {
+      dir = "prompts",
+      pattern = "%.md$",
+      name_prefix = "/",
+      parse = "markdown",
+      context_path = proj,
+    })) do
+      table.insert(skills, s)
+    end
+  end
+  return skills
+end
+
+--
+-- auth.json is keyed by provider: { type = "oauth", access, refresh,
+-- expires, accountId } or { type = "api_key", key, env }. Only the provider
+-- names, credential types and expiry are reported. A key starting with "!"
+-- is a shell command that prints the key.
+--
+
+local function auth_file_credentials(home)
+  local path = praxis.path_join({ home, ".pi", "agent", "auth.json" })
+  local item = helpers.credential_from_file(path, { kind = "provider_credentials_file" })
+  if item == nil then
+    return {}
+  end
+  local auth = helpers.parse_json(praxis.read_file(path)) or {}
+  local providers = {}
+  for provider, entry in pairs(auth) do
+    if type(provider) == "string" and type(entry) == "table" then
+      table.insert(providers, provider)
+      if type(entry.type) == "string" then
+        item.metadata[provider .. "_type"] = entry.type
+      end
+      if type(entry.expires) == "number" then
+        item.metadata[provider .. "_expires_at"] =
+          praxis.format_unix_timestamp(math.floor(entry.expires / 1000))
+      end
+      if type(entry.key) == "string" and helpers.starts_with(entry.key, "!") then
+        item.metadata[provider .. "_source"] = "command"
+      end
+    end
+  end
+  helpers.sort_strings(providers)
+  item.metadata.providers = table.concat(providers, ",")
+  return { item }
+end
+
 local recon_config = {
   home_dir = ".pi",
 
   home_configs = {
     { path = ".pi/agent/settings.json", type = "global_settings" },
-    { path = ".pi/agent/auth.json", type = "credentials" },
     { path = ".pi/agent/models.json", type = "global_models" },
+    { path = ".pi/agent/AGENTS.md", type = "global_instructions" },
+    { path = ".pi/agent/AGENTS.override.md", type = "global_instructions" },
+    { path = ".pi/agent/CLAUDE.md", type = "global_instructions" },
+    { path = ".pi/agent/SYSTEM.md", type = "global_system_instructions" },
+    { path = ".pi/agent/APPEND_SYSTEM.md", type = "global_system_instructions" },
   },
 
   project_markers = { "/.pi/settings.json" },
+  project_discovery = discover_session_projects,
 
   project_configs = {
     { path = ".pi/settings.json", type = "project_settings" },
+    { path = "AGENTS.override.md", type = "project_instructions" },
+    { path = "AGENTS.md", type = "project_instructions" },
+    { path = "CLAUDE.md", type = "project_instructions" },
+    { path = ".pi/SYSTEM.md", type = "project_system_instructions" },
+    { path = ".pi/APPEND_SYSTEM.md", type = "project_system_instructions" },
+  },
+
+  skill_dirs = {
+    home = { ".pi/agent/skills", helpers.SHARED_SKILL_DIRS },
+    project = { ".pi/skills", helpers.SHARED_SKILL_DIRS },
+  },
+  skill_discovery = discover_prompts,
+  plugin_discovery = discover_extensions,
+
+  credentials = {
+    { path = ".pi/agent/mcp-auth.json", kind = "oauth_token_file",
+      metadata = { holds = "MCP OAuth tokens" } },
+    { path = ".pi/agent/mcp-oauth/*", kind = "oauth_token_file",
+      metadata = { holds = "MCP OAuth tokens (legacy)" } },
+  },
+  credential_discovery = auth_file_credentials,
+  credential_env_vars = {
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "XAI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
   },
 
   mcp_parsers = {},

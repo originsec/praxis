@@ -109,10 +109,86 @@ local session_fns = helpers.subprocess_session({
 })
 
 --
--- Discover Droid custom commands (.factory/commands/*.md) at user and
--- project scope. Best-effort: if the directory does not exist the helper
--- returns an empty list, so this is safe regardless of CLI version.
+-- Discover Droid slash commands (~/.factory/commands and per-project).
+-- SKILL.md skills come from skill_dirs and installed plugins.
 --
+
+local function plugin_enabled(settings_path, id)
+  local settings = helpers.parse_json(praxis.read_file(settings_path))
+  local enabled = settings and settings.enabledPlugins
+  return type(enabled) == "table" and enabled[id] == true
+end
+
+--
+-- Plugins use the Claude-compatible registry under ~/.factory/plugins;
+-- enabledPlugins lives in user or project settings.json.
+--
+
+local function plugin_entries(home, project_paths)
+  local user_settings = praxis.path_join({ home, ".factory", "settings.json" })
+  local entries = {}
+  for _, p in ipairs(helpers.parse_plugin_registry(
+      praxis.path_join({ home, ".factory", "plugins", "installed_plugins.json" }))) do
+    p.enabled = plugin_enabled(user_settings, p.id)
+    if not p.enabled then
+      for _, proj in ipairs(project_paths or {}) do
+        if plugin_enabled(praxis.path_join({ proj, ".factory", "settings.json" }), p.id) then
+          p.enabled = true
+          break
+        end
+      end
+    end
+    table.insert(entries, p)
+  end
+  return entries
+end
+
+--
+-- Droid hook files may hold the event map at the root or under `hooks`.
+--
+
+local function hooks_or_root(doc, meta)
+  local tbl = type(doc.hooks) == "table" and doc.hooks or doc
+  return helpers.parse_hooks(tbl, meta)
+end
+
+local function discover_plugins(home, project_paths)
+  local found = { plugins = {}, marketplaces = {}, hooks = {} }
+  for _, p in ipairs(plugin_entries(home, project_paths)) do
+    table.insert(found.plugins, {
+      name = p.id,
+      version = p.version,
+      source = p.marketplace,
+      enabled = p.enabled,
+      scope = p.scope,
+      path = p.root,
+      context_path = p.project_path,
+    })
+    if p.enabled then
+      for _, rel in ipairs({ "hooks/hooks.json", "hooks.json" }) do
+        local path = praxis.path_join({ p.root, rel })
+        local doc = helpers.parse_json(praxis.read_file(path))
+        if doc then
+          for _, h in ipairs(hooks_or_root(doc, {
+            scope = "plugin",
+            source_path = path,
+            context_path = p.project_path,
+          })) do
+            table.insert(found.hooks, h)
+          end
+          break
+        end
+      end
+    end
+  end
+
+  local mkt_path = praxis.path_join({ home, ".factory", "plugins", "known_marketplaces.json" })
+  for _, m in ipairs(helpers.marketplace_items(
+      helpers.parse_json(praxis.read_file(mkt_path)), mkt_path, "user")) do
+    table.insert(found.marketplaces, m)
+  end
+  return found
+end
 
 local function discover_skills(home, project_paths)
   local skills = {}
@@ -137,6 +213,17 @@ local function discover_skills(home, project_paths)
       context_path = proj,
     })) do
       table.insert(skills, s)
+    end
+  end
+
+  for _, p in ipairs(plugin_entries(home, project_paths)) do
+    if p.enabled then
+      for _, s in ipairs(helpers.discover_skill_md_skills(p.root, {
+        dir = "skills",
+        context_path = p.project_path,
+      })) do
+        table.insert(skills, s)
+      end
     end
   end
 
@@ -144,55 +231,115 @@ local function discover_skills(home, project_paths)
 end
 
 --
--- Discover Droid slash commands (~/.factory/commands and per-project).
+-- The session discovery index records the real cwd of every session
+-- (session directory names encode it lossily).
 --
 
-local function discover_skills(home, project_paths)
-  local skills = {}
-
-  local home_factory = praxis.path_join({ home, ".factory" })
-  for _, s in ipairs(helpers.discover_command_skills(home_factory, {
-    dir = "commands",
-    pattern = "%.md$",
-    name_prefix = "/",
-    parse = "markdown",
-  })) do
-    table.insert(skills, s)
-  end
-
-  for _, proj in ipairs(project_paths or {}) do
-    local proj_factory = praxis.path_join({ proj, ".factory" })
-    for _, s in ipairs(helpers.discover_command_skills(proj_factory, {
-      dir = "commands",
-      pattern = "%.md$",
-      name_prefix = "/",
-      parse = "markdown",
-      context_path = proj,
-    })) do
-      table.insert(skills, s)
+local function discover_session_projects(home)
+  local paths = {}
+  local index = helpers.parse_json(praxis.read_file(
+    praxis.path_join({ home, ".factory", "cache", "session-discovery-index.json" })))
+  for _, entry in pairs(index and type(index.entries) == "table" and index.entries or {}) do
+    if type(entry) == "table" and type(entry.cwd) == "string" and praxis.path_is_dir(entry.cwd) then
+      table.insert(paths, entry.cwd)
     end
   end
+  return helpers.dedup(paths)
+end
 
-  return skills
+--
+-- BYOK models in settings.json carry plaintext apiKey values. Report how
+-- many models have one and their providers — never the keys.
+--
+
+local function custom_model_keys(home)
+  local path = praxis.path_join({ home, ".factory", "settings.json" })
+  local settings = helpers.parse_json(praxis.read_file(path))
+  local models = settings and settings.customModels
+  if type(models) ~= "table" then
+    return {}
+  end
+  local count = 0
+  local providers = {}
+  for _, m in ipairs(models) do
+    if type(m) == "table" and type(m.apiKey) == "string" and m.apiKey ~= "" then
+      count = count + 1
+      if type(m.provider) == "string" then
+        table.insert(providers, m.provider)
+      end
+    end
+  end
+  if count == 0 then
+    return {}
+  end
+  local item = helpers.credential_from_file(path, { kind = "api_key_in_config" })
+  item.metadata.custom_model_api_keys = tostring(count)
+  item.metadata.providers = table.concat(helpers.dedup(providers), ",")
+  return { item }
+end
+
+local function credential_discovery(home)
+  local out = custom_model_keys(home)
+  if praxis.path_exists(praxis.path_join({ home, ".factory", "auth.v2.keyring" })) then
+    table.insert(out, helpers.credential_keychain("Factory CLI", {
+      account = "auth-encryption-key",
+    }))
+  end
+  return out
 end
 
 local recon_config = {
   home_dir = ".factory",
 
   home_configs = {
-    { path = ".factory/settings.json", type = "global_settings" },
-    { path = ".factory/settings.local.json", type = "global_settings_local" },
+    { path = ".factory/settings.json", type = "global_settings", hooks = true },
+    { path = ".factory/settings.local.json", type = "global_settings_local",
+      hooks = true, hook_scope = "local" },
     { path = ".factory/mcp.json", type = "global_mcp", mcp = true },
+    { path = ".factory/hooks/hooks.json", type = "global_hooks", hooks = hooks_or_root },
+    { path = ".factory/hooks.json", type = "global_hooks", hooks = hooks_or_root },
+    { path = ".factory/AGENTS.md", type = "global_instructions" },
+    { path = ".factory/CLAUDE.md", type = "global_instructions" },
+    { path = ".factory/memories.md", type = "memory" },
+    { path = ".factory/automations/*/memory/*", type = "automation_memory" },
   },
 
   project_markers = { "/.factory/settings.json", "/.factory/mcp.json", "/AGENTS.md" },
+  project_discovery = discover_session_projects,
 
   project_configs = {
-    { path = ".factory/settings.json", type = "project_settings" },
-    { path = ".factory/settings.local.json", type = "project_settings_local" },
+    { path = ".factory/settings.json", type = "project_settings", hooks = true },
+    { path = ".factory/settings.local.json", type = "project_settings_local",
+      hooks = true, hook_scope = "local" },
     { path = ".factory/mcp.json", type = "project_mcp", mcp = true },
+    { path = ".factory/hooks/hooks.json", type = "project_hooks", hooks = hooks_or_root },
+    { path = ".factory/hooks.json", type = "project_hooks", hooks = hooks_or_root },
     { path = "AGENTS.md", type = "project_instructions" },
+    { path = "CLAUDE.md", type = "project_instructions" },
+    { path = ".factory/AGENTS.md", type = "project_instructions" },
+    { path = ".factory/CLAUDE.md", type = "project_instructions" },
+    { path = ".factory/automations/*/memory/*", type = "project_automation_memory" },
   },
+
+  skill_dirs = {
+    home = { ".factory/skills", helpers.SHARED_SKILL_DIRS, ".agent/skills" },
+    project = { ".factory/skills", helpers.SHARED_SKILL_DIRS, ".agent/skills" },
+  },
+  plugin_discovery = discover_plugins,
+
+  credentials = {
+    { path = ".factory/auth.v2.file", kind = "encrypted_store",
+      metadata = { cipher = "AES-256-GCM" } },
+    { path = ".factory/auth.v2.key", kind = "encryption_key_file",
+      metadata = { protects = "auth.v2.file" } },
+    { path = ".factory/auth.v2.keyring", kind = "encrypted_store",
+      metadata = { key_location = "os_keychain" } },
+    { path = ".factory/auth.encrypted", kind = "encrypted_store" },
+    { path = ".factory/auth.json", kind = "oauth_token_file",
+      presence = { "access_token", "refresh_token" } },
+  },
+  credential_env_vars = { "FACTORY_API_KEY" },
+  credential_discovery = credential_discovery,
 
   mcp_parsers = {
     default = helpers.parse_mcp_from_json,
