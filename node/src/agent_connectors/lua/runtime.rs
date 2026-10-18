@@ -1192,6 +1192,20 @@ fn install_shared_libraries(lua: &Lua) -> Result<()> {
         .set("praxis.uiautomation", uiautomation_loader)
         .map_err(lua_error)?;
 
+    let chromium_src = include_str!("lib/chromium.lua");
+    let chromium_loader = lua
+        .create_function(move |lua, ()| {
+            let value: Value = lua.load(chromium_src).eval().map_err(|e| {
+                mlua::Error::RuntimeError(format!("Failed to load praxis.chromium: {}", e))
+            })?;
+            Ok(value)
+        })
+        .map_err(lua_error)?;
+
+    preload
+        .set("praxis.chromium", chromium_loader)
+        .map_err(lua_error)?;
+
     Ok(())
 }
 

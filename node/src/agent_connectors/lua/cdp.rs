@@ -161,6 +161,8 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 //   debug_port_env_var  (string?) Env var name for the debug port argument
 //   debug_port_format   (string?) Format string, e.g. "--remote-debugging-port={}"
 //   debug_port_cli_arg  (string?) CLI arg format string, e.g. "--remote-debugging-port={}"
+//   extra_args          (table?)  Additional CLI args appended after the debug
+//                                 port arg, e.g. { "--user-data-dir=..." }
 //   base_port           (number)  Base port number
 //   port_range          (number)  Range for random port selection
 //   kill_existing       (bool?)   Whether to kill existing processes first
@@ -174,6 +176,10 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<(String, Option<String>)> {
     let debug_port_env_var: Option<String> = config.get("debug_port_env_var").unwrap_or(None);
     let debug_port_format: Option<String> = config.get("debug_port_format").unwrap_or(None);
     let debug_port_cli_arg: Option<String> = config.get("debug_port_cli_arg").unwrap_or(None);
+    let extra_args: Vec<String> = config
+        .get::<Option<Vec<String>>>("extra_args")
+        .map_err(|e| anyhow!("invalid extra_args: {}", e))?
+        .unwrap_or_default();
     let base_port: u16 = config
         .get("base_port")
         .map_err(|e| anyhow!("missing base_port: {}", e))?;
@@ -235,12 +241,13 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<(String, Option<String>)> {
         None
     };
 
-    let cli_args: Vec<String> = if use_cli {
+    let mut cli_args: Vec<String> = if use_cli {
         let fmt = debug_port_cli_arg.as_ref().unwrap();
         vec![fmt.replace("{}", &port_str)]
     } else {
         vec![]
     };
+    cli_args.extend(extra_args);
 
     let spawn_result = crate::utils::spawn_process_detached(
         &process_path,

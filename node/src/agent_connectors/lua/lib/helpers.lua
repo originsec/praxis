@@ -99,6 +99,105 @@ function M.parse_json(content)
   return parsed
 end
 
+--
+-- Rewrite the JSON5 subset that hand-edited agent configs use (comments,
+-- trailing commas, unquoted keys, single-quoted strings) into strict JSON.
+-- Anything outside that subset (hex numbers, Infinity, ...) is copied as-is
+-- and left for the JSON decoder to reject.
+--
+
+local function json5_to_json(src)
+  local out = {}
+  local i, n = 1, #src
+  local pending_comma = false
+
+  local function emit(s)
+    if pending_comma then
+      if s ~= "}" and s ~= "]" then
+        table.insert(out, ",")
+      end
+      pending_comma = false
+    end
+    table.insert(out, s)
+  end
+
+  while i <= n do
+    local c = src:sub(i, i)
+    if c == '"' or c == "'" then
+      local quote = c
+      local buf = { '"' }
+      i = i + 1
+      while i <= n do
+        local ch = src:sub(i, i)
+        if ch == "\\" then
+          local nxt = src:sub(i + 1, i + 1)
+          if nxt == "'" then
+            table.insert(buf, "'")
+          else
+            table.insert(buf, ch .. nxt)
+          end
+          i = i + 2
+        elseif ch == quote then
+          i = i + 1
+          break
+        else
+          if ch == '"' then
+            ch = '\\"'
+          end
+          table.insert(buf, ch)
+          i = i + 1
+        end
+      end
+      table.insert(buf, '"')
+      emit(table.concat(buf))
+    elseif c == "/" and src:sub(i + 1, i + 1) == "/" then
+      local nl = src:find("\n", i, true)
+      i = nl or (n + 1)
+    elseif c == "/" and src:sub(i + 1, i + 1) == "*" then
+      local close = src:find("*/", i + 2, true)
+      i = close and (close + 2) or (n + 1)
+    elseif c == "," then
+      if pending_comma then
+        table.insert(out, ",")
+      end
+      pending_comma = true
+      i = i + 1
+    elseif c:match("%s") then
+      i = i + 1
+    elseif c:match("[%a_%$]") then
+      local word = src:match("^[%w_%$]+", i)
+      i = i + #word
+      local next_sig = src:match("^%s*(.)", i)
+      if next_sig == ":" then
+        emit('"' .. word .. '"')
+      else
+        emit(word)
+      end
+    else
+      emit(c)
+      i = i + 1
+    end
+  end
+
+  return table.concat(out)
+end
+
+--
+-- Parse JSON5 (or plain JSON) content. Strict JSON is tried first so the
+-- rewrite only runs for files that need it.
+--
+
+function M.parse_json5(content)
+  if content == nil then
+    return nil
+  end
+  local parsed = M.parse_json(content)
+  if parsed ~= nil then
+    return parsed
+  end
+  return M.parse_json(json5_to_json(content))
+end
+
 function M.parse_toml(content)
   if content == nil then
     return nil
@@ -108,6 +207,116 @@ function M.parse_toml(content)
     return nil
   end
   return parsed
+end
+
+--
+-- Read a key from a macOS app bundle's Info.plist via plutil. Returns nil
+-- when the key is missing or plutil is unavailable (non-macOS hosts).
+--
+
+function M.macos_plist_value(app_path, key)
+  local plist = praxis.path_join({ app_path, "Contents", "Info.plist" })
+  if not praxis.path_exists(plist) then
+    return nil
+  end
+  local result = praxis.command_run({
+    program = "/usr/bin/plutil",
+    args = { "-extract", key, "raw", "-o", "-", plist },
+    timeout_secs = 10,
+  })
+  if not result.success then
+    return nil
+  end
+  local value = (result.stdout or ""):match("^%s*(.-)%s*$")
+  if value == "" then
+    return nil
+  end
+  return value
+end
+
+--
+-- Locate a macOS app bundle by name in /Applications and each user's
+-- ~/Applications. When bundle_ids is given the bundle's CFBundleIdentifier
+-- must match one of them (folder names alone are not trustworthy, e.g. the
+-- Codex app ships as ChatGPT.app). Returns the main executable path, its
+-- CFBundleShortVersionString, and the bundle path.
+--
+
+function M.find_macos_app(app_names, bundle_ids)
+  if praxis.os_name() ~= "macos" then
+    return nil, nil, nil
+  end
+
+  local dirs = { "/Applications" }
+  for _, home in ipairs(praxis.user_homes() or {}) do
+    table.insert(dirs, praxis.path_join({ home, "Applications" }))
+  end
+
+  for _, dir in ipairs(dirs) do
+    for _, name in ipairs(app_names) do
+      local app = praxis.path_join({ dir, name })
+      if praxis.path_is_dir(app) then
+        local id = M.macos_plist_value(app, "CFBundleIdentifier")
+        local id_ok = bundle_ids == nil
+        for _, want in ipairs(bundle_ids or {}) do
+          if id == want then
+            id_ok = true
+          end
+        end
+        if id_ok then
+          local exe_name = M.macos_plist_value(app, "CFBundleExecutable")
+              or name:gsub("%.app$", "")
+          local exe = praxis.path_join({ app, "Contents", "MacOS", exe_name })
+          local version = M.macos_plist_value(app, "CFBundleShortVersionString")
+              or M.macos_plist_value(app, "CFBundleVersion")
+          return exe, version, app
+        end
+      end
+    end
+  end
+
+  return nil, nil, nil
+end
+
+--
+-- Read a Windows executable's ProductVersion via PowerShell.
+--
+
+function M.windows_file_version(path)
+  local result = praxis.command_run({
+    program = "powershell",
+    args = { "-NoProfile", "-Command",
+      "(Get-Item -LiteralPath '" .. path:gsub("'", "''") .. "').VersionInfo.ProductVersion" },
+    timeout_secs = 10,
+  })
+  if result.success then
+    return (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+  end
+  return nil
+end
+
+--
+-- Look up an installed MSIX/AppX package by name. Returns its
+-- InstallLocation and Version, or nil when it isn't installed for the
+-- user the node runs as.
+--
+
+function M.windows_appx_package(name)
+  local result = praxis.command_run({
+    program = "powershell",
+    args = { "-NoProfile", "-Command",
+      "Get-AppxPackage -Name '" .. name:gsub("'", "''") .. "' | Select-Object -First 1 | "
+        .. "ForEach-Object { $_.InstallLocation + '|' + $_.Version }" },
+    timeout_secs = 15,
+  })
+  if not result.success then
+    return nil, nil
+  end
+  local location, version = (result.stdout or ""):match("^%s*(.-)|(%S+)")
+  if location == nil or location == "" then
+    return nil, nil
+  end
+  return location, version
 end
 
 --

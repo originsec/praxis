@@ -13,6 +13,7 @@ local M = {}
 --   debug_port_env_var  (string?) Env var for debug port (WebView2)
 --   debug_port_format   (string?) Format string for env var value
 --   debug_port_cli_arg  (string?) CLI arg format string (Electron)
+--   extra_args          (table?)  Additional CLI args, e.g. --user-data-dir
 --   base_port           (number)  Base port number
 --   port_range          (number)  Random port range (default 778)
 --   kill_existing       (bool?)   Kill existing processes first (default true)
