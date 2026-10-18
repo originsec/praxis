@@ -18,6 +18,13 @@ pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 pub const LLM_FEATURE_DOC_HELPER: &str = "llm_feature_doc_helper";
 
+/// Orchestrator model output cap (tokens per model response).
+pub const LLM_ORCHESTRATOR_MAX_TOKENS: &str = "llm_orchestrator_max_tokens";
+
+/// Orchestrator tool-calling mode: "auto" (provider default), "native"
+/// (provider function-calling API) or "manual" (prompt-based JSON calls).
+pub const LLM_ORCHESTRATOR_TOOL_MODE: &str = "llm_orchestrator_tool_mode";
+
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
@@ -62,6 +69,8 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
     LLM_FEATURE_DOC_HELPER,
+    LLM_ORCHESTRATOR_MAX_TOKENS,
+    LLM_ORCHESTRATOR_TOOL_MODE,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
