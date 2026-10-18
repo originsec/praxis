@@ -14,7 +14,7 @@ use common::{
 use lapin::Channel;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, oneshot};
@@ -1085,6 +1085,15 @@ impl McpServerManager {
     }
 
     pub async fn start(&self, rabbitmq_url: &str, port: u16) -> Result<()> {
+        let bind_ip = match std::env::var("PRAXIS_MCP_BIND_ADDRESS") {
+            Ok(value) => value
+                .parse::<IpAddr>()
+                .map_err(|error| anyhow!("Invalid PRAXIS_MCP_BIND_ADDRESS: {error}"))?,
+            Err(std::env::VarError::NotPresent) => IpAddr::from([0, 0, 0, 0]),
+            Err(error) => return Err(anyhow!("Invalid PRAXIS_MCP_BIND_ADDRESS: {error}")),
+        };
+        let bind_addr = SocketAddr::new(bind_ip, port);
+
         //
         // If a server is already running on the requested port there is
         // nothing to do. A single settings save writes one config key at a
@@ -1107,7 +1116,6 @@ impl McpServerManager {
 
         self.stop().await;
 
-        let bind_addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
         common::log_info!("Starting MCP streamable-http server on {}", bind_addr);
 
         //

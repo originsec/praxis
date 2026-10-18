@@ -27,6 +27,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PRAXIS_MCP_BIND_ADDRESS` | `0.0.0.0` | IP address for the service MCP listener. Set `127.0.0.1` for access from the local machine only. Accepts an IPv4 or IPv6 address; invalid values prevent the MCP listener from starting. Restart the service after changing it. |
 | `PRAXIS_NODES_DIR` | (none) | Directory containing node binaries for download. No Rust code in this repo reads it — it only appears in the Dockerfile and `pkg/` packaging examples, so it may be vestigial or packaging-only rather than something Praxis itself consumes. |
 
 ### Build
@@ -136,6 +137,10 @@ Access via **Settings** (`Ctrl+S`) > **Service** in the praxis TUI.
 | `mcp_server_port` | `8585` | Port for the MCP server |
 
 The MCP server exposes all Praxis tools via the Model Context Protocol over streamable-HTTP transport. It is used by the built-in Orchestrator and can also be used by external AI agents. See [MCP Server](../usage/mcp.md) for full details.
+
+The listener uses `PRAXIS_MCP_BIND_ADDRESS` from the service environment; its
+default is all IPv4 interfaces. Set it to `127.0.0.1` when only local clients
+should connect. The port remains controlled by `mcp_server_port`.
 
 ### Praxis Agent Settings
 
