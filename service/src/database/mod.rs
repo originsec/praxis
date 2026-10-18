@@ -10,6 +10,7 @@ pub(crate) mod exec;
 mod intercept_targets;
 mod lua_agent_scripts;
 mod operations;
+mod orchestrator_memory;
 mod playbooks;
 mod recon;
 mod remote_nodes;
@@ -39,6 +40,7 @@ pub use chains::{
 };
 pub use definitions::OperationDefinition;
 pub use operations::OperationRecord;
+pub use orchestrator_memory::MemoryEntry;
 #[allow(unused_imports)]
 pub use recon::StoredReconResult;
 #[allow(unused_imports)]
@@ -489,6 +491,27 @@ impl Database {
         }
 
         //
+        // Migration: engagement-scoped orchestrator memory for installs that
+        // predate it. Same DDL on both backends.
+        //
+        for statement in [
+            "CREATE TABLE IF NOT EXISTS orchestrator_memories (
+                id TEXT PRIMARY KEY,
+                engagement TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_memories_title ON orchestrator_memories(engagement, title)",
+            "CREATE INDEX IF NOT EXISTS idx_orchestrator_memories_updated ON orchestrator_memories(engagement, updated_at DESC)",
+        ] {
+            if let Err(e) = self.db_execute(statement, vec![]).await {
+                common::log_warn!("Migration: orchestrator_memories: {}", e);
+            }
+        }
+
+        //
         // Migration: replace the legacy per-row `intercept_targets` table
         // with the TOML virtual file stored in service_config. Existing
         // customisations (including user-edited builtins) are preserved
@@ -780,6 +803,67 @@ mod foreign_key_tests {
         //
         crate::orchestrator::seed_builtin_playbooks(&t.db).await;
         assert!(t.db.get_playbook("fleet-recon").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_memory_is_scoped_by_engagement() {
+        let t = temp_db().await;
+        let db = &t.db;
+
+        db.write_orchestrator_memory("acme", "creds", "token in ~/.config/x")
+            .await
+            .unwrap();
+        db.write_orchestrator_memory("acme", "nodes", "web-01 runs claude-code")
+            .await
+            .unwrap();
+        db.write_orchestrator_memory("other", "creds", "unrelated")
+            .await
+            .unwrap();
+
+        //
+        // Writing an existing title replaces it.
+        //
+        db.write_orchestrator_memory("acme", "creds", "token rotated (100%_done)")
+            .await
+            .unwrap();
+        let read = db
+            .read_orchestrator_memory("acme", "creds")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.content, "token rotated (100%_done)");
+
+        let listed = db.list_orchestrator_memories("acme", 10).await.unwrap();
+        assert_eq!(listed.len(), 2);
+
+        let hits = db
+            .search_orchestrator_memories("acme", "WEB claude", 10)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "nodes");
+
+        //
+        // LIKE wildcards in the query are literal.
+        //
+        let hits = db
+            .search_orchestrator_memories("acme", "100%_", 10)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            db.search_orchestrator_memories("acme", "t%n", 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        assert!(
+            db.read_orchestrator_memory("other", "nodes")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     async fn match_row_count(db: &Database) -> i64 {

@@ -337,6 +337,11 @@ impl App {
                 value: "model".to_string(),
                 description: "Select orchestrator model".to_string(),
             },
+            PopupItem {
+                label: "engagement".to_string(),
+                value: "engagement".to_string(),
+                description: "Show or switch the engagement (memory scope)".to_string(),
+            },
         ];
 
         self.popup = Some(Popup {
@@ -498,7 +503,12 @@ impl App {
         self.orchestrator.create_in_flight = true;
         if let Err(e) = self
             .acp
-            .create_session(".", Some(model_name), Vec::new())
+            .create_session(
+                ".",
+                Some(model_name),
+                &self.orchestrator.engagement,
+                Vec::new(),
+            )
             .await
         {
             self.orchestrator.create_in_flight = false;

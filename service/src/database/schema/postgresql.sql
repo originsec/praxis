@@ -301,3 +301,15 @@ CREATE TABLE IF NOT EXISTS orchestrator_playbooks (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- Orchestrator memory, scoped by engagement
+CREATE TABLE IF NOT EXISTS orchestrator_memories (
+    id TEXT PRIMARY KEY,
+    engagement TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_memories_title ON orchestrator_memories(engagement, title);
+CREATE INDEX IF NOT EXISTS idx_orchestrator_memories_updated ON orchestrator_memories(engagement, updated_at DESC);

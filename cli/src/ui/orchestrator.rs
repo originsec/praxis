@@ -843,6 +843,16 @@ fn render_meta(f: &mut Frame, area: Rect, app: &App, state: &OrchestratorState) 
         left_spans.push(Span::styled(model_text, Style::default().fg(DIM)));
     }
 
+    if state.engagement != common::acp_ext::DEFAULT_ENGAGEMENT {
+        if !left_spans.is_empty() {
+            left_spans.push(Span::raw("    "));
+        }
+        left_spans.push(Span::styled(
+            format!("engagement {}", state.engagement),
+            Style::default().fg(DIM),
+        ));
+    }
+
     if let Some(s) = session {
         if s.total_tokens > 0 {
             if !left_spans.is_empty() {

@@ -15,6 +15,7 @@ use common::ai::{
 use super::approval::{ApprovalGate, Decision, PermissionRegistry, denied_result};
 use super::delegate::{self, DELEGATE_TOOL};
 use super::markers::ManualTextFilter;
+use super::memory;
 use super::playbooks::{LOAD_PLAYBOOK_TOOL, load_playbook};
 use super::tools::{
     execute_local_tool, execute_mcp_tool, execute_tool_calls_concurrent, result_is_error,
@@ -80,6 +81,10 @@ pub(super) struct SessionCtx {
     pub gate: ApprovalGate,
     pub permissions: Arc<PermissionRegistry>,
     pub db: Arc<Database>,
+    //
+    // Engagement that scopes the memory tools.
+    //
+    pub engagement: String,
 }
 
 impl SessionCtx {
@@ -416,6 +421,10 @@ async fn execute_tool(
                 );
             }
         }
+    }
+
+    if let Some(result) = memory::execute(&ctx.db, &ctx.engagement, name, args).await {
+        return result;
     }
 
     if name == LOAD_PLAYBOOK_TOOL {

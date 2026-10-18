@@ -3,6 +3,7 @@ mod compaction;
 mod delegate;
 mod engine;
 mod markers;
+mod memory;
 mod playbooks;
 mod tools;
 
@@ -211,11 +212,13 @@ impl OrchestratorManager {
     // session that fails later prompts with an opaque error.
     //
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session(
         &self,
         client_id: &str,
         session_id: &str,
         model_ref: Option<&str>,
+        engagement: &str,
         history: Vec<(String, String)>,
         service_config: &Arc<RwLock<ServiceConfig>>,
         publish_channel: &Channel,
@@ -317,6 +320,7 @@ impl OrchestratorManager {
         tools.extend(get_local_tool_definitions());
         tools.push(playbooks::tool_definition());
         tools.push(delegate::tool_definition());
+        tools.extend(memory::tool_definitions());
 
         //
         // Session-specific context appended to the base prompt. Built once
@@ -328,9 +332,10 @@ impl OrchestratorManager {
             Vec::new()
         });
         let base_prompt = format!(
-            "{}{}",
+            "{}{}{}",
             ORCHESTRATOR_PROMPT,
-            playbooks::prompt_section(&available_playbooks)
+            playbooks::prompt_section(&available_playbooks),
+            memory::prompt_section(&self.db, engagement).await
         );
 
         let native_system = base_prompt.clone();
@@ -389,6 +394,7 @@ impl OrchestratorManager {
             gate: ApprovalGate::new(approval_gate),
             permissions: Arc::clone(&self.permissions),
             db: Arc::clone(&self.db),
+            engagement: engagement.to_string(),
         });
 
         //

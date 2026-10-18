@@ -26,6 +26,11 @@ pub struct StoredSession {
     pub model: Option<String>,
     #[serde(default)]
     pub messages: Vec<StoredMessage>,
+    //
+    // Orchestrator engagement the session belongs to (memory scope).
+    //
+    #[serde(default)]
+    pub engagement: Option<String>,
 }
 
 impl StoredSession {
@@ -38,6 +43,7 @@ impl StoredSession {
             provider: None,
             model: None,
             messages: Vec::new(),
+            engagement: None,
         }
     }
 

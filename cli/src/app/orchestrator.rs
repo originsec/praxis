@@ -171,6 +171,11 @@ pub struct OrchestratorState {
     //
     pub plan_split_percent: u16,
     pub plan_dragging: bool,
+    //
+    // Engagement sent on session/new; scopes the orchestrator's persistent
+    // memory. Switched with /engagement <name>.
+    //
+    pub engagement: String,
 }
 
 //
@@ -222,6 +227,7 @@ impl Default for OrchestratorState {
             pending_model_selection: None,
             plan_split_percent: 67,
             plan_dragging: false,
+            engagement: common::acp_ext::DEFAULT_ENGAGEMENT.to_string(),
         }
     }
 }
@@ -272,6 +278,9 @@ impl App {
         self.orchestrator.sessions.push(session);
         self.orchestrator.active_session_index = Some(0);
 
+        if let Some(engagement) = stored.engagement.clone() {
+            self.orchestrator.engagement = engagement;
+        }
         self.orchestrator.pending_history = Some(history);
         self.orchestrator.stored = Some(stored);
     }
@@ -354,7 +363,12 @@ impl App {
 
         let history = self.orchestrator.pending_history.take().unwrap_or_default();
         self.orchestrator.create_in_flight = true;
-        if let Err(e) = self.acp.create_session(".", None, history).await {
+        let engagement = self.orchestrator.engagement.clone();
+        if let Err(e) = self
+            .acp
+            .create_session(".", None, &engagement, history)
+            .await
+        {
             self.orchestrator.create_in_flight = false;
             self.push_orchestrator_error(format!("Failed to create session: {e}"));
         }
@@ -760,8 +774,42 @@ impl App {
         }
     }
 
+    //
+    // /engagement shows the current engagement; /engagement <name> switches
+    // to another one and starts a fresh session so the new engagement's
+    // memory is loaded.
+    //
+    async fn handle_engagement_command(&mut self, arg: &str) {
+        if arg.is_empty() {
+            let message = format!(
+                "Engagement: {} (orchestrator memory is scoped to it). Use /engagement <name> to switch; this starts a fresh session.",
+                self.orchestrator.engagement
+            );
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Info(message));
+            }
+            return;
+        }
+        let name = common::acp_ext::normalize_engagement(arg);
+        if name == self.orchestrator.engagement {
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Info(format!(
+                    "Already in engagement {}",
+                    name
+                )));
+            }
+            return;
+        }
+        self.orchestrator.engagement = name;
+        self.clear_orchestrator_session().await;
+    }
+
     pub(crate) async fn handle_slash_command(&mut self, input: &str) {
         let cmd = input.trim_start_matches('/').trim();
+        let (cmd, arg) = cmd
+            .split_once(char::is_whitespace)
+            .map(|(c, a)| (c, a.trim()))
+            .unwrap_or((cmd, ""));
 
         match cmd {
             "clear" => {
@@ -769,6 +817,9 @@ impl App {
             }
             "model" => {
                 self.open_model_select().await;
+            }
+            "engagement" => {
+                self.handle_engagement_command(arg).await;
             }
             _ => {
                 if let Some(session) = self.orchestrator.active_session_mut() {
@@ -787,7 +838,11 @@ impl App {
                 session_id,
                 provider,
                 model,
+                engagement,
             } => {
+                if let Some(engagement) = engagement {
+                    self.orchestrator.engagement = engagement;
+                }
                 //
                 // One orchestrator session per client. Drop any prior
                 // local session state and install the new one.
@@ -840,6 +895,7 @@ impl App {
                 stored.session_id = session_id.clone();
                 stored.provider = provider;
                 stored.model = model;
+                stored.engagement = Some(self.orchestrator.engagement.clone());
                 let _ = crate::session_store::save(&stored);
                 self.orchestrator.stored = Some(stored);
 
