@@ -25,6 +25,15 @@ pub const LLM_ORCHESTRATOR_MAX_TOKENS: &str = "llm_orchestrator_max_tokens";
 /// (provider function-calling API) or "manual" (prompt-based JSON calls).
 pub const LLM_ORCHESTRATOR_TOOL_MODE: &str = "llm_orchestrator_tool_mode";
 
+/// Request model reasoning (extended thinking) for the Orchestrator and
+/// show it in the client. Default on.
+pub const LLM_ORCHESTRATOR_THINKING: &str = "llm_orchestrator_thinking";
+
+/// Optional reasoning effort hint for the Orchestrator (low, medium, high,
+/// xhigh, max). Sent as Anthropic output_config.effort or OpenAI
+/// reasoning_effort; empty leaves the provider default.
+pub const LLM_ORCHESTRATOR_EFFORT: &str = "llm_orchestrator_effort";
+
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB_DEFAULT: usize = 60;
@@ -71,6 +80,8 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_DOC_HELPER,
     LLM_ORCHESTRATOR_MAX_TOKENS,
     LLM_ORCHESTRATOR_TOOL_MODE,
+    LLM_ORCHESTRATOR_THINKING,
+    LLM_ORCHESTRATOR_EFFORT,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,

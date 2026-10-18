@@ -601,6 +601,20 @@ pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientD
     )
 }
 
+//
+// Model reasoning (thinking summaries / reasoning content) streamed as ACP
+// agent_thought_chunk updates.
+//
+pub fn session_update_thought(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
+    let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
+        acp::schema::TextContent::new(text),
+    ));
+    session_notification(
+        session_id,
+        acp::schema::SessionUpdate::AgentThoughtChunk(chunk),
+    )
+}
+
 pub fn session_update_user_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
     let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
         acp::schema::TextContent::new(text),

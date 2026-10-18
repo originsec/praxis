@@ -11,12 +11,17 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 
 use common::acp_ext::ERR_ORCHESTRATOR_SESSION_NOT_FOUND;
-use common::ai::{Message, Provider, Tool, create_ai_client, get_system_prompt_with_tools};
+use common::ai::{
+    Message, Provider, ReasoningConfig, Tool, create_ai_client, get_system_prompt_with_tools,
+};
 use rmcp::{ServiceExt, transport::StreamableHttpClientTransport};
 
 use crate::acp_server::{acp_error_response, acp_response, session_update_user_text};
 use crate::config::ServiceConfig;
-use crate::config::service_config::{LLM_ORCHESTRATOR_MAX_TOKENS, LLM_ORCHESTRATOR_TOOL_MODE};
+use crate::config::service_config::{
+    LLM_ORCHESTRATOR_EFFORT, LLM_ORCHESTRATOR_MAX_TOKENS, LLM_ORCHESTRATOR_THINKING,
+    LLM_ORCHESTRATOR_TOOL_MODE,
+};
 use crate::messaging::send_to_client;
 
 use engine::{AiSettings, LoopOutcome, SessionCtx, run_loop};
@@ -224,6 +229,15 @@ impl OrchestratorManager {
             .map(|s| s.trim().to_ascii_lowercase())
             .unwrap_or_default();
 
+        let reasoning = config
+            .get_bool(LLM_ORCHESTRATOR_THINKING, true)
+            .then(|| ReasoningConfig {
+                effort: config
+                    .get(LLM_ORCHESTRATOR_EFFORT)
+                    .map(|e| e.trim().to_string())
+                    .filter(|e| !e.is_empty()),
+            });
+
         let history_count: usize = 20;
 
         drop(config);
@@ -308,7 +322,7 @@ impl OrchestratorManager {
                 client,
                 model,
                 max_tokens,
-                reasoning: None,
+                reasoning,
                 native: AtomicBool::new(native),
                 native_system,
                 manual_system,

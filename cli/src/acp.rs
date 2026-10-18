@@ -39,6 +39,14 @@ pub enum AcpNotification {
         session_id: String,
         text: String,
     },
+    //
+    // Model reasoning (ACP agent_thought_chunk). Rendered as the dimmed
+    // thinking segment of the current assistant entry.
+    //
+    ThoughtContent {
+        session_id: String,
+        text: String,
+    },
     ToolCall {
         session_id: String,
         tool_id: String,
@@ -266,6 +274,17 @@ fn session_update_to_event(notif: SessionNotification) -> Option<AcpNotification
         SessionUpdate::AgentMessageChunk(chunk) => {
             if let ContentBlock::Text(tc) = &chunk.content {
                 Some(AcpNotification::TextContent {
+                    session_id: sid,
+                    text: tc.text.clone(),
+                })
+            } else {
+                None
+            }
+        }
+
+        SessionUpdate::AgentThoughtChunk(chunk) => {
+            if let ContentBlock::Text(tc) = &chunk.content {
+                Some(AcpNotification::ThoughtContent {
                     session_id: sid,
                     text: tc.text.clone(),
                 })

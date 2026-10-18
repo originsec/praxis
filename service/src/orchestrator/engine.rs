@@ -17,8 +17,8 @@ use super::tools::{
     execute_local_tool, execute_mcp_tool, execute_tool_calls_concurrent, result_is_error,
 };
 use crate::acp_server::{
-    session_update_plan, session_update_text, session_update_tool_call, session_update_tool_result,
-    session_update_usage,
+    session_update_plan, session_update_text, session_update_thought, session_update_tool_call,
+    session_update_tool_result, session_update_usage,
 };
 use crate::messaging::send_to_client;
 
@@ -145,8 +145,9 @@ pub(super) async fn run_loop(ctx: &Arc<SessionCtx>, history: &mut Vec<Message>) 
                     full_text.push_str(&text);
                     display.text(ctx, &text).await;
                 }
-                Ok(StreamEvent::ReasoningDelta(_)) => {
+                Ok(StreamEvent::ReasoningDelta(text)) => {
                     received_any = true;
+                    display.thought(ctx, &text).await;
                 }
                 Ok(StreamEvent::Completed(response)) => {
                     completed = Some(response);
@@ -474,6 +475,7 @@ pub(super) fn to_manual_message(message: &Message) -> Message {
 struct Display {
     manual: Option<ManualTextFilter>,
     pending: String,
+    pending_thought: String,
 }
 
 impl Display {
@@ -481,10 +483,39 @@ impl Display {
         Self {
             manual: (!native).then(ManualTextFilter::default),
             pending: String::new(),
+            pending_thought: String::new(),
+        }
+    }
+
+    //
+    // Reasoning is streamed as thought chunks. Text and thought buffers are
+    // flushed before switching between them so ordering is preserved.
+    //
+    async fn thought(&mut self, ctx: &SessionCtx, delta: &str) {
+        self.flush_text(ctx).await;
+        self.pending_thought.push_str(delta);
+        if self.pending_thought.len() >= 80 || delta.contains('\n') {
+            self.flush_thought(ctx).await;
+        }
+    }
+
+    async fn flush_thought(&mut self, ctx: &SessionCtx) {
+        if !self.pending_thought.is_empty() {
+            let chunk = std::mem::take(&mut self.pending_thought);
+            ctx.send(session_update_thought(&ctx.session_id, chunk))
+                .await;
+        }
+    }
+
+    async fn flush_text(&mut self, ctx: &SessionCtx) {
+        if !self.pending.is_empty() {
+            let chunk = std::mem::take(&mut self.pending);
+            ctx.send(session_update_text(&ctx.session_id, chunk)).await;
         }
     }
 
     async fn text(&mut self, ctx: &SessionCtx, delta: &str) {
+        self.flush_thought(ctx).await;
         if let Some(filter) = self.manual.as_mut() {
             for chunk in filter.push(delta) {
                 ctx.send(session_update_text(&ctx.session_id, chunk)).await;
@@ -493,12 +524,12 @@ impl Display {
         }
         self.pending.push_str(delta);
         if self.pending.len() >= 50 || delta.contains('\n') {
-            let chunk = std::mem::take(&mut self.pending);
-            ctx.send(session_update_text(&ctx.session_id, chunk)).await;
+            self.flush_text(ctx).await;
         }
     }
 
     async fn finish(&mut self, ctx: &SessionCtx, full_text: &str, has_calls: bool) {
+        self.flush_thought(ctx).await;
         if let Some(filter) = self.manual.as_mut() {
             if let Some(chunk) = filter.finish() {
                 ctx.send(session_update_text(&ctx.session_id, chunk)).await;
@@ -508,10 +539,7 @@ impl Display {
             }
             return;
         }
-        if !self.pending.is_empty() {
-            let chunk = std::mem::take(&mut self.pending);
-            ctx.send(session_update_text(&ctx.session_id, chunk)).await;
-        }
+        self.flush_text(ctx).await;
     }
 }
 

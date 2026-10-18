@@ -904,6 +904,7 @@ impl App {
 
                     match session.messages.last_mut() {
                         Some(ConversationEntry::AssistantText(existing)) => {
+                            close_thought(existing);
                             existing.push_str(&text);
                         }
                         _ => {
@@ -916,6 +917,35 @@ impl App {
                             session
                                 .messages
                                 .push(ConversationEntry::AssistantText(text));
+                        }
+                    }
+                }
+            }
+
+            AcpNotification::ThoughtContent { session_id, text } => {
+                //
+                // Node sessions do not render reasoning; keep their
+                // transcript unchanged.
+                //
+                if self
+                    .nodes
+                    .sessions
+                    .values()
+                    .any(|s| s.session_id.as_deref() == Some(session_id.as_str()))
+                {
+                    return;
+                }
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.active_tool = None;
+                    match session.messages.last_mut() {
+                        Some(ConversationEntry::AssistantText(existing)) => {
+                            append_thought(existing, &text);
+                        }
+                        _ => {
+                            session.revealed_chars = 0;
+                            let mut entry = String::new();
+                            append_thought(&mut entry, &text);
+                            session.messages.push(ConversationEntry::AssistantText(entry));
                         }
                     }
                 }
@@ -936,6 +966,11 @@ impl App {
                     return;
                 }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    if let Some(ConversationEntry::AssistantText(existing)) =
+                        session.messages.last_mut()
+                    {
+                        close_thought(existing);
+                    }
                     if name != "report_plan" {
                         session.active_tool = Some(name.clone());
                         session.active_tool_input = raw_input.clone();
@@ -1029,7 +1064,14 @@ impl App {
                     }
                 }
                 if let Some(text) = last_assistant {
-                    self.persist_message("assistant", &text);
+                    //
+                    // Reasoning is display-only; resumed sessions only need
+                    // the visible answer.
+                    //
+                    let visible = strip_thoughts(&text);
+                    if !visible.trim().is_empty() {
+                        self.persist_message("assistant", visible.trim());
+                    }
                 }
             }
 
@@ -1186,6 +1228,51 @@ impl App {
         }
     }
 
+}
+
+//
+// Reasoning is stored inline in AssistantText entries as `<think>` blocks so
+// it renders through the same thinking segment used for models that emit
+// literal think tags. A block stays open while thought chunks stream and is
+// closed when visible text or a tool call follows.
+//
+
+fn has_open_thought(entry: &str) -> bool {
+    match (entry.rfind("<think>"), entry.rfind("</think>")) {
+        (Some(open), Some(close)) => open > close,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn append_thought(entry: &mut String, text: &str) {
+    if !has_open_thought(entry) {
+        entry.push_str("<think>");
+    }
+    entry.push_str(text);
+}
+
+pub(crate) fn close_thought(entry: &mut String) {
+    if has_open_thought(entry) {
+        entry.push_str("</think>");
+    }
+}
+
+fn strip_thoughts(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<think>") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("</think>") {
+            Some(end) => rest = &rest[start + end + "</think>".len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 //
@@ -1367,6 +1454,22 @@ mod tests {
         assert_eq!(state.sessions.len(), 1);
         assert_eq!(state.sessions[0].session_id, "live-session");
         assert_eq!(state.active_session_index, Some(0));
+    }
+
+    #[test]
+    fn thought_chunks_open_and_close_think_block() {
+        let mut entry = String::new();
+        append_thought(&mut entry, "Let me ");
+        append_thought(&mut entry, "check.");
+        assert_eq!(entry, "<think>Let me check.");
+        close_thought(&mut entry);
+        entry.push_str("Done.");
+        assert_eq!(entry, "<think>Let me check.</think>Done.");
+        close_thought(&mut entry);
+        assert_eq!(entry, "<think>Let me check.</think>Done.");
+        append_thought(&mut entry, "More");
+        assert_eq!(entry, "<think>Let me check.</think>Done.<think>More");
+        assert_eq!(strip_thoughts(&entry), "Done.");
     }
 
     fn other_debug(entry: &ConversationEntry) -> String {
