@@ -668,6 +668,11 @@ impl App {
                     None
                 }
             }
+            SettingsTab::Orchestrator => {
+                (2..2 + super::settings::ORCHESTRATOR_SETTING_ROWS)
+                    .contains(&rel_row)
+                    .then(|| rel_row - 2)
+            }
             SettingsTab::Agents => {
                 let sc = self.settings.agent_scripts.len();
                 if rel_row >= 2 && rel_row < 6 {

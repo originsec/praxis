@@ -4,9 +4,16 @@ use super::*;
 
 pub use self::model_form::ModelEditForm;
 
+//
+// Selectable rows on the Orchestrator tab: approval gate, tool calling
+// mode, reasoning, effort, context budget.
+//
+pub(crate) const ORCHESTRATOR_SETTING_ROWS: usize = 5;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum SettingsTab {
     Llm,
+    Orchestrator,
     Agents,
     Intercept,
     Service,
@@ -34,6 +41,16 @@ pub struct SettingsState {
     pub traffic_parser_model: String,
     pub traffic_parser_body_limit_kb: String,
     pub doc_helper_model: String,
+
+    //
+    // Orchestrator behaviour (Orchestrator tab).
+    //
+    pub orchestrator_approval_gate: bool,
+    pub orchestrator_tool_mode: String,
+    pub orchestrator_thinking: bool,
+    pub orchestrator_effort: String,
+    pub orchestrator_context_budget: String,
+
     pub praxis_agent_model_ref: String,
     pub praxis_agent_thinking_effort: String,
     pub praxis_agent_enabled: bool,
@@ -128,6 +145,11 @@ impl Default for SettingsState {
             traffic_parser_model: String::new(),
             traffic_parser_body_limit_kb: "60".to_string(),
             doc_helper_model: String::new(),
+            orchestrator_approval_gate: true,
+            orchestrator_tool_mode: "auto".to_string(),
+            orchestrator_thinking: true,
+            orchestrator_effort: String::new(),
+            orchestrator_context_budget: "100000".to_string(),
             praxis_agent_model_ref: String::new(),
             praxis_agent_thinking_effort: String::new(),
             praxis_agent_enabled: false,
@@ -164,6 +186,11 @@ impl App {
             "llm_model_definitions".to_string(),
             "llm_feature_orchestrator".to_string(),
             "llm_orchestrator_max_tokens".to_string(),
+            "llm_orchestrator_approval_gate".to_string(),
+            "llm_orchestrator_tool_mode".to_string(),
+            "llm_orchestrator_thinking".to_string(),
+            "llm_orchestrator_effort".to_string(),
+            "llm_orchestrator_context_budget".to_string(),
             "llm_feature_semantic_ops".to_string(),
             "llm_feature_semantic_parser".to_string(),
             "llm_feature_traffic_parser".to_string(),
@@ -202,6 +229,30 @@ impl App {
                     .get("llm_orchestrator_max_tokens")
                     .cloned()
                     .unwrap_or("25000".to_string());
+                let is_true = |v: &String| {
+                    !matches!(v.to_lowercase().as_str(), "false" | "0" | "no")
+                };
+                s.orchestrator_approval_gate = config
+                    .get("llm_orchestrator_approval_gate")
+                    .map(is_true)
+                    .unwrap_or(true);
+                s.orchestrator_tool_mode = config
+                    .get("llm_orchestrator_tool_mode")
+                    .filter(|v| !v.trim().is_empty())
+                    .cloned()
+                    .unwrap_or("auto".to_string());
+                s.orchestrator_thinking = config
+                    .get("llm_orchestrator_thinking")
+                    .map(is_true)
+                    .unwrap_or(true);
+                s.orchestrator_effort = config
+                    .get("llm_orchestrator_effort")
+                    .cloned()
+                    .unwrap_or_default();
+                s.orchestrator_context_budget = config
+                    .get("llm_orchestrator_context_budget")
+                    .cloned()
+                    .unwrap_or("100000".to_string());
                 s.semantic_ops_model = config
                     .get("llm_feature_semantic_ops")
                     .cloned()
@@ -429,6 +480,7 @@ impl App {
                 //
                 self.settings.model_definitions.len() + 8
             }
+            SettingsTab::Orchestrator => ORCHESTRATOR_SETTING_ROWS,
             SettingsTab::Agents => {
                 // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 6
@@ -453,6 +505,7 @@ impl App {
                 // mc+2 = Orchestrator Max Tokens, mc+6 = Traffic Parser Body Limit.
                 sel == mc + 2 || sel == mc + 6
             }
+            SettingsTab::Orchestrator => sel == 3 || sel == 4,
             SettingsTab::Agents => {
                 // 1 = Praxis thinking effort.
                 sel == 1
@@ -553,6 +606,11 @@ impl App {
                     String::new()
                 }
             }
+            SettingsTab::Orchestrator => match sel {
+                3 => self.settings.orchestrator_effort.clone(),
+                4 => self.settings.orchestrator_context_budget.clone(),
+                _ => String::new(),
+            },
             SettingsTab::Agents => {
                 if sel == 1 {
                     self.settings.praxis_agent_thinking_effort.clone()
@@ -692,7 +750,8 @@ impl App {
         match key.code {
             KeyCode::Tab => {
                 let next_tab = match self.settings.tab {
-                    SettingsTab::Llm => SettingsTab::Agents,
+                    SettingsTab::Llm => SettingsTab::Orchestrator,
+                    SettingsTab::Orchestrator => SettingsTab::Agents,
                     SettingsTab::Agents => SettingsTab::Intercept,
                     SettingsTab::Intercept => SettingsTab::Service,
                     SettingsTab::Service => SettingsTab::About,
@@ -703,7 +762,8 @@ impl App {
             KeyCode::BackTab => {
                 let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::About,
-                    SettingsTab::Agents => SettingsTab::Llm,
+                    SettingsTab::Orchestrator => SettingsTab::Llm,
+                    SettingsTab::Agents => SettingsTab::Orchestrator,
                     SettingsTab::Intercept => SettingsTab::Agents,
                     SettingsTab::Service => SettingsTab::Intercept,
                     SettingsTab::About => SettingsTab::Service,
@@ -823,6 +883,34 @@ impl App {
                     }
                 }
             }
+            SettingsTab::Orchestrator => match sel {
+                0 => {
+                    self.settings.orchestrator_approval_gate =
+                        !self.settings.orchestrator_approval_gate;
+                    let val = self.settings.orchestrator_approval_gate.to_string();
+                    self.save_setting("llm_orchestrator_approval_gate", &val)
+                        .await;
+                }
+                1 => {
+                    let next = match self.settings.orchestrator_tool_mode.as_str() {
+                        "auto" => "native",
+                        "native" => "manual",
+                        _ => "auto",
+                    };
+                    self.settings.orchestrator_tool_mode = next.to_string();
+                    self.save_setting("llm_orchestrator_tool_mode", next).await;
+                }
+                2 => {
+                    self.settings.orchestrator_thinking = !self.settings.orchestrator_thinking;
+                    let val = self.settings.orchestrator_thinking.to_string();
+                    self.save_setting("llm_orchestrator_thinking", &val).await;
+                }
+                3 | 4 => {
+                    self.settings.editing = true;
+                    self.settings.edit_buffer = self.current_field_value();
+                }
+                _ => {}
+            },
             SettingsTab::Agents => {
                 let script_count = self.settings.agent_scripts.len();
                 if sel < 4 {
@@ -995,6 +1083,26 @@ impl App {
                     }
                 }
             }
+            SettingsTab::Orchestrator => match sel {
+                3 => {
+                    let effort = val.trim().to_lowercase();
+                    self.settings.orchestrator_effort = effort.clone();
+                    self.save_setting("llm_orchestrator_effort", &effort).await;
+                }
+                4 => {
+                    let budget = val.trim().to_string();
+                    if budget.parse::<usize>().map(|n| n >= 4_000).unwrap_or(false) {
+                        self.settings.orchestrator_context_budget = budget.clone();
+                        self.save_setting("llm_orchestrator_context_budget", &budget)
+                            .await;
+                    } else {
+                        self.settings.status_message =
+                            Some("Failed: context budget must be a number >= 4000".to_string());
+                        self.settings.status_message_at = Some(std::time::Instant::now());
+                    }
+                }
+                _ => {}
+            },
             SettingsTab::Agents => match sel {
                 1 => {
                     self.settings.praxis_agent_thinking_effort = val.clone();
