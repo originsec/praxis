@@ -2708,6 +2708,7 @@ mod body_cache_tests {
             request_body: req,
             response_status: Some(200),
             response_headers: None,
+            mcp: None,
             response_body: resp,
         }
     }
@@ -3109,6 +3110,7 @@ mod regex_preview_tests {
             request_body: None,
             response_status: None,
             response_headers: None,
+            mcp: None,
             response_body: None,
         }
     }

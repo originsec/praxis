@@ -29,6 +29,27 @@ Centralized application log entries from service and nodes. Requires `applicatio
 | target | Log target/module (may be null) |
 | message | Log message text |
 
+### McpTrafficLogs
+
+Intercepted traffic the node classified as [Model Context Protocol](./mcp.md) JSON-RPC — a filtered view over the same rows as TrafficLogs, so `traffic_id` joins back to the full request/response. See [MCP traffic classification](./interception.md#mcp-traffic-classification) for how requests are recognised. Both the stateless 2026-07-28 revision and the older session-based revisions are covered.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the traffic was captured |
+| traffic_id | Traffic entry ID (join key for TrafficLogs) |
+| node_id | Node that captured the traffic |
+| agent_short_name | Agent associated with this traffic |
+| direction | send (client request) or receive (server response) |
+| host | MCP server host |
+| url | Full URL of the MCP endpoint |
+| mcp_method | JSON-RPC method (`tools/call`, `initialize`, `server/discover`, ...) |
+| mcp_name | Tool or prompt name, or resource URI (`Mcp-Name` header or `params.name` / `params.uri`) |
+| protocol_version | `MCP-Protocol-Version` header, `_meta` protocol version, or the initialize version |
+| session_id | `Mcp-Session-Id` (legacy revisions only; null for 2026-07-28) |
+| jsonrpc_id | JSON-RPC request id (null for notifications) |
+| is_error | On responses: 1 when the response is a JSON-RPC error or a tool result with `isError: true`, else 0 |
+| response_status | HTTP response status code |
+
 ### NodeLogs
 
 Currently connected nodes (in-memory).
@@ -230,6 +251,12 @@ AgentLogs | where available == true
 
 // Find all MCP tools across agents
 ReconToolLogs | where tool_type == "mcp" | project agent_short_name, server_name, tool_name
+
+// MCP tool calls seen on the wire, newest first
+McpTrafficLogs | where mcp_method == "tools/call" and direction == "send" | project timestamp, host, mcp_name, protocol_version
+
+// MCP responses that failed, by server and tool
+McpTrafficLogs | where is_error == true | summarize count() by host, mcp_name
 
 // Correlate traffic matches with rules
 TrafficMatchLogs | project timestamp, rule_name, url, summary | take 50

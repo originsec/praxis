@@ -30,6 +30,17 @@ PRAXIS_MCP_PORT=9090 docker compose up --build
 
 Then update the port under **Settings** > **Service** to match.
 
+## Protocol Versions
+
+The server is dual-era and serves both kinds of MCP client on the same `/mcp` endpoint:
+
+| Protocol version | Client behaviour | How Praxis serves it |
+|------------------|------------------|----------------------|
+| `2026-07-28` | Stateless: no handshake or session; every request carries `MCP-Protocol-Version`, `Mcp-Method` (and `Mcp-Name`), and `_meta` with the protocol version and client capabilities | Each request is served independently. `server/discover` advertises every supported version. All stateless requests share one internal service connection, so tool calls from modern clients run one at a time |
+| `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` | `initialize` handshake, then an `Mcp-Session-Id` on each request | One session (and one internal service connection) per client, as before |
+
+A request is treated as 2026-07-28 when its `MCP-Protocol-Version` header names that revision or later; anything else (including a missing header) takes the session-based path. Requests naming a version the server does not implement get `400 Bad Request` with an `UnsupportedProtocolVersionError` listing the supported versions. The built-in Orchestrator connects using the session-based handshake.
+
 ## AI Agent Integration
 
 MCP-compatible AI assistants can connect to the Praxis MCP server to control the entire C2 network. This enables AI agents to discover nodes, run recon, create sessions, execute operations, and search traffic — all through structured tool calls.

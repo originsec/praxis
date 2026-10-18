@@ -118,7 +118,7 @@ The schema is created automatically. Key tables:
 |-------|---------|
 | `operations` | Semantic operation executions |
 | `operation_definitions` | Stored operation templates |
-| `intercepted_traffic` | Captured HTTP traffic |
+| `intercepted_traffic` | Captured HTTP traffic (plus `mcp_*` classification columns for MCP exchanges) |
 | `intercept_rules` | Traffic matching rules |
 | `traffic_matches` | Rule match results |
 | `operation_chains` | Chain workflow definitions |

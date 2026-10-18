@@ -133,6 +133,10 @@ under [CLI — Traffic Interception](./cli.md#available-commands).
 | `y` | Copy selected URL |
 | `m` | Jump to Matches for the selected traffic row |
 
+Rows the node classified as MCP JSON-RPC are prefixed with an
+`MCP <method> <name>` badge in the URL column (red when the response was
+an error) — see [MCP Traffic Classification](./interception.md#mcp-traffic-classification).
+
 Request and response bodies arrive via a second fetch on selection to
 keep the broadcast payload small — large bodies load within a few
 hundred milliseconds after you navigate to an entry.

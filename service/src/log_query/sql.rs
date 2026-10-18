@@ -232,6 +232,87 @@ impl VirtualTable {
                 order_by: "tm.matched_at DESC",
             }),
 
+            //
+            // A filtered view over intercepted_traffic: only rows the node
+            // classified as MCP carry mcp_method (indexed).
+            //
+            VirtualTable::McpTrafficLogs => Some(SqlTableConfig {
+                from_clause: "(SELECT * FROM intercepted_traffic WHERE mcp_method IS NOT NULL) AS mcp",
+                columns: vec![
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "timestamp",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "traffic_id",
+                        sql_expr: "id",
+                        col_type: SqlColumnType::Integer,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "node_id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "agent_short_name",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "direction",
+                        sql_expr: "direction",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "host",
+                        sql_expr: "host",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "url",
+                        sql_expr: "url",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "mcp_method",
+                        sql_expr: "mcp_method",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "mcp_name",
+                        sql_expr: "mcp_name",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "protocol_version",
+                        sql_expr: "mcp_protocol_version",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "session_id",
+                        sql_expr: "mcp_session_id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "jsonrpc_id",
+                        sql_expr: "mcp_jsonrpc_id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "is_error",
+                        sql_expr: "mcp_is_error",
+                        col_type: SqlColumnType::Integer,
+                    },
+                    SqlColumn {
+                        kql_name: "response_status",
+                        sql_expr: "response_status",
+                        col_type: SqlColumnType::Integer,
+                    },
+                ],
+                order_by: "timestamp DESC",
+            }),
+
             VirtualTable::SemanticOperationLogs => Some(SqlTableConfig {
                 from_clause: "operations",
                 columns: vec![

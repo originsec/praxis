@@ -264,6 +264,7 @@ CREATE TABLE intercepted_traffic (
     url TEXT,
     request_body BLOB,
     response_body BLOB,
+    mcp_method TEXT,  -- set when the node classified the exchange as MCP
     -- ...
 );
 

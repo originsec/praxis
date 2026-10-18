@@ -863,6 +863,13 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::String(s), Value::Number(n)) | (Value::Number(n), Value::String(s)) => {
             s.parse::<f64>().ok() == n.as_f64()
         }
+        //
+        // SQL-backed tables store booleans as 0/1 integers and the SQL
+        // translation already renders `true` as 1; match that here.
+        //
+        (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
+            n.as_f64() == Some(if *b { 1.0 } else { 0.0 })
+        }
         _ => false,
     }
 }
@@ -1140,5 +1147,135 @@ fn compute_aggregation(expr: &Expr, columns: &[String], group_rows: &[Vec<Value>
             _ => Value::Null,
         },
         _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+mod mcp_traffic_tests {
+    use super::*;
+    use crate::database::DatabaseConfig;
+    use common::mcp::McpTrafficInfo;
+    use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
+
+    fn entry(direction: TrafficDirection, mcp: Option<McpTrafficInfo>) -> InterceptedTrafficEntry {
+        InterceptedTrafficEntry {
+            id: None,
+            timestamp: chrono::Utc::now(),
+            node_id: "node-1".into(),
+            agent_short_name: "claude".into(),
+            intercept_method: InterceptMethod::Proxy,
+            direction,
+            method: Some("POST".into()),
+            url: "https://mcp.example.com/mcp".into(),
+            host: "mcp.example.com".into(),
+            request_headers: None,
+            request_body: None,
+            response_status: None,
+            response_headers: None,
+            response_body: None,
+            mcp,
+        }
+    }
+
+    //
+    // Opens a database whose intercepted_traffic predates the MCP columns,
+    // then runs the service schema + migrations over it twice to prove the
+    // migration is applied and idempotent before querying McpTrafficLogs.
+    //
+
+    #[tokio::test]
+    async fn mcp_traffic_logs_over_migrated_database() {
+        let path = std::env::temp_dir().join(format!(
+            "praxis_mcp_traffic_test_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let options = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true);
+            let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE intercepted_traffic (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+                    node_id TEXT NOT NULL, agent_short_name TEXT NOT NULL,
+                    intercept_method TEXT NOT NULL DEFAULT 'proxy', direction TEXT NOT NULL,
+                    method TEXT, url TEXT NOT NULL, host TEXT NOT NULL, request_headers TEXT,
+                    request_body BLOB, response_status INTEGER, response_headers TEXT,
+                    response_body BLOB, created_at TEXT NOT NULL)",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        let config = DatabaseConfig::Sqlite { path: path.clone() };
+        drop(Database::new(&config).await.expect("first migration"));
+        let db = Arc::new(Database::new(&config).await.expect("second migration"));
+
+        let request = McpTrafficInfo {
+            method: "tools/call".into(),
+            name: Some("search".into()),
+            protocol_version: Some("2026-07-28".into()),
+            jsonrpc_id: Some("7".into()),
+            ..Default::default()
+        };
+        let response = McpTrafficInfo {
+            is_error: Some(true),
+            ..request.clone()
+        };
+        db.insert_traffic(&entry(TrafficDirection::Send, Some(request)))
+            .await
+            .unwrap();
+        let response_id = db
+            .insert_traffic(&entry(TrafficDirection::Receive, Some(response.clone())))
+            .await
+            .unwrap();
+        let plain_id = db
+            .insert_traffic(&entry(TrafficDirection::Send, None))
+            .await
+            .unwrap();
+
+        let stored = db.get_traffic(response_id).await.unwrap().unwrap();
+        assert_eq!(stored.mcp, Some(response));
+        let stored = db.get_traffic(plain_id).await.unwrap().unwrap();
+        assert_eq!(stored.mcp, None);
+
+        let registry = Arc::new(NodeRegistry::new());
+        let service_config = Arc::new(RwLock::new(ServiceConfig::new(db.clone()).await.unwrap()));
+
+        let all = execute_log_query("McpTrafficLogs", &db, &registry, &service_config)
+            .await
+            .unwrap();
+        assert_eq!(all.rows.len(), 2, "non-MCP traffic must be excluded");
+        assert_eq!(
+            all.columns,
+            super::super::tables::table_columns(VirtualTable::McpTrafficLogs)
+        );
+
+        let errors = execute_log_query(
+            "McpTrafficLogs | where is_error == true | project mcp_method, mcp_name, protocol_version, jsonrpc_id, direction",
+            &db,
+            &registry,
+            &service_config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            errors.rows,
+            vec![vec![
+                Value::from("tools/call"),
+                Value::from("search"),
+                Value::from("2026-07-28"),
+                Value::from("7"),
+                Value::from("receive"),
+            ]]
+        );
+
+        drop(service_config);
+        drop(db);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+        }
     }
 }

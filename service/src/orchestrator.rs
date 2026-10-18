@@ -16,7 +16,7 @@ use common::ai::{
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use rmcp::{
     ServiceExt,
-    model::{CallToolRequestParams, RawContent},
+    model::{CallToolRequestParams, ContentBlock},
     transport::StreamableHttpClientTransport,
 };
 
@@ -1045,8 +1045,8 @@ async fn execute_mcp_tool(
             let text = result
                 .content
                 .iter()
-                .find_map(|c| match &c.raw {
-                    RawContent::Text(t) => Some(t.text.clone()),
+                .find_map(|c| match c {
+                    ContentBlock::Text(t) => Some(t.text.clone()),
                     _ => None,
                 })
                 .unwrap_or_else(|| "{}".to_string());

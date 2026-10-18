@@ -8,6 +8,7 @@ use crate::state::NodeRegistry;
 pub enum VirtualTable {
     TrafficLogs,
     TrafficMatchLogs,
+    McpTrafficLogs,
     NodeLogs,
     AgentLogs,
     ReconLogs,
@@ -25,6 +26,7 @@ impl VirtualTable {
         match self {
             VirtualTable::TrafficLogs => "TrafficLogs",
             VirtualTable::TrafficMatchLogs => "TrafficMatchLogs",
+            VirtualTable::McpTrafficLogs => "McpTrafficLogs",
             VirtualTable::NodeLogs => "NodeLogs",
             VirtualTable::AgentLogs => "AgentLogs",
             VirtualTable::ReconLogs => "ReconLogs",
@@ -41,6 +43,7 @@ impl VirtualTable {
 pub const ALL_TABLES: &[VirtualTable] = &[
     VirtualTable::TrafficLogs,
     VirtualTable::TrafficMatchLogs,
+    VirtualTable::McpTrafficLogs,
     VirtualTable::NodeLogs,
     VirtualTable::AgentLogs,
     VirtualTable::ReconLogs,

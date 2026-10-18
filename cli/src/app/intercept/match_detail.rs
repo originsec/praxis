@@ -364,6 +364,7 @@ mod tests {
             request_body: None,
             response_status: None,
             response_headers: None,
+            mcp: None,
             response_body: None,
         }
     }

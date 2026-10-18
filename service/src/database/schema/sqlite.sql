@@ -72,7 +72,13 @@ CREATE TABLE IF NOT EXISTS intercepted_traffic (
     response_status INTEGER,
     response_headers TEXT,
     response_body BLOB,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    mcp_method TEXT,
+    mcp_name TEXT,
+    mcp_protocol_version TEXT,
+    mcp_session_id TEXT,
+    mcp_jsonrpc_id TEXT,
+    mcp_is_error INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_node_id ON intercepted_traffic(node_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_agent ON intercepted_traffic(agent_short_name);

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{Duration, Utc};
+use common::mcp::McpTrafficInfo;
 use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection, TrafficLogFilters};
 use indexmap::IndexMap;
 use regex::Regex;
@@ -47,8 +48,10 @@ impl Database {
             .as_ref()
             .map(|h| serde_json::to_string(h).unwrap_or_default());
 
-        let sql = "INSERT INTO intercepted_traffic (timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)";
+        let mcp = entry.mcp.as_ref();
+
+        let sql = "INSERT INTO intercepted_traffic (timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, created_at, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)";
 
         self.db_insert_returning_id(
             sql,
@@ -67,6 +70,12 @@ impl Database {
                 response_headers_json,
                 entry.response_body.clone(),
                 Utc::now(),
+                mcp.map(|m| m.method.as_str()),
+                mcp.and_then(|m| m.name.as_deref()),
+                mcp.and_then(|m| m.protocol_version.as_deref()),
+                mcp.and_then(|m| m.session_id.as_deref()),
+                mcp.and_then(|m| m.jsonrpc_id.as_deref()),
+                mcp.and_then(|m| m.is_error).map(i64::from),
             ],
         )
         .await
@@ -170,7 +179,7 @@ impl Database {
                     format!("{} AND {}", where_clause, keyset)
                 };
                 let query_sql = format!(
-                    "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, response_status, response_headers
+                    "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, response_status, response_headers, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error
                      FROM intercepted_traffic {} ORDER BY id DESC LIMIT {}",
                     page_where, URL_SCAN_BATCH
                 );
@@ -198,7 +207,7 @@ impl Database {
 
         let effective_limit = filters.limit.min(MAX_TRAFFIC_QUERY_LIMIT);
         let query_sql = format!(
-            "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, response_status, response_headers
+            "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, response_status, response_headers, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error
              FROM intercepted_traffic {} ORDER BY timestamp DESC, id DESC LIMIT {} OFFSET {}",
             where_clause, effective_limit, filters.offset
         );
@@ -234,7 +243,7 @@ impl Database {
 
     /// Get a single traffic entry by ID
     pub async fn get_traffic(&self, id: i64) -> Result<Option<InterceptedTrafficEntry>> {
-        let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body
+        let sql = "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error
              FROM intercepted_traffic WHERE id = $1";
 
         let row = self.db_fetch_optional(sql, db_args![id]).await?;
@@ -316,7 +325,7 @@ impl Database {
                 format!("{} AND {}", where_clause, keyset)
             };
             let query_sql = format!(
-                "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body
+                "SELECT id, timestamp, node_id, agent_short_name, intercept_method, direction, method, url, host, request_headers, request_body, response_status, response_headers, response_body, mcp_method, mcp_name, mcp_protocol_version, mcp_session_id, mcp_jsonrpc_id, mcp_is_error
                  FROM intercepted_traffic {} ORDER BY id DESC LIMIT {}",
                 page_where, SEARCH_SCAN_BATCH
             );
@@ -521,7 +530,25 @@ fn parse_traffic_row(row: &DbRow) -> Result<InterceptedTrafficEntry> {
         request_body,
         response_status: response_status.map(|s| s as u16),
         response_headers,
+        mcp: parse_mcp_columns(row, 14),
         response_body,
+    })
+}
+
+//
+// The six mcp_* columns are selected last, in insert order, starting at
+// `start`. A row without mcp_method was not classified as MCP.
+//
+
+fn parse_mcp_columns(row: &DbRow, start: usize) -> Option<McpTrafficInfo> {
+    let method: Option<String> = row.get(start);
+    Some(McpTrafficInfo {
+        method: method?,
+        name: row.get(start + 1),
+        protocol_version: row.get(start + 2),
+        session_id: row.get(start + 3),
+        jsonrpc_id: row.get(start + 4),
+        is_error: row.get::<Option<i64>, _>(start + 5).map(|v| v != 0),
     })
 }
 
@@ -555,6 +582,7 @@ fn parse_traffic_metadata_row(row: &DbRow) -> Result<InterceptedTrafficEntry> {
         request_body: None,
         response_status: response_status.map(|status| status as u16),
         response_headers: response_headers_json.and_then(|json| serde_json::from_str(&json).ok()),
+        mcp: parse_mcp_columns(row, 12),
         response_body: None,
     })
 }

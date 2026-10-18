@@ -137,6 +137,8 @@ This reveals:
 
 MCP (Model Context Protocol) servers extend agent capabilities. Recon discovers server definitions including stdio commands and arguments, SSE endpoints, and environment variables. It also attempts to connect to each MCP server to pull out the actual tools it provides - giving you visibility into what external capabilities the agent has access to and potential attack surface.
 
+Tool discovery connects to stdio MCP servers (HTTP/SSE servers are recorded but not connected to). The node speaks both protocol eras: it first sends a stateless `server/discover` request (revision 2026-07-28) and, if the server answers with a non-modern error or does not answer within 10 seconds, falls back to the legacy `initialize` handshake (2025-11-25 and earlier). Servers that only speak 2026-07-28 and older session-based servers are both discovered; a legacy server that silently ignores the probe adds up to 10 seconds to recon.
+
 Note that if an MCP server requires specific authentication or environment setup, the tool discovery connection may fail. Praxis does its best to replicate the agent's environment but some servers may not respond.
 
 ### Internal Tools
