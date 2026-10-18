@@ -728,9 +728,17 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                             .collect()
                     })
                     .unwrap_or_default();
+                let env: Vec<(String, String)> = spec_json["env"]
+                    .as_object()
+                    .map(|m| {
+                        m.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let cwd = spec_json["cwd"].as_str().unwrap_or("");
 
-                let client = crate::acp::client::spawn_acp_client(program, &args, cwd)
+                let client = crate::acp::client::spawn_acp_client(program, &args, &env, cwd)
                     .map_err(|e| mlua::Error::RuntimeError(format!("ACP start failed: {}", e)))?;
 
                 let handle = uuid::Uuid::new_v4().to_string();

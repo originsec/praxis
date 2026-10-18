@@ -161,25 +161,59 @@ struct PromptCtx {
 
 //
 // Spawn an ACP subprocess and return a Send-safe handle. The ACP
-// connection driver runs on the ambient tokio runtime.
+// connection driver runs on a dedicated thread (see start_driver).
 //
 
-pub fn spawn_acp_client(program: &str, args: &[String], cwd: &str) -> Result<AcpHandle> {
+pub fn spawn_acp_client(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+    cwd: &str,
+) -> Result<AcpHandle> {
     let program = program.to_string();
     let args = args.to_vec();
+    let env = env.to_vec();
     let cwd = cwd.to_string();
+    start_driver(move || {
+        let (child, stdin, stdout, pid) = spawn_child(&program, &args, &env, &cwd)?;
+        Ok(AcpIo {
+            child: Some(child),
+            reader: Box::new(stdout),
+            writer: Box::new(stdin),
+            pid,
+        })
+    })
+}
+
+//
+// The byte streams an ACP driver talks over. `child` is None when the agent
+// is not a subprocess we own (in-process mock agents in tests).
+//
+
+struct AcpIo {
+    child: Option<tokio::process::Child>,
+    reader: Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+    writer: Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+    pid: u32,
+}
+
+//
+// The driver needs its own tokio runtime so synchronous callers (blocking
+// Lua threads) can block on replies without occupying the caller's
+// runtime. A dedicated std::thread + current_thread runtime keeps the ACP
+// stdio reader isolated. `open` runs inside that runtime because spawning
+// a tokio child process requires one.
+//
+
+fn start_driver<F>(open: F) -> Result<AcpHandle>
+where
+    F: FnOnce() -> Result<AcpIo> + Send + 'static,
+{
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_clone = cancelled.clone();
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<AcpCommand>();
     let (init_tx, init_rx) = oneshot::channel::<Result<u32>>();
-
-    //
-    // The driver needs its own tokio runtime for synchronous callers
-    // (blocking Lua threads) to be able to block on replies without
-    // occupying the caller's runtime. A dedicated std::thread +
-    // current_thread runtime keeps the ACP stdio reader isolated.
-    //
 
     std::thread::Builder::new()
         .name("acp-client".into())
@@ -189,14 +223,14 @@ pub fn spawn_acp_client(program: &str, args: &[String], cwd: &str) -> Result<Acp
                 .build()
                 .expect("Failed to create ACP tokio runtime");
 
-            rt.block_on(run_acp_driver(
-                program,
-                args,
-                cwd,
-                cancelled_clone,
-                cmd_rx,
-                init_tx,
-            ));
+            rt.block_on(async move {
+                match open() {
+                    Ok(io) => run_acp_driver(io, cancelled_clone, cmd_rx, init_tx).await,
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e));
+                    }
+                }
+            });
         })
         .context("Failed to spawn ACP client thread")?;
 
@@ -212,20 +246,17 @@ pub fn spawn_acp_client(program: &str, args: &[String], cwd: &str) -> Result<Acp
 }
 
 async fn run_acp_driver(
-    program: String,
-    args: Vec<String>,
-    cwd: String,
+    io: AcpIo,
     cancelled: Arc<AtomicBool>,
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
     init_tx: oneshot::Sender<Result<u32>>,
 ) {
-    let (mut child, stdin, stdout, pid) = match spawn_child(&program, &args, &cwd) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = init_tx.send(Err(e));
-            return;
-        }
-    };
+    let AcpIo {
+        mut child,
+        reader,
+        writer,
+        pid,
+    } = io;
 
     let ctx: Arc<Mutex<PromptCtx>> = Arc::new(Mutex::new(PromptCtx::default()));
     let ctx_notif = Arc::clone(&ctx);
@@ -246,7 +277,7 @@ async fn run_acp_driver(
     let init_tx_main = Arc::new(init_tx);
     let init_tx_for_main = Arc::clone(&init_tx_main);
 
-    let transport = acp::ByteStreams::new(stdin.compat_write(), stdout.compat());
+    let transport = acp::ByteStreams::new(writer.compat_write(), reader.compat());
 
     let drive_result = acp::Client
         .builder()
@@ -590,17 +621,18 @@ async fn run_acp_driver(
                         let _ = reply.send(Ok(()));
                     }
                     AcpCommand::IsAlive { reply } => {
-                        let alive = matches!(child.try_wait(), Ok(None));
+                        let alive = child
+                            .as_mut()
+                            .is_none_or(|c| matches!(c.try_wait(), Ok(None)));
                         let _ = reply.send(alive);
                     }
-                    AcpCommand::Close => {
-                        let _ = child.kill().await;
-                        break;
-                    }
+                    AcpCommand::Close => break,
                 }
             }
 
-            let _ = child.kill().await;
+            if let Some(c) = child.as_mut() {
+                let _ = c.kill().await;
+            }
             Ok(())
         })
         .await;
@@ -616,6 +648,7 @@ async fn run_acp_driver(
 fn spawn_child(
     program: &str,
     args: &[String],
+    env: &[(String, String)],
     cwd: &str,
 ) -> Result<(
     tokio::process::Child,
@@ -625,6 +658,7 @@ fn spawn_child(
 )> {
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
@@ -644,4 +678,344 @@ fn spawn_child(
     let pid = child.id().ok_or_else(|| anyhow!("No PID for ACP child"))?;
 
     Ok((child, stdin, stdout, pid))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    type WireLog = Arc<Mutex<Vec<Value>>>;
+
+    //
+    // Minimal in-process ACP agent speaking newline-delimited JSON-RPC.
+    // Behaviour is keyed off the prompt text: "perm" asks for permission
+    // before finishing the turn, "hang" holds the turn open until the client
+    // sends session/cancel, anything else streams a reply and ends the turn.
+    // Every message received from the client is appended to `log`.
+    //
+
+    async fn mock_agent(stream: tokio::io::DuplexStream, log: WireLog) {
+        let (reader, mut writer) = tokio::io::split(stream);
+        let mut lines = BufReader::new(reader).lines();
+        let mut pending_prompt: Option<Value> = None;
+
+        async fn send(w: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>, msg: Value) {
+            let mut line = msg.to_string();
+            line.push('\n');
+            w.write_all(line.as_bytes()).await.unwrap();
+            w.flush().await.unwrap();
+        }
+        fn update(update: Value) -> Value {
+            json!({"jsonrpc": "2.0", "method": "session/update",
+                   "params": {"sessionId": "mock-session", "update": update}})
+        }
+        fn chunk(text: &str) -> Value {
+            update(json!({"sessionUpdate": "agent_message_chunk",
+                          "content": {"type": "text", "text": text}}))
+        }
+        fn end_turn(id: &Value, reason: &str) -> Value {
+            json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": reason}})
+        }
+
+        while let Ok(Some(line)) = lines.next_line().await {
+            let msg: Value = serde_json::from_str(&line).unwrap();
+            log.lock().unwrap().push(msg.clone());
+            let id = msg.get("id").cloned().unwrap_or(Value::Null);
+            match msg.get("method").and_then(|m| m.as_str()) {
+                Some("initialize") => {
+                    let result = json!({"protocolVersion": 1, "agentCapabilities": {},
+                                        "authMethods": []});
+                    send(
+                        &mut writer,
+                        json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                    )
+                    .await;
+                }
+                Some("session/new") => {
+                    let result = json!({"sessionId": "mock-session"});
+                    send(
+                        &mut writer,
+                        json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                    )
+                    .await;
+                }
+                Some("session/prompt") => {
+                    let text = msg["params"]["prompt"][0]["text"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
+                    send(&mut writer, chunk("po")).await;
+                    send(&mut writer, chunk("ng")).await;
+                    send(
+                        &mut writer,
+                        update(json!({"sessionUpdate": "tool_call", "toolCallId": "t1",
+                                      "title": "Read file", "status": "pending",
+                                      "rawInput": {"path": "a.txt"}})),
+                    )
+                    .await;
+                    send(
+                        &mut writer,
+                        update(
+                            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1",
+                                      "status": "completed", "rawOutput": {"ok": true}}),
+                        ),
+                    )
+                    .await;
+                    if text.contains("perm") {
+                        let options = json!([
+                            {"optionId": "opt-allow-once", "name": "Allow", "kind": "allow_once"},
+                            {"optionId": "opt-allow-always", "name": "Always", "kind": "allow_always"},
+                            {"optionId": "opt-reject", "name": "Reject", "kind": "reject_once"},
+                        ]);
+                        let params = json!({"sessionId": "mock-session", "options": options,
+                                            "toolCall": {"toolCallId": "t2", "title": "Write file",
+                                                         "rawInput": {"path": "b.txt"}}});
+                        send(
+                            &mut writer,
+                            json!({"jsonrpc": "2.0", "id": 900,
+                                   "method": "session/request_permission", "params": params}),
+                        )
+                        .await;
+                        pending_prompt = Some(id);
+                    } else if text.contains("hang") {
+                        pending_prompt = Some(id);
+                    } else {
+                        send(&mut writer, end_turn(&id, "end_turn")).await;
+                    }
+                }
+                Some("session/cancel") => {
+                    if let Some(pid) = pending_prompt.take() {
+                        send(&mut writer, end_turn(&pid, "cancelled")).await;
+                    }
+                }
+                Some(_) => {}
+                None => {
+                    //
+                    // A response from the client: only the permission
+                    // request (id 900) is ever outstanding.
+                    //
+                    if id == json!(900)
+                        && let Some(pid) = pending_prompt.take()
+                    {
+                        send(&mut writer, end_turn(&pid, "end_turn")).await;
+                    }
+                }
+            }
+        }
+    }
+
+    fn start_mock() -> (AcpHandle, WireLog) {
+        let log: WireLog = Arc::new(Mutex::new(Vec::new()));
+        let agent_log = Arc::clone(&log);
+        let handle = start_driver(move || {
+            let (client_side, agent_side) = tokio::io::duplex(1 << 16);
+            tokio::spawn(mock_agent(agent_side, agent_log));
+            let (reader, writer) = tokio::io::split(client_side);
+            Ok(AcpIo {
+                child: None,
+                reader: Box::new(reader),
+                writer: Box::new(writer),
+                pid: 0,
+            })
+        })
+        .expect("mock ACP driver should start");
+        (handle, log)
+    }
+
+    fn received(log: &WireLog, method: &str) -> Vec<Value> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.get("method").and_then(|v| v.as_str()) == Some(method))
+            .cloned()
+            .collect()
+    }
+
+    fn permission_outcome(log: &WireLog) -> Value {
+        log.lock()
+            .unwrap()
+            .iter()
+            .find(|m| m.get("id") == Some(&json!(900)) && m.get("method").is_none())
+            .map(|m| m["result"]["outcome"].clone())
+            .expect("client should answer the permission request")
+    }
+
+    struct PromptRun {
+        text: Result<String>,
+        updates: Vec<SessionUpdateKind>,
+    }
+
+    fn run_prompt(
+        handle: &AcpHandle,
+        prompt: &str,
+        yolo: bool,
+        interactive: bool,
+        decision: Option<PermissionDecision>,
+        cancel: &AtomicBool,
+    ) -> PromptRun {
+        let (update_tx, mut update_rx) = mpsc::channel(64);
+        let (perm_tx, perm_rx) = std::sync::mpsc::channel();
+        if let Some(d) = decision {
+            perm_tx.send(("t2".to_string(), d)).unwrap();
+        }
+        let text = handle.send_prompt(prompt, &update_tx, perm_rx, yolo, interactive, cancel);
+        let mut updates = Vec::new();
+        while let Ok(u) = update_rx.try_recv() {
+            updates.push(u);
+        }
+        PromptRun { text, updates }
+    }
+
+    #[test]
+    fn handshake_and_streamed_turn() {
+        let (handle, log) = start_mock();
+        assert_eq!(
+            handle.create_session("/tmp/project").unwrap(),
+            "mock-session"
+        );
+
+        let run = run_prompt(
+            &handle,
+            "hello",
+            false,
+            false,
+            None,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(run.text.unwrap(), "pong");
+        assert_eq!(
+            run.updates,
+            vec![
+                SessionUpdateKind::TextChunk { text: "po".into() },
+                SessionUpdateKind::TextChunk { text: "ng".into() },
+                SessionUpdateKind::ToolCall {
+                    tool_name: "Read file".into(),
+                    tool_id: "t1".into(),
+                    input: r#"{"path":"a.txt"}"#.into(),
+                },
+                SessionUpdateKind::ToolResult {
+                    tool_id: "t1".into(),
+                    output: r#"{"ok":true}"#.into(),
+                    is_error: false,
+                },
+            ]
+        );
+
+        let init = &received(&log, "initialize")[0];
+        assert_eq!(init["params"]["protocolVersion"], json!(1));
+        let new = &received(&log, "session/new")[0];
+        assert_eq!(new["params"]["cwd"], json!("/tmp/project"));
+        assert_eq!(new["params"]["mcpServers"], json!([]));
+        let prompt = &received(&log, "session/prompt")[0];
+        assert_eq!(prompt["params"]["sessionId"], json!("mock-session"));
+        assert_eq!(prompt["params"]["prompt"][0]["text"], json!("hello"));
+
+        //
+        // The turn state is reset between prompts.
+        //
+
+        let run = run_prompt(
+            &handle,
+            "again",
+            false,
+            false,
+            None,
+            &AtomicBool::new(false),
+        );
+        assert_eq!(run.text.unwrap(), "pong");
+        assert!(handle.is_alive());
+        handle.close();
+    }
+
+    #[test]
+    fn prompt_without_session_fails() {
+        let (handle, _log) = start_mock();
+        let run = run_prompt(
+            &handle,
+            "hello",
+            false,
+            false,
+            None,
+            &AtomicBool::new(false),
+        );
+        assert!(run.text.is_err());
+        handle.close();
+    }
+
+    #[test]
+    fn yolo_auto_allows_permission() {
+        let (handle, log) = start_mock();
+        handle.create_session("/tmp").unwrap();
+        let run = run_prompt(&handle, "perm", true, false, None, &AtomicBool::new(false));
+        assert_eq!(run.text.unwrap(), "pong");
+        assert_eq!(
+            permission_outcome(&log),
+            json!({"outcome": "selected", "optionId": "opt-allow-always"})
+        );
+        assert!(
+            !run.updates
+                .iter()
+                .any(|u| matches!(u, SessionUpdateKind::PermissionRequest { .. }))
+        );
+        handle.close();
+    }
+
+    #[test]
+    fn non_interactive_rejects_permission() {
+        let (handle, log) = start_mock();
+        handle.create_session("/tmp").unwrap();
+        let run = run_prompt(&handle, "perm", false, false, None, &AtomicBool::new(false));
+        assert_eq!(run.text.unwrap(), "pong");
+        assert_eq!(
+            permission_outcome(&log),
+            json!({"outcome": "selected", "optionId": "opt-reject"})
+        );
+        handle.close();
+    }
+
+    #[test]
+    fn interactive_forwards_permission_decision() {
+        let (handle, log) = start_mock();
+        handle.create_session("/tmp").unwrap();
+        let run = run_prompt(
+            &handle,
+            "perm",
+            false,
+            true,
+            Some(PermissionDecision::Allow),
+            &AtomicBool::new(false),
+        );
+        assert_eq!(run.text.unwrap(), "pong");
+        assert!(run.updates.contains(&SessionUpdateKind::PermissionRequest {
+            permission_id: "t2".into(),
+            tool_name: "Write file".into(),
+            tool_input: r#"{"path":"b.txt"}"#.into(),
+        }));
+        assert_eq!(
+            permission_outcome(&log),
+            json!({"outcome": "selected", "optionId": "opt-allow-once"})
+        );
+        handle.close();
+    }
+
+    #[test]
+    fn cancel_flag_sends_session_cancel() {
+        let (handle, log) = start_mock();
+        handle.create_session("/tmp").unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let setter = Arc::clone(&cancel);
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            setter.store(true, Ordering::SeqCst);
+        });
+        let run = run_prompt(&handle, "hang", false, false, None, &cancel);
+        t.join().unwrap();
+        assert_eq!(run.text.unwrap(), "pong");
+        let cancels = received(&log, "session/cancel");
+        assert_eq!(cancels.len(), 1);
+        assert_eq!(cancels[0]["params"]["sessionId"], json!("mock-session"));
+        handle.close();
+    }
 }

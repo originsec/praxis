@@ -824,7 +824,7 @@ pub struct SessionUpdate {
 }
 
 /// The kind of streaming update from an ACP agent session.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum SessionUpdateKind {
     /// Incremental text output from the agent.
     TextChunk { text: String },
