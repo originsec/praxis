@@ -512,7 +512,20 @@ All extensions are advertised under `InitializeResponse._meta.extensions`.
 - `_praxis/write_file` — write a file on the node. Params
   `{ "file_type": AgentFileType, "path": string, "contents": string }`.
   There is no `agent_short_name` field; writes are rejected for `Session`
-  file types.
+  file types. Version 2 adds optional `expected_sha256` (write only if the
+  file currently has this SHA-256), `expect_absent` (write only if the file
+  does not exist) and `delete` (remove the file instead of writing); a failed
+  check returns `success: false, conflict: true`. **`Config` writes sent by
+  clients are intercepted by the service** and routed through the
+  [change ledger](../usage/changes.md): the service snapshots the file,
+  performs the compare-and-swap write itself and records the change. Optional
+  ledger fields `agent_short_name`, `config_type`, `engagement`, `note` and
+  `operator` are accepted, and the response adds `change_id` (absent when the
+  file already had the requested content).
+- `_praxis/snapshot_files` — full-content read used by the change ledger.
+  Params `{ "paths": string[] }`; result
+  `{ "files": [{ "path", "exists", "sha256", "content", "error" }] }`. Files
+  larger than 4 MiB or not valid UTF-8 are reported as errors.
 - `_praxis/grep_files` — regex search across one or more files. Params
   `{ "agent_short_name": string, "file_type": AgentFileType,
   "paths": string[], "pattern": string }`.
@@ -520,6 +533,25 @@ All extensions are advertised under `InitializeResponse._meta.extensions`.
   the connector's `write_session_content` hook (so agents with virtual
   session stores can intercept the write). Params
   `{ "agent_short_name": string, "path": string, "contents": string }`.
+
+### Service-handled change-ledger methods
+
+These are answered by the service itself and are sent without
+`_meta.praxis.nodeId` (the node is named in the params where relevant). Types
+live in `common::config_change`.
+
+- `_praxis/changes/list` — `ChangeQuery` → `{ "changes": ConfigChangeRecord[] }` (no file content)
+- `_praxis/changes/get` — `{ "change_id" }` (full id or unique prefix) → `{ "change", "diff" }` with before/after content
+- `_praxis/changes/apply` — `ChangeApplyParams` (`node_id`, `path`, `op`, optional `agent_short_name`, `file_kind`, `config_type`, `engagement`, `note`, `operator`, `dry_run`, `cancel_token`) → `{ "change", "diff", "no_op", "dry_run" }`
+- `_praxis/changes/revert` — `ChangeRevertParams` (`change_id`, `on_conflict`, …) → `ChangeRevertOutcome`
+- `_praxis/changes/revert_all` — `ChangeRevertAllParams` (`query`, `all`, `on_conflict`, …) → `{ "outcomes", "cancelled" }`
+- `_praxis/changes/status` — `ChangeStatusParams` (`query`, `cancel_token`) → `{ "entries", "cancelled" }`
+- `_praxis/changes/cancel` — notification `{ "cancel_token" }`; cancels the
+  caller's in-flight request that was sent with the same `cancel_token`
+
+`ChangeOp` is tagged by `op`: `{"op":"set","key_path":"/env/FOO","value":"1"}`,
+`merge`, `remove`, `list_append`, `list_remove`, `append_block`
+(`content`), `remove_block` (`block_id`), `overwrite` (`contents`).
 
 ### NodeCommand (non-agent concerns)
 

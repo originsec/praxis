@@ -1,3 +1,4 @@
+mod changes;
 mod executions;
 mod library;
 pub mod new_op_form;
@@ -38,6 +39,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         OpsTab::Library => library::render_library(f, chunks[3], state),
         OpsTab::Executions => executions::render_executions(f, chunks[3], state),
         OpsTab::Triggers => triggers::render_triggers(f, chunks[3], state),
+        OpsTab::Changes => changes::render_changes(f, chunks[3], app),
     }
 
     //
@@ -52,7 +54,45 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_filter_row(f: &mut Frame, area: Rect, state: &OperationsState) {
-    use crate::ui::filter_bar::{self, FilterBarModel};
+    use crate::ui::filter_bar::{self, FilterBarModel, FilterPill};
+
+    //
+    // The Changes tab adds its status filter, the engagement label applied
+    // to new config writes, and the progress / result of ledger operations.
+    //
+
+    let (extra_pills, meta) = if state.tab == OpsTab::Changes {
+        let c = &state.changes;
+        let engagement = match &c.engagement_input {
+            Some(input) => format!("{}\u{2588}", input),
+            None => c.engagement.clone().unwrap_or_else(|| "none".to_string()),
+        };
+        let meta = match (&c.in_flight, &c.message) {
+            (Some(op), _) => Some(format!(
+                "{} {}\u{2026}  ^c cancel",
+                crate::ui::common::spinner_char(),
+                op.label
+            )),
+            (None, Some((msg, _))) => Some(msg.clone()),
+            (None, None) => None,
+        };
+        (
+            vec![
+                FilterPill {
+                    label: "status".to_string(),
+                    value: c.status_filter.label().to_string(),
+                },
+                FilterPill {
+                    label: "engagement".to_string(),
+                    value: engagement,
+                },
+            ],
+            meta,
+        )
+    } else {
+        (Vec::new(), None)
+    };
+
     filter_bar::render(
         f,
         area,
@@ -60,8 +100,8 @@ fn render_filter_row(f: &mut Frame, area: Rect, state: &OperationsState) {
             focused: state.filter_focused,
             query: &state.filter,
             placeholder: "filter",
-            extra_pills: Vec::new(),
-            meta: None,
+            extra_pills,
+            meta,
         },
     );
 }
@@ -75,11 +115,18 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
             .count();
     let exec_count = state.operations.len() + state.chain_executions.len();
     let trig_count = state.triggers.len();
+    let change_count = state
+        .changes
+        .entries
+        .iter()
+        .filter(|c| c.is_revertable())
+        .count();
 
     let specs = [
         (OpsTab::Executions, "Executions", exec_count),
         (OpsTab::Library, "Library", lib_count),
         (OpsTab::Triggers, "Triggers", trig_count),
+        (OpsTab::Changes, "Changes", change_count),
     ];
     let mut x = 0u16;
     for (i, (tab, label, n)) in specs.iter().enumerate() {
@@ -111,6 +158,12 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
         "Triggers",
         Some(trig_count),
         state.tab == OpsTab::Triggers,
+    ));
+    spans.push(chrome::tab_sep());
+    spans.extend(chrome::tab(
+        "Changes",
+        Some(change_count),
+        state.tab == OpsTab::Changes,
     ));
 
     spans.push(Span::raw("      "));
@@ -210,6 +263,58 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App, state: &OperationsState) {
             }
             Line::from(spans)
         }
+        OpsTab::Changes => {
+            let c = &state.changes;
+            let mut spans: Vec<Span> = Vec::new();
+            let mut chip = |reg: &mut HintRegistrar, k: &'static str, l: &'static str, a| {
+                reg.chip(k, MouseAction::OpsHint(a));
+                reg.chip(l, MouseAction::OpsHint(a));
+                reg.gap(4);
+                spans.push(Span::styled(k, key));
+                spans.push(Span::styled(l, label));
+                spans.push(gap.clone());
+            };
+            if c.engagement_input.is_some() {
+                spans.push(Span::styled(
+                    "engagement label for new writes\u{2026}  \u{21B5} set  esc cancel",
+                    Style::default().fg(DIM),
+                ));
+            } else if c.conflict.is_some() {
+                spans.push(Span::styled("u", key));
+                spans.push(Span::styled(" structured undo", label));
+                spans.push(gap.clone());
+                spans.push(Span::styled("f", key));
+                spans.push(Span::styled(" force restore", label));
+                spans.push(gap.clone());
+                spans.push(Span::styled("esc", key));
+                spans.push(Span::styled(" dismiss", label));
+            } else {
+                if c.in_flight.is_some() {
+                    chip(&mut reg, "^c", " cancel", OpsHintAction::CancelChangeOp);
+                }
+                chip(&mut reg, "^z", " revert", OpsHintAction::RevertChange);
+                chip(
+                    &mut reg,
+                    "^x",
+                    " revert all in view",
+                    OpsHintAction::RevertVisibleChanges,
+                );
+                chip(
+                    &mut reg,
+                    "r",
+                    " refresh + drift",
+                    OpsHintAction::RefreshChanges,
+                );
+                spans.push(Span::styled("s", key));
+                spans.push(Span::styled(" status", label));
+                spans.push(gap.clone());
+                spans.push(Span::styled("e", key));
+                spans.push(Span::styled(" engagement", label));
+                spans.push(gap.clone());
+                append_filter_hint(&mut spans, state);
+            }
+            Line::from(spans)
+        }
         OpsTab::Executions => {
             let sorted = crate::app::App::sorted_exec_static(
                 &state.operations,
@@ -286,6 +391,7 @@ fn register_content_hits(app: &App, main_area: Rect, state: &OperationsState) {
         OpsTab::Library => RowSelectKind::OpsLibrary,
         OpsTab::Executions => RowSelectKind::OpsExecutions,
         OpsTab::Triggers => RowSelectKind::OpsTriggers,
+        OpsTab::Changes => RowSelectKind::OpsChanges,
     };
     app.hits_register(
         list_area,

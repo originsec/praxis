@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -21,8 +20,8 @@ fn raw_arc<T: Serialize>(v: &T) -> Arc<RawValue> {
 }
 
 pub use common::acp_ext::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
-    EXT_PRAXIS_WRITE_SESSION_CONTENT,
+    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_SNAPSHOT_FILES,
+    EXT_PRAXIS_WRITE_FILE, EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 
 #[derive(Debug, Deserialize)]
@@ -53,11 +52,25 @@ struct ReadFileResult {
     error: Option<String>,
 }
 
+//
+// The optional fields are used by the service's change ledger: a
+// compare-and-swap on the current hash (`expected_sha256`, or
+// `expect_absent` for "must not exist yet") and `delete` to remove a file
+// that did not exist before a change being reverted.
+//
+
 #[derive(Debug, Deserialize)]
 struct WriteFileParams {
     file_type: AgentFileType,
     path: String,
+    #[serde(default)]
     contents: String,
+    #[serde(default)]
+    expected_sha256: Option<String>,
+    #[serde(default)]
+    expect_absent: bool,
+    #[serde(default)]
+    delete: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +79,18 @@ struct WriteFileResult {
     path: String,
     success: bool,
     error: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    conflict: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SnapshotFilesParams {
+    paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SnapshotFilesResult {
+    files: Vec<file_ops::FileSnapshot>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +143,7 @@ pub async fn dispatch(
         EXT_PRAXIS_RECON => handle_recon(registry, req).await,
         EXT_PRAXIS_READ_FILE => handle_read_file(registry, req).await,
         EXT_PRAXIS_WRITE_FILE => handle_write_file(req).await,
+        EXT_PRAXIS_SNAPSHOT_FILES => handle_snapshot_files(req).await,
         EXT_PRAXIS_GREP_FILES => handle_grep_files(registry, req).await,
         EXT_PRAXIS_WRITE_SESSION_CONTENT => handle_write_session_content(registry, req).await,
         _ => Err(acp::Error::method_not_found()),
@@ -246,56 +272,80 @@ async fn handle_read_file(
 
 async fn handle_write_file(req: ExtRequest) -> Result<ExtResponse, acp::Error> {
     let params: WriteFileParams = parse_params(&req)?;
-
-    if matches!(params.file_type, AgentFileType::Session) {
-        return Ok(ext_ok(&WriteFileResult {
+    let fail = |params: &WriteFileParams, error: String, conflict: bool| {
+        ext_ok(&WriteFileResult {
             file_type: params.file_type,
-            path: params.path,
+            path: params.path.clone(),
             success: false,
-            error: Some("Write is not allowed for session content".to_string()),
-        }));
-    }
-
-    let target_path = Path::new(&params.path);
-    let canonical_path = match target_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => match target_path.parent().and_then(|p| p.canonicalize().ok()) {
-            Some(parent) if file_ops::is_path_in_valid_home(&parent) => target_path.to_path_buf(),
-            _ => {
-                return Ok(ext_ok(&WriteFileResult {
-                    file_type: params.file_type,
-                    path: params.path,
-                    success: false,
-                    error: Some("Invalid path or path outside home directory".to_string()),
-                }));
-            }
-        },
+            error: Some(error),
+            conflict,
+        })
     };
 
-    if !file_ops::is_path_in_valid_home(&canonical_path) {
-        return Ok(ext_ok(&WriteFileResult {
-            file_type: params.file_type,
-            path: params.path,
-            success: false,
-            error: Some("Path must be within a valid user home directory".to_string()),
-        }));
+    if matches!(params.file_type, AgentFileType::Session) {
+        return Ok(fail(
+            &params,
+            "Write is not allowed for session content".to_string(),
+            false,
+        ));
     }
 
-    let result = match std::fs::write(&params.path, &params.contents) {
-        Ok(_) => WriteFileResult {
+    if let Err(error) = file_ops::validate_write_path(&params.path) {
+        return Ok(fail(&params, error, false));
+    }
+
+    if params.expected_sha256.is_some() || params.expect_absent {
+        let current = match file_ops::current_sha256(&params.path) {
+            Ok(c) => c,
+            Err(e) => return Ok(fail(&params, format!("Failed to read file: {}", e), false)),
+        };
+        let expected = if params.expect_absent {
+            None
+        } else {
+            params.expected_sha256.clone()
+        };
+        if current != expected {
+            return Ok(fail(
+                &params,
+                "File changed since it was read".to_string(),
+                true,
+            ));
+        }
+    }
+
+    let outcome = if params.delete {
+        match std::fs::remove_file(&params.path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    } else {
+        std::fs::write(&params.path, &params.contents)
+    };
+
+    Ok(match outcome {
+        Ok(_) => ext_ok(&WriteFileResult {
             file_type: params.file_type,
             path: params.path,
             success: true,
             error: None,
-        },
-        Err(e) => WriteFileResult {
-            file_type: params.file_type,
-            path: params.path,
-            success: false,
-            error: Some(format!("Failed to write file: {}", e)),
-        },
-    };
-    Ok(ext_ok(&result))
+            conflict: false,
+        }),
+        Err(e) => fail(&params, format!("Failed to write file: {}", e), false),
+    })
+}
+
+async fn handle_snapshot_files(req: ExtRequest) -> Result<ExtResponse, acp::Error> {
+    let params: SnapshotFilesParams = parse_params(&req)?;
+    let files = tokio::task::spawn_blocking(move || {
+        params
+            .paths
+            .iter()
+            .map(|p| file_ops::snapshot_file(p))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| acp::Error::internal_error().data(serde_json::json!(e.to_string())))?;
+    Ok(ext_ok(&SnapshotFilesResult { files }))
 }
 
 async fn handle_grep_files(

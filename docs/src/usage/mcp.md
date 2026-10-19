@@ -80,7 +80,7 @@ All recon tools take a `node` prefix and an `agent` short-name.
 - `recon_session_read` — Read session file content (`node`, `agent`, optional `path`)
 - `recon_config_grep` — Grep config files with regex (`node`, `agent`, `pattern`, optional `paths`)
 - `recon_session_grep` — Grep session files with regex (`node`, `agent`, `pattern`, optional `paths`)
-- `write_file` — Write file content
+- `write_file` — Write file content (`node`, `file_type`, `path`, `contents`, optional `agent`, `engagement`, `note`). Config writes are recorded in the [change ledger](./changes.md) and the result includes the `change_id`.
 
 ### Sessions
 
@@ -159,6 +159,36 @@ returning success. `trigger_create` returns the created trigger's full ID as
 `id` (and its short form as `id_short`), while `trigger_delete` and
 `trigger_toggle` return only after the requested trigger is deleted or updated.
 Service-side validation and database errors are returned as MCP tool errors.
+
+### Change Ledger
+
+Every config write made through Praxis is recorded with its original content
+so it can be rolled back. See [Change Ledger](./changes.md) for the full model.
+
+- `change_list` — List recorded changes, newest first (optional `node`, `agent`, `engagement`, `path`, `state` = active/reverted, `kind` = apply/revert, `limit`)
+- `change_get` — Full record for one change (`change_id` or unique prefix), including before/after content, undo steps and a unified diff
+- `change_apply` — Apply a recorded change (`node`, `path`, `operation`, plus `key_path` / `value` / `content` / `block_id` as the operation needs; optional `agent`, `file_kind`, `engagement`, `note`, `dry_run`). Operations: `set`, `merge`, `remove`, `list_append`, `list_remove` (JSON/JSONC/TOML/YAML), `append_block`, `remove_block` (markdown/text), `overwrite`
+- `change_revert` — Revert one change (`change_id`, optional `on_conflict` = abort/structured/force, `note`). With the default `abort`, a file modified since returns `outcome: "conflict"` plus a diff of the later modifications instead of touching it
+- `change_revert_all` — Revert every active change for a `node`, `agent`, `engagement` or explicit `change_ids`, newest first (`all: true` is required when no filter is given)
+- `change_status` — Drift check: re-read each active change's file and report `in_sync`, `superseded`, `modified`, `missing` or `unreachable`
+
+Example — add a harmless environment variable to a Claude Code settings file:
+
+```json
+{
+  "node": "3f2a",
+  "path": "/home/alice/.claude/settings.json",
+  "operation": "set",
+  "key_path": "/env/PRAXIS_DEMO",
+  "value": "1",
+  "engagement": "acme-2026q4",
+  "note": "ledger demo"
+}
+```
+
+If the MCP client cancels a `change_*` call, the server sends the service a
+cancel for the in-flight request so bulk reverts and drift checks stop
+between files.
 
 ### Traffic
 

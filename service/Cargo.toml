@@ -41,6 +41,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 base64 = "0.22"
 nom = "8"
 similar = "3"
+jsonc-parser = { version = "0.34", features = ["cst", "serde_json"] }
+toml_edit = "0.22"
+serde_yaml_ng = "0.10"
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 reqwest = { version = "0.13", default-features = false }
 rcgen = "0.14"

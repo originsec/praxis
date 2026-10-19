@@ -13,8 +13,10 @@ use acp::schema::{
 };
 use agent_client_protocol as acp;
 use common::ClientDirectMessage;
+use common::acp_ext::{EXT_PRAXIS_CHANGES_PREFIX, EXT_PRAXIS_WRITE_FILE};
 
 use crate::acp_node_proxy::AcpNodeProxy;
+use crate::change_ledger::ChangeLedger;
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
 use crate::orchestrator::OrchestratorManager;
@@ -31,6 +33,7 @@ pub struct AcpServer {
     orchestrator_manager: Arc<OrchestratorManager>,
     service_config: Arc<RwLock<ServiceConfig>>,
     node_proxy: Arc<AcpNodeProxy>,
+    change_ledger: Arc<ChangeLedger>,
 }
 
 impl AcpServer {
@@ -38,11 +41,13 @@ impl AcpServer {
         orchestrator_manager: Arc<OrchestratorManager>,
         service_config: Arc<RwLock<ServiceConfig>>,
         node_proxy: Arc<AcpNodeProxy>,
+        change_ledger: Arc<ChangeLedger>,
     ) -> Self {
         Self {
             orchestrator_manager,
             service_config,
             node_proxy,
+            change_ledger,
         }
     }
 
@@ -81,6 +86,12 @@ impl AcpServer {
 
         let id = msg.get("id").cloned();
         let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
+
+        if let Some(m) = method.as_deref()
+            && self.try_handle_change_ledger(client_id, id.clone(), m, &msg, publish_channel)
+        {
+            return;
+        }
 
         //
         // Response to an agent request (has id, no method). Try the
@@ -212,6 +223,58 @@ impl AcpServer {
                 }
             }
         }
+    }
+
+    //
+    // Change-ledger methods and config writes are handled by the service
+    // itself rather than forwarded to the node, so every config write made
+    // through Praxis is recorded. Runs in its own task: the ledger awaits
+    // node responses, which arrive on the same dispatch loop that delivered
+    // this message.
+    //
+
+    fn try_handle_change_ledger(
+        &self,
+        client_id: &str,
+        id: Option<Value>,
+        method: &str,
+        msg: &Value,
+        publish_channel: &Channel,
+    ) -> bool {
+        let params = msg.get("params").cloned().unwrap_or_else(|| json!({}));
+        let is_ledger = method.starts_with(EXT_PRAXIS_CHANGES_PREFIX);
+        let is_config_write = method == EXT_PRAXIS_WRITE_FILE
+            && params.get("file_type").and_then(|v| v.as_str()) == Some("Config");
+        if !is_ledger && !is_config_write {
+            return false;
+        }
+
+        let ledger = self.change_ledger.clone();
+        let channel = publish_channel.clone();
+        let client_id = client_id.to_string();
+        let method = method.to_string();
+        tokio::spawn(async move {
+            let reply = if is_config_write {
+                Ok(ledger.handle_legacy_write(&client_id, params).await)
+            } else {
+                ledger.handle_request(&client_id, &method, params).await
+            };
+            let Some(id) = id else {
+                return;
+            };
+            let message = match reply {
+                Ok(v) => acp_response(id, v),
+                Err(e) => acp_error_response(id, -32000, &e.to_string()),
+            };
+            if let Err(e) = send_to_client(&channel, &client_id, message).await {
+                common::log_warn!(
+                    "Failed to send change-ledger response to {}: {}",
+                    common::short_id(&client_id),
+                    e
+                );
+            }
+        });
+        true
     }
 
     //

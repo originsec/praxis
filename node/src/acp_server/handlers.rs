@@ -15,8 +15,8 @@ use serde_json::{Value, json};
 
 use super::NodeAcpServer;
 use super::extensions::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
-    EXT_PRAXIS_WRITE_SESSION_CONTENT,
+    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_SNAPSHOT_FILES,
+    EXT_PRAXIS_WRITE_FILE, EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 use super::sessions::NodeSession;
 use crate::agent_connectors::SessionTransactContext;
@@ -56,7 +56,12 @@ pub async fn handle_initialize(
         "extensions": {
             EXT_PRAXIS_RECON: { "version": 1 },
             EXT_PRAXIS_READ_FILE: { "version": 1 },
-            EXT_PRAXIS_WRITE_FILE: { "version": 1 },
+            //
+            // v2: compare-and-swap (`expected_sha256` / `expect_absent`) and
+            // `delete`, used by the service's change ledger.
+            //
+            EXT_PRAXIS_WRITE_FILE: { "version": 2 },
+            EXT_PRAXIS_SNAPSHOT_FILES: { "version": 1 },
             EXT_PRAXIS_GREP_FILES: { "version": 1 },
             EXT_PRAXIS_WRITE_SESSION_CONTENT: { "version": 1 },
         },

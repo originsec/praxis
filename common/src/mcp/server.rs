@@ -11,7 +11,16 @@ use tokio::sync::Mutex;
 
 use super::client::McpClient;
 use super::params::*;
-use crate::acp_ext::{EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE};
+use crate::acp_ext::{
+    EXT_PRAXIS_CHANGES_APPLY, EXT_PRAXIS_CHANGES_CANCEL, EXT_PRAXIS_CHANGES_GET,
+    EXT_PRAXIS_CHANGES_LIST, EXT_PRAXIS_CHANGES_REVERT, EXT_PRAXIS_CHANGES_REVERT_ALL,
+    EXT_PRAXIS_CHANGES_STATUS, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
+};
+use crate::config_change::{
+    ChangeApplyParams, ChangeKind, ChangeOp, ChangeQuery, ChangeRevertAllParams,
+    ChangeRevertParams, ChangeState, ChangeStatusParams, ConfigFileKind, ConflictPolicy,
+    default_engagement, default_operator,
+};
 use crate::{AgentFileType, ReconResult};
 
 const SERVER_NAME: &str = "praxis";
@@ -118,6 +127,59 @@ macro_rules! resolve_node {
 
 fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
     rmcp::ErrorData::internal_error(e.to_string(), None)
+}
+
+//
+// Sends a change-ledger cancel for `token` if the tool call is dropped
+// (cancelled by the MCP client) before the service answered.
+//
+
+struct CancelOnDrop<C: McpClient + Clone + 'static> {
+    client: Option<C>,
+    token: String,
+}
+
+impl<C: McpClient + Clone + 'static> CancelOnDrop<C> {
+    fn new(client: &C) -> Self {
+        Self {
+            client: Some(client.clone()),
+            token: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    fn disarm(mut self) {
+        self.client = None;
+    }
+}
+
+impl<C: McpClient + Clone + 'static> Drop for CancelOnDrop<C> {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            let token = self.token.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = client
+                        .acp_notification(
+                            "",
+                            EXT_PRAXIS_CHANGES_CANCEL,
+                            json!({ "cancel_token": token }),
+                        )
+                        .await;
+                });
+            }
+        }
+    }
+}
+
+fn parse_choice<T: serde::de::DeserializeOwned>(
+    raw: Option<&str>,
+    what: &str,
+) -> Result<Option<T>, rmcp::ErrorData> {
+    raw.map(|s| {
+        serde_json::from_value(serde_json::Value::String(s.to_lowercase()))
+            .map_err(|_| mcp_err(format!("invalid {} '{}'", what, s)))
+    })
+    .transpose()
 }
 
 fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -827,14 +889,19 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                     "file_type": file_type,
                     "path": params.path,
                     "contents": params.contents,
+                    "agent_short_name": params.agent,
+                    "engagement": params.engagement.or_else(default_engagement),
+                    "note": params.note,
+                    "operator": default_operator("mcp"),
                 }),
             )
             .await
             .map_err(mcp_err)?;
 
         //
-        // Node returns a WriteFileResult shape or an error-only shape on
-        // method-level errors.
+        // Config writes are recorded by the service's change ledger, which
+        // answers in the node's WriteFileResult shape plus `change_id`.
+        // Method-level errors come back as an error-only shape.
         //
 
         if result.get("path").is_none() {
@@ -848,7 +915,201 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "path": result.get("path"),
             "success": result.get("success"),
             "error": result.get("error"),
+            "change_id": result.get("change_id"),
         }))
+    }
+
+    // ── Change Ledger ────────────────────────────────────────────────────
+
+    #[tool(
+        description = "List recorded agent config changes made through Praxis (newest first). Filter by node, agent, engagement, path, state (active/reverted) or kind (apply/revert). Each entry has the change id, operator, engagement, note, before/after SHA-256 and last drift status."
+    )]
+    async fn change_list(
+        &self,
+        Parameters(params): Parameters<ChangeListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = match params.node {
+            Some(prefix) => Some(resolve_node!(client, prefix)),
+            None => None,
+        };
+        let query = ChangeQuery {
+            node_id,
+            agent_short_name: params.agent,
+            engagement: params.engagement,
+            path: params.path,
+            state: parse_choice::<ChangeState>(params.state.as_deref(), "state")?,
+            kind: parse_choice::<ChangeKind>(params.kind.as_deref(), "kind")?,
+            limit: params.limit,
+            ..Default::default()
+        };
+        let result = client
+            .service_request(EXT_PRAXIS_CHANGES_LIST, json!(query))
+            .await
+            .map_err(mcp_err)?;
+        json_result(result)
+    }
+
+    #[tool(
+        description = "Show one recorded config change in full: metadata, structured op, undo steps, before/after content and a unified diff."
+    )]
+    async fn change_get(
+        &self,
+        Parameters(params): Parameters<ChangeIdParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let result = client
+            .service_request(
+                EXT_PRAXIS_CHANGES_GET,
+                json!({ "change_id": params.change_id }),
+            )
+            .await
+            .map_err(mcp_err)?;
+        json_result(result)
+    }
+
+    #[tool(
+        description = "Apply a recorded change to an agent config file on a node. Structured operations edit JSON/JSONC/TOML/YAML in place, preserving the rest of the file: set (key_path + value), merge (object value), remove (key_path), list_append / list_remove (key_path + value). Markdown/text files support append_block (content, wrapped in marker comments carrying the change id) and remove_block (block_id). 'overwrite' replaces the whole file (content). Use dry_run to preview the diff. The before-content is stored so the change can be reverted with change_revert."
+    )]
+    async fn change_apply(
+        &self,
+        Parameters(params): Parameters<ChangeApplyToolParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
+        let op = ChangeOp::from_parts(
+            &params.operation,
+            params.key_path.as_deref(),
+            params.value,
+            params.content.as_deref(),
+            params.block_id.as_deref(),
+        )
+        .map_err(mcp_err)?;
+        let file_kind = match params.file_kind.as_deref() {
+            Some(k) => Some(
+                ConfigFileKind::parse(k)
+                    .ok_or_else(|| mcp_err(format!("unknown file_kind '{}'", k)))?,
+            ),
+            None => None,
+        };
+        let cancel = CancelOnDrop::new(client);
+        let request = ChangeApplyParams {
+            node_id,
+            agent_short_name: params.agent,
+            path: params.path,
+            file_kind,
+            config_type: None,
+            op,
+            engagement: params.engagement.or_else(default_engagement),
+            note: params.note,
+            operator: Some(default_operator("mcp")),
+            dry_run: params.dry_run,
+            cancel_token: Some(cancel.token.clone()),
+        };
+        let result = client
+            .service_request(EXT_PRAXIS_CHANGES_APPLY, json!(request))
+            .await;
+        cancel.disarm();
+        json_result(result.map_err(mcp_err)?)
+    }
+
+    #[tool(
+        description = "Revert one recorded config change. If the file still matches what Praxis wrote, the original content is restored exactly (or the file is removed if it did not exist). If it was modified since, the default ('abort') returns a conflict with a diff of the later modifications; retry with on_conflict='structured' to undo just this change on top of the current content, or 'force' to restore the original and discard later edits. Reverts are recorded in the ledger."
+    )]
+    async fn change_revert(
+        &self,
+        Parameters(params): Parameters<ChangeRevertToolParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let on_conflict =
+            parse_choice::<ConflictPolicy>(params.on_conflict.as_deref(), "on_conflict")?
+                .unwrap_or_default();
+        let cancel = CancelOnDrop::new(client);
+        let request = ChangeRevertParams {
+            change_id: params.change_id,
+            on_conflict,
+            operator: Some(default_operator("mcp")),
+            note: params.note,
+            cancel_token: Some(cancel.token.clone()),
+        };
+        let result = client
+            .service_request(EXT_PRAXIS_CHANGES_REVERT, json!(request))
+            .await;
+        cancel.disarm();
+        json_result(result.map_err(mcp_err)?)
+    }
+
+    #[tool(
+        description = "Revert every active config change for a node, an agent, an engagement label, or an explicit list of change ids, newest first so stacked edits unwind in order. Conflicting changes follow on_conflict (default 'abort': skipped and reported). Pass all=true to revert every active change when no filter is given."
+    )]
+    async fn change_revert_all(
+        &self,
+        Parameters(params): Parameters<ChangeRevertAllToolParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = match params.node {
+            Some(prefix) => Some(resolve_node!(client, prefix)),
+            None => None,
+        };
+        let on_conflict =
+            parse_choice::<ConflictPolicy>(params.on_conflict.as_deref(), "on_conflict")?
+                .unwrap_or_default();
+        let cancel = CancelOnDrop::new(client);
+        let request = ChangeRevertAllParams {
+            query: ChangeQuery {
+                node_id,
+                agent_short_name: params.agent,
+                engagement: params.engagement,
+                change_ids: params.change_ids.unwrap_or_default(),
+                ..Default::default()
+            },
+            all: params.all,
+            on_conflict,
+            operator: Some(default_operator("mcp")),
+            note: params.note,
+            cancel_token: Some(cancel.token.clone()),
+        };
+        let result = client
+            .service_request(EXT_PRAXIS_CHANGES_REVERT_ALL, json!(request))
+            .await;
+        cancel.disarm();
+        json_result(result.map_err(mcp_err)?)
+    }
+
+    #[tool(
+        description = "Drift check for active config changes: reads each file on its node and reports in_sync (still what Praxis wrote), superseded (changed again by a later Praxis change), modified (changed by something else), missing (file removed) or unreachable (node offline / read failed)."
+    )]
+    async fn change_status(
+        &self,
+        Parameters(params): Parameters<ChangeStatusToolParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = match params.node {
+            Some(prefix) => Some(resolve_node!(client, prefix)),
+            None => None,
+        };
+        let cancel = CancelOnDrop::new(client);
+        let request = ChangeStatusParams {
+            query: ChangeQuery {
+                node_id,
+                agent_short_name: params.agent,
+                engagement: params.engagement,
+                change_ids: params.change_id.into_iter().collect(),
+                ..Default::default()
+            },
+            cancel_token: Some(cancel.token.clone()),
+        };
+        let result = client
+            .service_request(EXT_PRAXIS_CHANGES_STATUS, json!(request))
+            .await;
+        cancel.disarm();
+        json_result(result.map_err(mcp_err)?)
     }
 
     // ── Traffic ──────────────────────────────────────────────────────────

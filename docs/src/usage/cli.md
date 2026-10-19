@@ -84,11 +84,31 @@ node reset <prefix>                # Reset a node
 agent list --node <prefix>                   # List agents on a node
 agent update --node <prefix>                 # Request agent info update
 agent config read --node <prefix> --agent <name> <path>     # Read config file
-agent config write --node <prefix> <path> <contents>        # Write config file (agent-independent)
+agent config write --node <prefix> <path> <contents> [--agent <name>] [--engagement <label>] [--note <text>]
+                                             # Write config file (recorded in the change ledger)
 agent config grep --node <prefix> --agent <name> <path> <pattern>  # Grep config file
 agent session read --node <prefix> --agent <name> <file>    # Read session file
 agent session grep --node <prefix> --agent <name> <file> <pattern> # Grep session file
 ```
+
+**Change Ledger** (see [Change Ledger](./changes.md)):
+```bash
+change list [--node <prefix>] [--agent <name>] [--engagement <label>] [--state active|reverted] [--kind apply|revert] [--path <path>] [--json]
+change show <id> [--json]                    # Full record + before/after diff
+change apply --node <prefix> --path <path> --op <operation> [--key <json-pointer>] [--value <json>]
+             [--content <text> | --content-file <file>] [--block-id <id>] [--file-kind <kind>]
+             [--agent <name>] [--engagement <label>] [--note <text>] [--dry-run]
+change revert <id> [--on-conflict abort|structured|force] [--note <text>]
+change revert-all [--node <prefix>] [--agent <name>] [--engagement <label>] [--id <id>]... [--all]
+                  [--on-conflict abort|structured|force] [--note <text>]
+change status [--node <prefix>] [--agent <name>] [--engagement <label>] [--id <id>]
+```
+
+`--engagement` on `change apply` and `agent config write` defaults to
+`$PRAXIS_ENGAGEMENT`. Change ids accept unique prefixes (the 8-character short
+ids shown in listings). Ctrl+C during `apply`, `revert`, `revert-all` or
+`status` cancels the request on the service as well. `change revert` and
+`change revert-all` exit non-zero when any change could not be reverted.
 
 **Session Management:**
 ```bash

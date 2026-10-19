@@ -156,6 +156,7 @@ pub enum RowSelectKind {
     OpsLibrary,
     OpsExecutions,
     OpsTriggers,
+    OpsChanges,
     LogQueryResults,
 }
 
@@ -173,6 +174,10 @@ pub enum OpsHintAction {
     NewTrigger,
     EditTrigger,
     DeleteTrigger,
+    RevertChange,
+    RevertVisibleChanges,
+    RefreshChanges,
+    CancelChangeOp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

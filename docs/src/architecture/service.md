@@ -53,6 +53,17 @@ using `AcpNodeProxy::request` / `request_collecting_text`. Internal
 callers get a `svc_*` pseudo-client-id so their responses are completed
 in-process instead of being delivered to any external client queue.
 
+Two kinds of client frames are answered by the service instead of being
+forwarded: `_praxis/write_file` requests for `Config` files and the
+`_praxis/changes/*` methods. Both go to the **change ledger**
+(`service/src/change_ledger/`), which snapshots the target file on the node
+(`_praxis/snapshot_files`), computes the new content (raw overwrite or a
+format-preserving structured edit), writes it back with a compare-and-swap
+on the before-hash and records the change in the `config_changes` table.
+Ledger requests run in their own task because they await node responses
+that arrive on the same dispatch loop. See
+[Change Ledger](../usage/changes.md).
+
 ## Node Tracking
 
 The service maintains state for all connected nodes:

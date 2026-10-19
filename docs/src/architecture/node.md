@@ -267,6 +267,11 @@ advertised in `InitializeResponse._meta.extensions`:
   when `is_semantic` is true), `sessions` (enumerated agent sessions).
 - `_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files` —
   agent-scoped file ops used by recon tooling and the orchestrator.
+  `_praxis/write_file` supports a compare-and-swap on the current SHA-256 and
+  file deletion for the service's [change ledger](../usage/changes.md).
+- `_praxis/snapshot_files` — untruncated read (existence, SHA-256, content)
+  of one or more files, used by the change ledger to record before-content
+  and check drift.
 - `_praxis/write_session_content` — writes agent-session content through
   the connector's `write_session_content` hook so agents with virtual
   session stores can intercept the write.

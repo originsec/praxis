@@ -29,6 +29,15 @@ pub trait McpClient: Send + Sync {
     async fn acp_request(&self, node_id: &str, method: &str, params: Value) -> Result<Value>;
 
     //
+    // Send an ACP request handled by the service itself rather than a node
+    // (no node id is attached), e.g. the change-ledger methods.
+    //
+
+    async fn service_request(&self, method: &str, params: Value) -> Result<Value> {
+        self.acp_request("", method, params).await
+    }
+
+    //
     // Like `acp_request` but additionally buffers any `session/update`
     // notifications (where `update.sessionUpdate == "agent_message_chunk"`)
     // that arrive for the session while the request is in flight, and

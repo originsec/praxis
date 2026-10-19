@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 // Build an ACP request envelope with the target node id injected into
 // `params._meta.praxis.nodeId` so the service-side AcpNodeProxy knows how
 // to route it. Any `_meta.praxis.nodeId` already present in `params` is
-// preserved.
+// preserved. An empty node id marks a service-scoped request (e.g. the
+// `_praxis/changes/*` ledger methods) and injects nothing.
 //
 
 pub fn build_request_frame(
@@ -34,6 +35,9 @@ pub fn build_notification_frame(node_id: &str, method: &str, mut params: Value) 
 fn inject_node_id(params: &mut Value, node_id: &str) {
     if !params.is_object() {
         *params = json!({});
+    }
+    if node_id.is_empty() {
+        return;
     }
     let obj = params.as_object_mut().unwrap();
     let meta = obj.entry("_meta").or_insert_with(|| json!({}));

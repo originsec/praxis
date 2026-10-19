@@ -59,6 +59,110 @@ pub fn canonicalize_and_validate_path(path: &str) -> Result<PathBuf, String> {
     Ok(canonical_path)
 }
 
+//
+// Validate a path that is about to be written, snapshotted or deleted. The
+// file itself may not exist yet, in which case its parent directory must
+// resolve inside a valid user home.
+//
+
+pub fn validate_write_path(path: &str) -> Result<(), String> {
+    let target_path = Path::new(path);
+    let canonical_path = match target_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => match target_path.parent().and_then(|p| p.canonicalize().ok()) {
+            Some(parent) if is_path_in_valid_home(&parent) => return Ok(()),
+            _ => return Err("Invalid path or path outside home directory".to_string()),
+        },
+    };
+    if !is_path_in_valid_home(&canonical_path) {
+        return Err("Path must be within a valid user home directory".to_string());
+    }
+    Ok(())
+}
+
+//
+// Largest file the change ledger will snapshot. Config files are tiny; the
+// cap keeps before/after content (both stored by the service) well inside
+// the RabbitMQ message limit.
+//
+
+pub const MAX_SNAPSHOT_SIZE: u64 = 4 * 1024 * 1024;
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct FileSnapshot {
+    pub path: String,
+    pub exists: bool,
+    pub sha256: Option<String>,
+    pub content: Option<String>,
+    pub error: Option<String>,
+}
+
+//
+// Read a file in full for the change ledger. A missing file is a valid
+// snapshot (exists = false); unreadable, oversized or non-UTF-8 files are
+// reported as errors because the ledger could not restore them faithfully.
+//
+
+pub fn snapshot_file(path: &str) -> FileSnapshot {
+    let err = |e: String| FileSnapshot {
+        path: path.to_string(),
+        exists: false,
+        sha256: None,
+        content: None,
+        error: Some(e),
+    };
+    if let Err(e) = validate_write_path(path) {
+        return err(e);
+    }
+    let bytes = match std::fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return FileSnapshot {
+                path: path.to_string(),
+                exists: false,
+                sha256: None,
+                content: None,
+                error: None,
+            };
+        }
+        Err(e) => return err(format!("Failed to stat file: {}", e)),
+        Ok(m) if m.is_dir() => return err("Path is a directory".to_string()),
+        Ok(m) if m.len() > MAX_SNAPSHOT_SIZE => {
+            return err(format!(
+                "File is {} bytes; the change ledger handles files up to {} bytes",
+                m.len(),
+                MAX_SNAPSHOT_SIZE
+            ));
+        }
+        Ok(_) => match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => return err(format!("Failed to read file: {}", e)),
+        },
+    };
+    let sha256 = common::config_change::sha256_hex(&bytes);
+    match String::from_utf8(bytes) {
+        Ok(content) => FileSnapshot {
+            path: path.to_string(),
+            exists: true,
+            sha256: Some(sha256),
+            content: Some(content),
+            error: None,
+        },
+        Err(_) => err("File is not valid UTF-8 text".to_string()),
+    }
+}
+
+//
+// Current SHA-256 of a file, None if it does not exist.
+//
+
+pub fn current_sha256(path: &str) -> std::io::Result<Option<String>> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(Some(common::config_change::sha256_hex(&b))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn validate_line_range(
     line_start: Option<usize>,
     line_end: Option<usize>,
@@ -177,5 +281,41 @@ pub fn grep_single_config_file(path: &str, re: &Regex) -> GrepFileEntry {
             matches: Vec::new(),
             error: Some(format!("Failed to read: {}", e)),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    //
+    // Paths outside every user home are refused before any read, for both
+    // existing and not-yet-existing files.
+    //
+
+    #[test]
+    fn snapshot_refuses_paths_outside_home() {
+        for path in ["/etc/hostname", "/nonexistent-dir/praxis.json"] {
+            let snap = snapshot_file(path);
+            assert!(!snap.exists);
+            assert!(snap.content.is_none());
+            assert!(snap.error.is_some(), "{} should be rejected", path);
+        }
+        assert!(validate_write_path("/etc/praxis-test.json").is_err());
+    }
+
+    #[test]
+    fn current_sha256_reports_missing_and_existing() {
+        let dir = std::env::temp_dir().join(format!("praxis_file_ops_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.txt");
+        let path = file.to_string_lossy().into_owned();
+        assert_eq!(current_sha256(&path).unwrap(), None);
+        std::fs::write(&file, "abc").unwrap();
+        assert_eq!(
+            current_sha256(&path).unwrap().as_deref(),
+            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

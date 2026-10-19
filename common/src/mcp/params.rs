@@ -74,6 +74,159 @@ pub struct WriteFileParams {
     pub file_type: McpFileType,
     pub path: String,
     pub contents: String,
+
+    #[schemars(
+        description = "Agent short name the config belongs to (recorded in the change ledger; inferred from recon when omitted)"
+    )]
+    pub agent: Option<String>,
+
+    #[schemars(description = "Engagement label recorded in the change ledger")]
+    pub engagement: Option<String>,
+
+    #[schemars(description = "Reason / note recorded in the change ledger")]
+    pub note: Option<String>,
+}
+
+//
+// Change ledger tools.
+//
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeListParams {
+    #[schemars(description = "Node ID prefix to filter by")]
+    pub node: Option<String>,
+
+    #[schemars(description = "Agent short name to filter by")]
+    pub agent: Option<String>,
+
+    #[schemars(description = "Engagement label to filter by")]
+    pub engagement: Option<String>,
+
+    #[schemars(description = "Exact config file path to filter by")]
+    pub path: Option<String>,
+
+    #[schemars(description = "'active' (not yet reverted) or 'reverted'")]
+    pub state: Option<String>,
+
+    #[schemars(description = "'apply' (changes) or 'revert' (rollback records)")]
+    pub kind: Option<String>,
+
+    #[schemars(description = "Maximum number of entries (default 500)")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeIdParams {
+    #[schemars(description = "Change ID or unique prefix (from change_list)")]
+    pub change_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeApplyToolParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(
+        description = "Agent short name the config belongs to (inferred from recon when omitted)"
+    )]
+    pub agent: Option<String>,
+
+    #[schemars(description = "Absolute path of the config file on the node")]
+    pub path: String,
+
+    #[schemars(
+        description = "One of: overwrite, set, merge, remove, list_append, list_remove (JSON/JSONC/TOML/YAML); append_block, remove_block (markdown/text)"
+    )]
+    pub operation: String,
+
+    #[schemars(
+        description = "JSON Pointer key path for set/merge/remove/list_* (e.g. '/mcpServers/name', '/env/VAR', '/permissions/allow')"
+    )]
+    pub key_path: Option<String>,
+
+    #[schemars(
+        description = "JSON value for set/merge/list_append/list_remove (merge needs an object)"
+    )]
+    pub value: Option<serde_json::Value>,
+
+    #[schemars(description = "Full file content for overwrite, or block body for append_block")]
+    pub content: Option<String>,
+
+    #[schemars(description = "Change ID whose marker block to remove (remove_block)")]
+    pub block_id: Option<String>,
+
+    #[schemars(
+        description = "Override the file format: json, jsonc, toml, yaml, markdown, text (default: from extension)"
+    )]
+    pub file_kind: Option<String>,
+
+    #[schemars(description = "Engagement label recorded with the change")]
+    pub engagement: Option<String>,
+
+    #[schemars(description = "Reason / note recorded with the change")]
+    pub note: Option<String>,
+
+    #[schemars(description = "Compute and return the diff without writing anything")]
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeRevertToolParams {
+    #[schemars(description = "Change ID or unique prefix (from change_list)")]
+    pub change_id: String,
+
+    #[schemars(
+        description = "If the file changed since: 'abort' (default; return a conflict with a diff), 'structured' (undo just this change on top of the current content), 'force' (restore the original content, discarding later edits)"
+    )]
+    pub on_conflict: Option<String>,
+
+    #[schemars(description = "Reason / note recorded with the revert")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeRevertAllToolParams {
+    #[schemars(description = "Node ID prefix: revert every active change on this node")]
+    pub node: Option<String>,
+
+    #[schemars(description = "Agent short name: revert every active change for this agent")]
+    pub agent: Option<String>,
+
+    #[schemars(description = "Engagement label: revert every active change in this engagement")]
+    pub engagement: Option<String>,
+
+    #[schemars(description = "Explicit change IDs to revert")]
+    pub change_ids: Option<Vec<String>>,
+
+    #[schemars(
+        description = "Required to revert every active change when no other filter is given"
+    )]
+    #[serde(default)]
+    pub all: bool,
+
+    #[schemars(
+        description = "Conflict policy: 'abort' (default, skip and report), 'structured', 'force'"
+    )]
+    pub on_conflict: Option<String>,
+
+    #[schemars(description = "Reason / note recorded with each revert")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeStatusToolParams {
+    #[schemars(description = "Node ID prefix to filter by")]
+    pub node: Option<String>,
+
+    #[schemars(description = "Agent short name to filter by")]
+    pub agent: Option<String>,
+
+    #[schemars(description = "Engagement label to filter by")]
+    pub engagement: Option<String>,
+
+    #[schemars(description = "Check a single change (ID or unique prefix)")]
+    pub change_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

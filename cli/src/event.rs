@@ -41,6 +41,10 @@ pub enum AppEvent {
         triggers: Vec<ChainTriggerInfo>,
         intercept_rules: Vec<InterceptRule>,
     },
+    //
+    // Change-ledger responses for the Operations > Changes tab.
+    //
+    Changes(crate::app::ChangesEvent),
     SessionResponse(SessionResult),
     TerminalCreated {
         node_id: String,

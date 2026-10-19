@@ -88,7 +88,10 @@ seconds. Cached recon data appears instantly on re-open.
 
 Press `Ctrl+E` on a Config leaf to open the selected file in
 `$VISUAL`/`$EDITOR`; on a clean exit with changes, the new contents are
-written back to the node and the detail pane refreshes.
+written back to the node and the detail pane refreshes. The write is
+recorded in the [change ledger](./changes.md) (tagged with the engagement
+label set on the **Operations → Changes** tab) and the status line shows the
+recorded change id.
 
 ## Intercept (`Ctrl+T`)
 
@@ -212,13 +215,14 @@ Response bodies in `TrafficLogs` and JSON columns like
 
 ## Operations (`Ctrl+P`)
 
-Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
+Operation and chain management with four tabs (`Tab` / `Shift+Tab` to switch):
 
 - **Executions** — live tracking of running/queued/completed operations and chains
   with duration timers. Operation result previews stay on one line and truncate
   without splitting Unicode characters.
 - **Library** — browse operation and chain definitions with search filtering and detail view
 - **Triggers** — automated chain firing rules
+- **Changes** — the agent config [change ledger](./changes.md): review, drift-check and revert config writes
 
 Common actions:
 - Create new operations inline (`Ctrl+N` on the Library tab)
@@ -259,6 +263,35 @@ Triggers fire a chain on a schedule, when an intercept rule matches, or when a n
 | `Ctrl+D` | Delete selected trigger |
 
 In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/→` cycle picker options, `Space`/`Enter` toggle checkboxes and list items, `Ctrl+S` saves, and `Esc` cancels. The form is fully mouse-driven: click a row to focus/toggle it, click `Ctrl+S`/`Esc` in the hint bar to save or cancel.
+
+### Changes tab
+
+Every config write made through Praxis, newest first, with a status column
+(`in sync`, `superseded`, `modified`, `missing`, `unreachable`, `reverted`,
+`revert`). The detail pane shows who changed what (operator, agent,
+engagement, note, before/after SHA-256) and a coloured before → after diff.
+The filter row shows the status filter, the engagement label applied to new
+TUI writes, and the progress or result of the last ledger operation. The
+tab's count is the number of active (not yet reverted) changes.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select change (scroll the detail pane when it has focus) |
+| `→` / `Enter` | Focus the detail pane (`PgUp` / `PgDn` scroll) |
+| `/` | Free-text filter over node, agent, engagement, path, operation, operator, note |
+| `s` | Cycle status filter: all → active → drifted → reverted |
+| `r` | Reload the ledger and run a drift check on every active change |
+| `e` | Set the engagement label for writes made from the TUI (`Enter` saves, empty clears; defaults to `$PRAXIS_ENGAGEMENT`) |
+| `Ctrl+Z` | Revert the selected change (with confirmation) |
+| `Ctrl+X` | Revert every active change currently in view, newest first (with confirmation; conflicting files are skipped and reported) |
+| `Ctrl+C` | Cancel the running revert / drift check |
+
+If a single revert finds that the file was modified after Praxis wrote it,
+nothing is written. The detail pane shows the conflict and a diff of the
+later modifications, and you choose: `u` undoes only this change on top of
+the current content (structured and marker-block changes), `f` force-restores
+the original content (discarding the later edits), or `Esc` leaves the file
+as it is.
 
 ## Settings (`Ctrl+S`)
 
@@ -324,7 +357,7 @@ The TUI uses a consistent two-layer grammar:
 | Layer | Keys | Use |
 |-------|------|-----|
 | **Navigate / view** | bare keys, arrows, `Tab`, `/`, `Enter`, `Esc` | Move around lists, filter, soft toggles (pause, body mode, expand) |
-| **Change data / app** | always **Ctrl+** | Create (`^n`), edit (`^e`), delete (`^d`), run (`^r`), save (`^s`), clear-all (`^x`), windows, quit |
+| **Change data / app** | always **Ctrl+** | Create (`^n`), edit (`^e`), delete (`^d`), run (`^r`), save (`^s`), clear-all (`^x`), revert (`^z`), windows, quit |
 
 Further conventions:
 

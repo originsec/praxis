@@ -1222,6 +1222,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn advertises_change_ledger_tools() {
+        let server = PraxisServer::<ServiceMcpClient>::new(|| async {
+            Err(anyhow!("client factory should not run while listing tools"))
+        });
+
+        for name in [
+            "change_list",
+            "change_get",
+            "change_apply",
+            "change_revert",
+            "change_revert_all",
+            "change_status",
+        ] {
+            assert!(server.get_tool(name).is_some(), "missing MCP tool {name}");
+        }
+    }
+
     #[tokio::test]
     async fn trigger_created_response_completes_pending_request() {
         let state = Arc::new(Mutex::new(ClientState {

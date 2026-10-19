@@ -295,3 +295,36 @@ CREATE TABLE IF NOT EXISTS toolkit_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_execution ON toolkit_actions(execution_id);
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_created_at ON toolkit_actions(created_at DESC);
+
+-- Agent configuration change ledger (writes made through Praxis + reverts)
+CREATE TABLE IF NOT EXISTS config_changes (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    agent_short_name TEXT,
+    path TEXT NOT NULL,
+    file_kind TEXT NOT NULL,
+    config_type TEXT,
+    op_json TEXT,
+    summary TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    engagement TEXT,
+    note TEXT,
+    before_exists INTEGER NOT NULL,
+    before_sha256 TEXT,
+    before_content TEXT,
+    after_exists INTEGER NOT NULL,
+    after_sha256 TEXT,
+    after_content TEXT,
+    undo_json TEXT,
+    reverts_change_id TEXT,
+    reverted_by TEXT,
+    reverted_at TEXT,
+    drift_status TEXT,
+    drift_checked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_config_changes_created_at ON config_changes(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_config_changes_node ON config_changes(node_id, path);
+CREATE INDEX IF NOT EXISTS idx_config_changes_engagement ON config_changes(engagement);

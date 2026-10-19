@@ -124,6 +124,7 @@ The schema is created automatically. Key tables:
 | `operation_chains` | Chain workflow definitions |
 | `chain_executions` | Chain execution history |
 | `recon_results` | Agent reconnaissance data |
+| `config_changes` | [Change ledger](../usage/changes.md): config writes made through Praxis with before/after content, and their reverts |
 | `event_log` | Centralized logging |
 | `service_config` | Key-value configuration |
 | `lua_agent_scripts` | Lua agent connector scripts |

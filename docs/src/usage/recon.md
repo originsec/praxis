@@ -115,7 +115,19 @@ controls.
 
 This is useful for exploring the offensive impact of configuration changes - adding MCP servers, modifying permissions, changing model settings, or injecting tool configurations.
 
-**Caution**: Editing configs can break the agent if done incorrectly. The changes persist until the user or agent modifies them again.
+Every save is recorded in the [change ledger](./changes.md): the service
+snapshots the file first, stores its full original content, writes the new
+content only if the file has not changed in the meantime, and records the
+operator, agent, engagement label (set on the **Operations → Changes** tab,
+or `$PRAXIS_ENGAGEMENT`) and before/after SHA-256. The status line shows the
+recorded change id. Use the Changes tab, `praxis change revert`, or the MCP
+`change_revert` tool to restore the original. For targeted edits that leave
+the rest of the file untouched (adding an MCP server, an env var, a
+permission rule, a marker block in an instructions file), use structured
+changes (`praxis change apply` / MCP `change_apply`) instead of rewriting the
+whole file.
+
+**Caution**: Editing configs can break the agent if done incorrectly. The changes persist until the user or agent modifies them again, or until they are reverted from the change ledger.
 
 ### View Session History
 

@@ -4,6 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod agent_chat;
 mod banner;
+mod change_ledger;
 mod claude_bridge;
 mod config;
 mod conversions;
@@ -397,10 +398,18 @@ async fn run_main_loop() -> Result<()> {
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
     let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
+    let change_ledger = change_ledger::ChangeLedger::new(
+        database.clone(),
+        Arc::new(change_ledger::node_files::ProxyNodeFiles::new(
+            acp_node_proxy.clone(),
+            publish_channel.clone(),
+        )),
+    );
     let acp_server = Arc::new(acp_server::AcpServer::new(
         orchestrator_manager.clone(),
         service_config.clone(),
         acp_node_proxy.clone(),
+        change_ledger,
     ));
     let remote_node_manager = Arc::new(remote_nodes::RemoteNodeManager::new());
     acp_node_proxy.set_remote_node_manager(remote_node_manager.clone());

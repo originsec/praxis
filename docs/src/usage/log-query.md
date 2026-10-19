@@ -16,6 +16,33 @@ Discovered agents across all nodes (in-memory).
 | agent_name | Agent display name |
 | version | Agent version (if known) |
 
+### ConfigChangeLogs
+
+The agent configuration [change ledger](./changes.md): one row per config write made through Praxis (`kind` = `apply`) and per rollback (`kind` = `revert`). File content is not exposed here; use `praxis change show` or the MCP `change_get` tool for before/after content and diffs.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the change (or revert) was made |
+| change_id | Change identifier |
+| node_id | Node the file lives on |
+| agent_short_name | Agent the config belongs to (may be null) |
+| path | Config file path on the node |
+| file_kind | File format: json, jsonc, toml, yaml, markdown, text |
+| config_type | Config category from recon (e.g. settings, instructions; may be null) |
+| kind | `apply` or `revert` |
+| summary | Operation summary, e.g. `set /env/FOO` or `revert 1a2b3c4d (exact)` |
+| operator | Who made the change (e.g. `alice@tui`, `bob@mcp`) |
+| engagement | Engagement label (may be null) |
+| note | Reason / note (may be null) |
+| state | `active` (not reverted) or `reverted` |
+| before_exists | 1 if the file existed before the change, 0 if Praxis created it |
+| before_sha256 | SHA-256 of the file before the change |
+| after_sha256 | SHA-256 of the file after the change |
+| reverts_change_id | For revert rows: the change that was undone |
+| reverted_by | For reverted changes: the revert row that undid it |
+| reverted_at | When the change was reverted |
+| drift_status | Result of the last drift check: in_sync, superseded, modified, missing, unreachable |
+
 ### EventLogs
 
 Centralized application log entries from service and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
@@ -263,13 +290,19 @@ SemanticOperationChainLogs | project timestamp, chain_name, status, outputs | ta
 
 // Find completed chains with their outputs
 SemanticOperationChainLogs | where status == "Completed" | project timestamp, chain_name, outputs
+
+// Config changes still in place for an engagement
+ConfigChangeLogs | where engagement == "acme-2026q4" and state == "active" and kind == "apply" | project timestamp, node_id, path, summary, drift_status
+
+// Who changed what, per operator
+ConfigChangeLogs | where kind == "apply" | summarize count() by operator
 ```
 
 ## Query Execution
 
 ### SQL Pushdown
 
-Tables backed by the database (EventLogs, TrafficLogs, TrafficMatchLogs, SemanticOperationLogs, SemanticOperationChainLogs) benefit from automatic SQL pushdown. When the executor encounters leading `where` and `take`/`limit` operators in a query pipeline, it translates KQL expressions directly into SQL WHERE clauses with parameterized queries. This means the database handles filtering before rows are loaded into memory, enabling efficient queries over large datasets.
+Tables backed by the database (ConfigChangeLogs, EventLogs, TrafficLogs, TrafficMatchLogs, SemanticOperationLogs, SemanticOperationChainLogs) benefit from automatic SQL pushdown. When the executor encounters leading `where` and `take`/`limit` operators in a query pipeline, it translates KQL expressions directly into SQL WHERE clauses with parameterized queries. This means the database handles filtering before rows are loaded into memory, enabling efficient queries over large datasets.
 
 The following KQL constructs are translated to SQL:
 

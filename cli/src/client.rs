@@ -1362,6 +1362,19 @@ impl Client {
     }
 
     //
+    // ACP request handled by the service itself (no node id attached),
+    // e.g. the `_praxis/changes/*` change-ledger methods.
+    //
+
+    pub async fn service_request(&self, method: &str, params: Value) -> Result<Value> {
+        self.acp_request("", method, params).await
+    }
+
+    pub async fn service_notification(&self, method: &str, params: Value) -> Result<()> {
+        self.acp_notification("", method, params).await
+    }
+
+    //
     // Same as `acp_request` but additionally buffers any streamed
     // `agent_message_chunk` text that arrives while the request is in
     // flight, returning it alongside the response result.

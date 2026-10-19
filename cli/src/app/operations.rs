@@ -148,34 +148,62 @@ impl App {
         });
     }
 
+    //
+    // Switch Operations tab, clearing the filter and refreshing the data
+    // the new tab shows.
+    //
+
+    pub(crate) fn set_ops_tab(&mut self, tab: OpsTab) {
+        if tab == self.operations.tab {
+            return;
+        }
+        self.operations.tab = tab;
+        self.operations.filter.clear();
+        self.operations.detail_focus = false;
+        match tab {
+            OpsTab::Triggers => self.refresh_triggers_after(Duration::ZERO),
+            OpsTab::Changes => self.refresh_changes(false),
+            _ => {}
+        }
+    }
+
     pub(crate) async fn handle_operations_key(&mut self, key: KeyEvent) {
+        if self.operations.tab == OpsTab::Changes {
+            if self.handle_changes_key(key) {
+                return;
+            }
+            let filter_before = self.operations.filter.clone();
+            self.handle_operations_key_generic(key).await;
+            if self.operations.tab == OpsTab::Changes && self.operations.filter != filter_before {
+                self.changes_filter_changed();
+            }
+            return;
+        }
+        self.handle_operations_key_generic(key).await;
+    }
+
+    async fn handle_operations_key_generic(&mut self, key: KeyEvent) {
         //
         // Tab switches tabs regardless of pane focus — the user should
         // always be able to jump from Library to Executions without
         // first escaping the detail pane.
         //
         if key.code == KeyCode::Tab {
-            self.operations.tab = match self.operations.tab {
+            self.set_ops_tab(match self.operations.tab {
                 OpsTab::Executions => OpsTab::Library,
                 OpsTab::Library => OpsTab::Triggers,
-                OpsTab::Triggers => OpsTab::Executions,
-            };
-            self.operations.filter.clear();
-            if self.operations.tab == OpsTab::Triggers {
-                self.refresh_triggers_after(Duration::ZERO);
-            }
+                OpsTab::Triggers => OpsTab::Changes,
+                OpsTab::Changes => OpsTab::Executions,
+            });
             return;
         }
         if key.code == KeyCode::BackTab {
-            self.operations.tab = match self.operations.tab {
-                OpsTab::Executions => OpsTab::Triggers,
+            self.set_ops_tab(match self.operations.tab {
+                OpsTab::Executions => OpsTab::Changes,
                 OpsTab::Library => OpsTab::Executions,
                 OpsTab::Triggers => OpsTab::Library,
-            };
-            self.operations.filter.clear();
-            if self.operations.tab == OpsTab::Triggers {
-                self.refresh_triggers_after(Duration::ZERO);
-            }
+                OpsTab::Changes => OpsTab::Triggers,
+            });
             return;
         }
 
@@ -234,6 +262,7 @@ impl App {
                         self.operations.trigger_selected -= 1;
                     }
                 }
+                OpsTab::Changes => self.changes_move(false),
             },
             KeyCode::Down => match self.operations.tab {
                 OpsTab::Library => {
@@ -255,6 +284,7 @@ impl App {
                         self.operations.trigger_selected += 1;
                     }
                 }
+                OpsTab::Changes => self.changes_move(true),
             },
             KeyCode::Right => {
                 self.operations.detail_focus = true;
@@ -269,7 +299,7 @@ impl App {
                 // (^r runs the op/chain from Library). On the Triggers
                 // tab Enter keeps its original toggle-enabled meaning.
                 //
-                OpsTab::Library | OpsTab::Executions => {
+                OpsTab::Library | OpsTab::Executions | OpsTab::Changes => {
                     self.operations.detail_focus = true;
                     self.operations.detail_scroll = 0;
                 }
@@ -323,6 +353,7 @@ impl App {
                     OpsTab::Library => self.delete_selected_library_row().await,
                     OpsTab::Executions => self.delete_selected_execution().await,
                     OpsTab::Triggers => self.delete_selected_trigger().await,
+                    OpsTab::Changes => {}
                 }
             }
             KeyCode::Char('c')

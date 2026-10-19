@@ -49,6 +49,117 @@ pub struct SqlTableConfig {
 impl VirtualTable {
     pub fn sql_config(&self) -> Option<SqlTableConfig> {
         match self {
+            VirtualTable::ConfigChangeLogs => Some(SqlTableConfig {
+                from_clause: "config_changes",
+                columns: vec![
+                    SqlColumn {
+                        kql_name: "timestamp",
+                        sql_expr: "created_at",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "change_id",
+                        sql_expr: "id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "node_id",
+                        sql_expr: "node_id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "agent_short_name",
+                        sql_expr: "agent_short_name",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "path",
+                        sql_expr: "path",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "file_kind",
+                        sql_expr: "file_kind",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "config_type",
+                        sql_expr: "config_type",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "kind",
+                        sql_expr: "kind",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "summary",
+                        sql_expr: "summary",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "operator",
+                        sql_expr: "operator",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "engagement",
+                        sql_expr: "engagement",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "note",
+                        sql_expr: "note",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "state",
+                        sql_expr: "state",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "before_exists",
+                        //
+                        // SMALLINT on PostgreSQL; widen so the i64 decoder
+                        // reads it on both backends.
+                        //
+                        sql_expr: "CAST(before_exists AS BIGINT)",
+                        col_type: SqlColumnType::Integer,
+                    },
+                    SqlColumn {
+                        kql_name: "before_sha256",
+                        sql_expr: "before_sha256",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "after_sha256",
+                        sql_expr: "after_sha256",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "reverts_change_id",
+                        sql_expr: "reverts_change_id",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "reverted_by",
+                        sql_expr: "reverted_by",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "reverted_at",
+                        sql_expr: "reverted_at",
+                        col_type: SqlColumnType::Text,
+                    },
+                    SqlColumn {
+                        kql_name: "drift_status",
+                        sql_expr: "drift_status",
+                        col_type: SqlColumnType::Text,
+                    },
+                ],
+                order_by: "created_at DESC",
+            }),
+
             VirtualTable::EventLogs => Some(SqlTableConfig {
                 from_clause: "event_log",
                 columns: vec![

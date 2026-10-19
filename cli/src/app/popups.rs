@@ -40,8 +40,10 @@ pub enum ConfirmKind {
         enable: bool,
         method: Option<common::InterceptMethod>,
     },
-    DeleteTrigger(String), // trigger_id
-    DeleteChain(String),   // chain_id
+    DeleteTrigger(String),      // trigger_id
+    DeleteChain(String),        // chain_id
+    RevertChange(String),       // change_id
+    RevertChanges(Vec<String>), // change_ids, reverted newest first
     DiscardChainForm,
     Info,
 }
@@ -295,6 +297,12 @@ impl App {
                     self.operations.trigger_selected = total - 1;
                 }
                 self.refresh_triggers_after(Duration::from_millis(200));
+            }
+            ConfirmKind::RevertChange(change_id) => {
+                self.start_change_revert(change_id, common::config_change::ConflictPolicy::Abort);
+            }
+            ConfirmKind::RevertChanges(ids) => {
+                self.start_change_revert_all(ids);
             }
             ConfirmKind::Info => {}
         }

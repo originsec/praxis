@@ -6,6 +6,7 @@ use crate::state::NodeRegistry;
 
 #[derive(Debug, Clone, Copy)]
 pub enum VirtualTable {
+    ConfigChangeLogs,
     TrafficLogs,
     TrafficMatchLogs,
     NodeLogs,
@@ -23,6 +24,7 @@ impl VirtualTable {
     /// Canonical table name, matching `common::log_query_schema::TABLES`.
     pub fn name(&self) -> &'static str {
         match self {
+            VirtualTable::ConfigChangeLogs => "ConfigChangeLogs",
             VirtualTable::TrafficLogs => "TrafficLogs",
             VirtualTable::TrafficMatchLogs => "TrafficMatchLogs",
             VirtualTable::NodeLogs => "NodeLogs",
@@ -39,6 +41,7 @@ impl VirtualTable {
 }
 
 pub const ALL_TABLES: &[VirtualTable] = &[
+    VirtualTable::ConfigChangeLogs,
     VirtualTable::TrafficLogs,
     VirtualTable::TrafficMatchLogs,
     VirtualTable::NodeLogs,

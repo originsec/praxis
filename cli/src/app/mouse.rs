@@ -163,14 +163,7 @@ impl App {
             }
 
             MouseAction::OpsTab(tab) => {
-                let prev = self.operations.tab;
-                self.operations.tab = tab;
-                if tab != prev {
-                    self.operations.filter.clear();
-                    if tab == OpsTab::Triggers {
-                        self.refresh_triggers_after(std::time::Duration::ZERO);
-                    }
-                }
+                self.set_ops_tab(tab);
                 true
             }
             MouseAction::OpsDetailFocus => {
@@ -377,6 +370,11 @@ impl App {
                 }
                 true
             }
+            RowSelectKind::OpsChanges => {
+                self.operations.detail_focus = false;
+                self.changes_select(clicked);
+                true
+            }
             RowSelectKind::LogQueryResults => {
                 self.log_query.focus = LogQueryFocus::Results;
                 let n = self.log_query.visible_row_count();
@@ -414,6 +412,10 @@ impl App {
             OpsHintAction::NewTrigger => self.open_new_trigger_form(),
             OpsHintAction::EditTrigger => self.edit_selected_trigger(),
             OpsHintAction::DeleteTrigger => self.delete_selected_trigger().await,
+            OpsHintAction::RevertChange => self.confirm_revert_selected_change(),
+            OpsHintAction::RevertVisibleChanges => self.confirm_revert_visible_changes(),
+            OpsHintAction::RefreshChanges => self.refresh_changes(true),
+            OpsHintAction::CancelChangeOp => self.cancel_change_op(),
         }
         true
     }

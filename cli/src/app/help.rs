@@ -143,7 +143,8 @@ impl App {
             ),
             Window::Operations => (
                 "The Operations window: run and track semantic operations and multi-step \
-                 chains against agents."
+                 chains against agents, and (Changes tab) review, drift-check and revert \
+                 agent config changes recorded in the change ledger."
                     .to_string(),
                 "Operations",
             ),

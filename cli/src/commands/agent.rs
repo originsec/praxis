@@ -51,12 +51,21 @@ pub enum AgentConfigCommand {
         line_end: Option<usize>,
     },
 
-    /// Write config content to a file
+    /// Write config content to a file (recorded in the change ledger)
     Write {
         #[arg(short, long)]
         node: String,
         path: String,
         contents: String,
+        /// Agent the config belongs to (inferred from recon when omitted)
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// Engagement label recorded with the change
+        #[arg(short, long, env = common::config_change::ENGAGEMENT_ENV_VAR)]
+        engagement: Option<String>,
+        /// Reason for the change
+        #[arg(long)]
+        note: Option<String>,
     },
 
     /// Grep config content in a file with regex
@@ -123,7 +132,24 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
                 node,
                 path,
                 contents,
-            } => write_file(client, &node, NodeFileType::Config, &path, &contents).await,
+                agent,
+                engagement,
+                note,
+            } => {
+                write_config_file(
+                    client,
+                    &node,
+                    &path,
+                    &contents,
+                    json!({
+                        "agent_short_name": agent,
+                        "engagement": engagement,
+                        "note": note,
+                        "operator": common::config_change::default_operator("cli"),
+                    }),
+                )
+                .await
+            }
             AgentConfigCommand::Grep {
                 node,
                 agent,
@@ -284,12 +310,17 @@ async fn read_file(
     Ok(())
 }
 
-async fn write_file(
+//
+// Config writes are recorded by the service's change ledger; `ledger`
+// carries the attribution fields (agent, engagement, note, operator).
+//
+
+async fn write_config_file(
     client: &Client,
     node_prefix: &str,
-    file_type: NodeFileType,
     path: &str,
     contents: &str,
+    ledger: serde_json::Value,
 ) -> Result<()> {
     let state = client
         .get_state()
@@ -299,15 +330,13 @@ async fn write_file(
         .map_err(|e| anyhow!("Node '{}': {}", node_prefix, e))?;
 
     let result = client
-        .acp_request(
-            &node_id,
-            EXT_PRAXIS_WRITE_FILE,
-            json!({
-                "file_type": file_type,
-                "path": path,
-                "contents": contents,
-            }),
-        )
+        .acp_request(&node_id, EXT_PRAXIS_WRITE_FILE, {
+            let mut params = ledger;
+            params["file_type"] = json!(NodeFileType::Config);
+            params["path"] = json!(path);
+            params["contents"] = json!(contents);
+            params
+        })
         .await?;
 
     let success = result
@@ -315,7 +344,13 @@ async fn write_file(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     if success {
-        print_success("Write complete");
+        match result.get("change_id").and_then(|v| v.as_str()) {
+            Some(id) => print_success(&format!(
+                "Write complete (change {} recorded)",
+                format_short_id(id)
+            )),
+            None => print_success("Write complete (no change needed)"),
+        }
         Ok(())
     } else {
         let err = result

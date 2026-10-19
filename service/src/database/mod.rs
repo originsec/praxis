@@ -4,6 +4,7 @@ mod chain_payloads;
 mod chain_triggers;
 mod chains;
 pub mod config;
+mod config_changes;
 mod definitions;
 mod event_log;
 pub(crate) mod exec;
@@ -498,6 +499,99 @@ impl Database {
                 )
                 .execute(pool)
                 .await;
+            }
+        }
+
+        //
+        // Migration: create the config_changes ledger table for databases
+        // that predate the change ledger.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS config_changes (
+                        id TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        node_id TEXT NOT NULL,
+                        agent_short_name TEXT,
+                        path TEXT NOT NULL,
+                        file_kind TEXT NOT NULL,
+                        config_type TEXT,
+                        op_json TEXT,
+                        summary TEXT NOT NULL,
+                        operator TEXT NOT NULL,
+                        engagement TEXT,
+                        note TEXT,
+                        before_exists INTEGER NOT NULL,
+                        before_sha256 TEXT,
+                        before_content TEXT,
+                        after_exists INTEGER NOT NULL,
+                        after_sha256 TEXT,
+                        after_content TEXT,
+                        undo_json TEXT,
+                        reverts_change_id TEXT,
+                        reverted_by TEXT,
+                        reverted_at TEXT,
+                        drift_status TEXT,
+                        drift_checked_at TEXT
+                    )",
+                )
+                .execute(pool)
+                .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_created_at ON config_changes(created_at DESC)")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_node ON config_changes(node_id, path)")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_engagement ON config_changes(engagement)")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS config_changes (
+                        id TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        node_id TEXT NOT NULL,
+                        agent_short_name TEXT,
+                        path TEXT NOT NULL,
+                        file_kind TEXT NOT NULL,
+                        config_type TEXT,
+                        op_json TEXT,
+                        summary TEXT NOT NULL,
+                        operator TEXT NOT NULL,
+                        engagement TEXT,
+                        note TEXT,
+                        before_exists SMALLINT NOT NULL,
+                        before_sha256 TEXT,
+                        before_content TEXT,
+                        after_exists SMALLINT NOT NULL,
+                        after_sha256 TEXT,
+                        after_content TEXT,
+                        undo_json TEXT,
+                        reverts_change_id TEXT,
+                        reverted_by TEXT,
+                        reverted_at TEXT,
+                        drift_status TEXT,
+                        drift_checked_at TEXT
+                    )",
+                )
+                .execute(pool)
+                .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_created_at ON config_changes(created_at DESC)")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_node ON config_changes(node_id, path)")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_config_changes_engagement ON config_changes(engagement)")
+                    .execute(pool)
+                    .await;
             }
         }
 

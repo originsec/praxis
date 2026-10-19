@@ -53,6 +53,93 @@ pub const TABLES: &[TableSchema] = &[
         ],
     },
     TableSchema {
+        name: "ConfigChangeLogs",
+        description: "Agent config change ledger",
+        source: "DB",
+        columns: &[
+            ColumnSchema {
+                name: "timestamp",
+                description: "Change time",
+            },
+            ColumnSchema {
+                name: "change_id",
+                description: "Change identifier",
+            },
+            ColumnSchema {
+                name: "node_id",
+                description: "Node identifier",
+            },
+            ColumnSchema {
+                name: "agent_short_name",
+                description: "Agent short name",
+            },
+            ColumnSchema {
+                name: "path",
+                description: "Config file path",
+            },
+            ColumnSchema {
+                name: "file_kind",
+                description: "File format",
+            },
+            ColumnSchema {
+                name: "config_type",
+                description: "Config category",
+            },
+            ColumnSchema {
+                name: "kind",
+                description: "apply or revert",
+            },
+            ColumnSchema {
+                name: "summary",
+                description: "Operation summary",
+            },
+            ColumnSchema {
+                name: "operator",
+                description: "Who made the change",
+            },
+            ColumnSchema {
+                name: "engagement",
+                description: "Engagement label",
+            },
+            ColumnSchema {
+                name: "note",
+                description: "Reason / note",
+            },
+            ColumnSchema {
+                name: "state",
+                description: "active or reverted",
+            },
+            ColumnSchema {
+                name: "before_exists",
+                description: "File existed before",
+            },
+            ColumnSchema {
+                name: "before_sha256",
+                description: "SHA-256 before",
+            },
+            ColumnSchema {
+                name: "after_sha256",
+                description: "SHA-256 after",
+            },
+            ColumnSchema {
+                name: "reverts_change_id",
+                description: "Change undone by this revert",
+            },
+            ColumnSchema {
+                name: "reverted_by",
+                description: "Revert that undid this change",
+            },
+            ColumnSchema {
+                name: "reverted_at",
+                description: "Revert time",
+            },
+            ColumnSchema {
+                name: "drift_status",
+                description: "Last drift check result",
+            },
+        ],
+    },
+    TableSchema {
         name: "EventLogs",
         description: "System event log entries",
         source: "DB",

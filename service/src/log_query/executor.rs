@@ -63,7 +63,7 @@ pub async fn execute_log_query(
 
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!(
-            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, EventLogs, ToolkitActionsLog, OperationLogs, ChainExecutionLogs",
+            "Unknown table '{}'. Available tables: AgentLogs, ConfigChangeLogs, EventLogs, NodeLogs, ReconLogs, ReconSessionLogs, ReconToolLogs, SemanticOperationChainLogs, SemanticOperationLogs, ToolkitActionsLog, TrafficLogs, TrafficMatchLogs",
             table_name
         ))?;
 

@@ -1,5 +1,6 @@
 mod agent_scripts;
 mod chain_form;
+pub mod changes;
 mod forms;
 pub mod help;
 mod input;
@@ -16,6 +17,7 @@ mod settings;
 pub use self::chain_form::{
     collect_session_groups, element_issues, input_port_count, output_port_count,
 };
+pub use self::changes::{ChangesEvent, ChangesState};
 pub use self::forms::*;
 pub use self::intercept::InterceptState;
 pub use self::log_query::LogQueryState;
@@ -349,6 +351,7 @@ pub enum OpsTab {
     Executions,
     Library,
     Triggers,
+    Changes,
 }
 
 pub struct OperationsState {
@@ -359,6 +362,7 @@ pub struct OperationsState {
     pub chain_executions: Vec<common::ChainExecutionUpdate>,
     pub triggers: Vec<ChainTriggerInfo>,
     pub intercept_rules: Vec<InterceptRule>,
+    pub changes: ChangesState,
     pub library_selected: usize,
     pub exec_selected: usize,
     pub trigger_selected: usize,
@@ -400,6 +404,7 @@ impl Default for OperationsState {
             chain_executions: Vec::new(),
             triggers: Vec::new(),
             intercept_rules: Vec::new(),
+            changes: ChangesState::default(),
             library_selected: 0,
             exec_selected: 0,
             trigger_selected: 0,
@@ -646,6 +651,10 @@ impl App {
                     self.operations.exec_selected = total - 1;
                 }
 
+                true
+            }
+            AppEvent::Changes(event) => {
+                self.handle_changes_event(event);
                 true
             }
             AppEvent::TriggersRefreshed {
@@ -1934,14 +1943,15 @@ impl App {
     //
     // Open the currently-selected Config item in $EDITOR. On a clean
     // exit with changed content, write the new buffer back to the node
-    // via _praxis/write_file and refresh the cached content shown in
-    // the right pane.
+    // via _praxis/write_file (recorded by the service's change ledger,
+    // tagged with the current engagement label) and refresh the cached
+    // content shown in the right pane.
     //
 
     pub(crate) async fn edit_recon_config_in_editor(&mut self) {
         use std::io::Write;
 
-        let (node_id, agent_short_name, path) = {
+        let (node_id, agent_short_name, path, config_type) = {
             let Some(ref recon) = self.nodes.recon else {
                 return;
             };
@@ -1961,6 +1971,7 @@ impl App {
                 recon.node_id.clone(),
                 recon.agent_short_name.clone(),
                 item.path.clone(),
+                item.config_type.clone(),
             )
         };
 
@@ -2103,11 +2114,16 @@ impl App {
                                 "file_type": "Config",
                                 "path": path,
                                 "contents": new_content,
+                                "agent_short_name": agent_short_name,
+                                "config_type": config_type,
+                                "engagement": self.operations.changes.engagement,
+                                "operator": common::config_change::default_operator("tui"),
+                                "note": "edited in recon overlay",
                             }),
                         )
                         .await;
 
-                    let (ok, err) = match write_result {
+                    let (ok, err, change_id) = match write_result {
                         Ok(value) => {
                             let success = value
                                 .get("success")
@@ -2117,14 +2133,22 @@ impl App {
                                 .get("error")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
-                            (success && err.is_none(), err)
+                            let change_id = value
+                                .get("change_id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| common::short_id(s).to_string());
+                            (success && err.is_none(), err, change_id)
                         }
-                        Err(e) => (false, Some(format!("{}", e))),
+                        Err(e) => (false, Some(format!("{}", e)), None),
                     };
 
                     if let Some(recon) = self.nodes.recon.as_mut() {
                         if ok {
-                            recon.config_edit_status = Some(("Saved".to_string(), now));
+                            let saved = match change_id {
+                                Some(id) => format!("Saved (change {} recorded)", id),
+                                None => "Saved".to_string(),
+                            };
+                            recon.config_edit_status = Some((saved, now));
 
                             //
                             // Drop the cached content for this item and re-fetch
