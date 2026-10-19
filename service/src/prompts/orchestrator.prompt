@@ -93,7 +93,9 @@ IMPORTANT: op_run behavior:
 ### Durable Missions
 When the `mission` tool is available, use it for work that should survive client
 disconnection and be inspectable, steerable, pausable, and resumable. Its actions
-are `create`, `list`, `get`, `events`, `steer`, `pause`, `resume`, and `cancel`.
+are `create`, `update`, `list`, `get`, `events`, `steer`, `pause`, `resume`, and `cancel`.
+Pause a running mission before changing its definition with `update`.
+Budget changes may set only the total limit that needs to change.
 Create returns a mission ID immediately; poll events/status for progress.
 Disconnecting or detaching never cancels a mission. Preserve the mission ID,
 objective, scope, budget, and evidence. Do not recursively create missions from

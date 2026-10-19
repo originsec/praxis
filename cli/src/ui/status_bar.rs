@@ -232,7 +232,7 @@ mod tests {
 
         let expected = [
             "^o orchestrator",
-            "^b missions",
+            "F6 missions",
             "^l nodes",
             "^p ops",
             "^t intercept",

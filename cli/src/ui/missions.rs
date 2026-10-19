@@ -161,6 +161,9 @@ fn render_state(f: &mut Frame, area: Rect, state: &MissionsState, app: Option<&A
             mission.status,
             MissionStatus::Completed | MissionStatus::Cancelled
         ) {
+            if mission.status != MissionStatus::Running {
+                hints.push(hint("e", "edit", KeyCode::Char('e')));
+            }
             if area.width >= 68 {
                 hints.push(hint("s", "steer", KeyCode::Char('s')));
             }
@@ -533,6 +536,49 @@ fn section(lines: &mut Vec<Line<'static>>, title: &str, value: &str) {
 
 fn overview_lines(mission: &Mission) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    lines.push(chrome::section_title("STATUS AND NEXT STEP", false));
+    let next_step = match mission.status {
+        MissionStatus::Running => {
+            "Running. You can steer or pause this mission while work continues."
+        }
+        MissionStatus::Paused => "Paused. Press r to review the limits and resume.",
+        MissionStatus::BudgetExceeded => {
+            "The next model request did not fit the remaining budget. Press r, raise the relevant total limit, then resume."
+        }
+        MissionStatus::NeedsReview => {
+            "The report did not pass verification. Inspect the verdict and evidence, steer if needed, then press r to resume."
+        }
+        MissionStatus::Interrupted => {
+            "Work stopped after a service interruption. Review uncertain actions below before pressing r to resume."
+        }
+        MissionStatus::Failed => {
+            "The mission stopped after an error. Read the status detail below before resuming."
+        }
+        MissionStatus::Completed if mission.spec.verify => {
+            "Completed. The report and verification are available below."
+        }
+        MissionStatus::Completed => {
+            "Completed. The report is available below; verification was not requested."
+        }
+        MissionStatus::Cancelled => "Cancelled. The saved report and evidence remain available.",
+    };
+    lines.push(Line::from(next_step));
+    if let Some(error) = &mission.error {
+        lines.push(Line::styled(error.clone(), Style::default().fg(SECONDARY)));
+    }
+    if mission.result.is_some() && mission.verification.is_none() && mission.spec.verify {
+        lines.push(Line::styled(
+            "A report was saved, but verification has not passed.",
+            Style::default().fg(SECONDARY),
+        ));
+    }
+    lines.push(Line::raw(""));
+    if let Some(result) = &mission.result {
+        section(&mut lines, "REPORT", result);
+    }
+    if let Some(verification) = &mission.verification {
+        section(&mut lines, "VERIFICATION", &pretty(verification));
+    }
     if !mission.pending_tools.is_empty() {
         lines.push(Line::styled(
             format!(
@@ -588,15 +634,6 @@ fn overview_lines(mission: &Mission) -> Vec<Line<'static>> {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-    }
-    if let Some(result) = &mission.result {
-        section(&mut lines, "REPORT", result);
-    }
-    if let Some(verification) = &mission.verification {
-        section(&mut lines, "VERIFICATION", &pretty(verification));
-    }
-    if let Some(error) = &mission.error {
-        section(&mut lines, "LAST STATUS DETAIL", error);
     }
     section(
         &mut lines,
@@ -795,11 +832,12 @@ fn render_form(
     app: Option<&App>,
 ) {
     let width = area.width.saturating_sub(4).min(88).max(1).min(area.width);
-    let desired_height = if form.fields.is_empty() {
+    let desired_height = if form.visible_fields() == 0 {
         13
     } else {
         form.fields
             .iter()
+            .take(form.visible_fields())
             .map(|field| {
                 if field.kind == MissionFieldKind::Multiline {
                     7
@@ -827,11 +865,25 @@ fn render_form(
     .split(body);
     let mut lines = Vec::new();
     match &form.kind {
-        MissionFormKind::Create => {
+        MissionFormKind::Create | MissionFormKind::Edit { .. } => {
             lines.push(Line::styled(
-                "Define the outcome, its scope, and how much work to allow.",
+                if matches!(form.kind, MissionFormKind::Create) {
+                    "Name the work, define its objective and scope. Press F4 for model, limits and verification."
+                } else {
+                    "Edit the mission definition before resuming. Press F4 for model, limits and verification."
+                },
                 Style::default().fg(MUTED),
             ));
+            if !form.advanced {
+                lines.push(Line::styled(
+                    if matches!(form.kind, MissionFormKind::Create) {
+                        "Using the configured model and default limits; verification is on."
+                    } else {
+                        "Existing model, limits and verification setting will be retained."
+                    },
+                    Style::default().fg(MUTED),
+                ));
+            }
             lines.push(Line::raw(""));
         }
         MissionFormKind::Resume {
@@ -846,7 +898,13 @@ fn render_form(
         }
         MissionFormKind::Resume { .. } => {
             lines.push(Line::styled(
-                "Budgets are totals for the mission, including work already completed.",
+                if mission.is_some_and(|mission| mission.status == MissionStatus::BudgetExceeded) {
+                    "Raise the exhausted total limit before resuming. Other limits can stay as they are."
+                } else if !form.advanced {
+                    "Press Ctrl+S to resume. Press F4 only if you need to change total limits."
+                } else {
+                    "Press Ctrl+S to resume with these total limits, or edit a limit first."
+                },
                 Style::default().fg(MUTED),
             ));
             lines.push(Line::raw(""));
@@ -892,7 +950,7 @@ fn render_form(
     }
     let mut fields = Vec::new();
     let mut focused_end = 0;
-    for (index, field) in form.fields.iter().enumerate() {
+    for (index, field) in form.fields.iter().take(form.visible_fields()).enumerate() {
         let start = lines.len();
         let focused = index == form.focused;
         lines.push(Line::from(vec![
@@ -989,24 +1047,39 @@ fn render_form(
     hint_row::render(
         f,
         row(chunks[2], 0),
-        &[
-            hint_row::HintItem::with_action(
+        &{
+            let mut hints = vec![hint_row::HintItem::with_action(
                 "Ctrl+S",
                 label,
                 MouseAction::MissionKey(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
-            ),
-            hint("Esc", "close", KeyCode::Esc),
-        ],
+            )];
+            if matches!(
+                form.kind,
+                MissionFormKind::Create
+                    | MissionFormKind::Edit { .. }
+                    | MissionFormKind::Resume { .. }
+            ) {
+                hints.push(hint(
+                    "F4",
+                    if form.advanced { "basic" } else { "advanced" },
+                    KeyCode::F(4),
+                ));
+            }
+            hints.push(hint("Esc", "close", KeyCode::Esc));
+            hints
+        },
         footer_app,
     );
     f.render_widget(
         Paragraph::new(if form.fields.is_empty() {
             "Enter confirms · Esc closes".to_string()
+        } else if form.visible_fields() == 0 {
+            "Ctrl+S resume · F4 adjust limits · Esc closes".to_string()
         } else {
             format!(
                 "Field {}/{}   Tab next   Shift+Enter newline",
                 form.focused + 1,
-                form.fields.len()
+                form.visible_fields()
             )
         })
         .style(Style::default().fg(DIM)),
@@ -1158,6 +1231,24 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_mission_shows_recovery_before_long_objective() {
+        let mut state = populated();
+        state.missions[0].status = MissionStatus::BudgetExceeded;
+        state.missions[0].error = Some("Insufficient remaining token budget".into());
+        state.missions[0].result = Some("Observed result".into());
+        let lines = overview_lines(&state.missions[0]);
+        let text = lines
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.find("STATUS AND NEXT STEP") < text.find("OBJECTIVE"));
+        assert!(text.find("REPORT") < text.find("OBJECTIVE"));
+        assert!(text.contains("verification has not passed"));
+        assert!(text.contains("Press r"));
+    }
+
+    #[test]
     fn narrow_workspace_switches_between_list_and_detail_without_losing_navigation() {
         let mut state = populated();
         let list = snapshot(&state, 80, 24);
@@ -1212,8 +1303,12 @@ mod tests {
         state.open_create("");
         let first = snapshot(&state, 80, 24);
         assert!(first.contains("Create mission"));
-        assert!(first.contains("More fields below"));
         assert!(first.contains("Ctrl+S"));
+        assert!(first.contains("F4 advanced"));
+        let form = state.form.as_mut().unwrap();
+        form.advanced = true;
+        let advanced = snapshot(&state, 80, 24);
+        assert!(advanced.contains("More fields below"));
         let form = state.form.as_mut().unwrap();
         form.focused = form.fields.len() - 1;
         let label = form.fields[form.focused].label;

@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand};
 use common::missions::{
-    MissionBudget, MissionCommand, MissionResponse, MissionSpec, MissionStatus,
+    MissionBudget, MissionBudgetUpdate, MissionCommand, MissionResponse, MissionSpec,
+    MissionSpecUpdate, MissionStatus,
 };
 
 use crate::client::Client;
@@ -31,6 +32,32 @@ pub enum MissionSubcommand {
         #[arg(long)]
         no_verify: bool,
     },
+    /// Edit a paused or stopped mission before resuming it
+    Update {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long, conflicts_with = "clear_model")]
+        model: Option<String>,
+        /// Use the configured Orchestrator model on the next run
+        #[arg(long)]
+        clear_model: bool,
+        #[arg(long, conflicts_with = "no_verify")]
+        verify: bool,
+        #[arg(long)]
+        no_verify: bool,
+        /// Replace the total iteration limit
+        #[arg(long)]
+        max_iterations: Option<u32>,
+        #[arg(long)]
+        max_tokens: Option<u64>,
+        #[arg(long)]
+        max_active_seconds: Option<u64>,
+    },
     List,
     Show {
         id: String,
@@ -52,12 +79,12 @@ pub enum MissionSubcommand {
         id: String,
         #[arg(long)]
         reconciliation: Option<String>,
-        /// Replace the total budget (all three limits must be supplied)
-        #[arg(long, requires_all = ["max_tokens", "max_active_seconds"])]
+        /// Replace the total iteration limit
+        #[arg(long)]
         max_iterations: Option<u32>,
-        #[arg(long, requires_all = ["max_iterations", "max_active_seconds"])]
+        #[arg(long)]
         max_tokens: Option<u64>,
-        #[arg(long, requires_all = ["max_iterations", "max_tokens"])]
+        #[arg(long)]
         max_active_seconds: Option<u64>,
     },
     Steer {
@@ -106,6 +133,36 @@ impl MissionSubcommand {
                     verify: !no_verify,
                 },
             },
+            Self::Update {
+                id,
+                name,
+                objective,
+                scope,
+                model,
+                clear_model,
+                verify,
+                no_verify,
+                max_iterations,
+                max_tokens,
+                max_active_seconds,
+            } => MissionCommand::Update {
+                id,
+                changes: MissionSpecUpdate {
+                    name,
+                    objective,
+                    scope,
+                    model,
+                    clear_model,
+                    budget: budget_update(max_iterations, max_tokens, max_active_seconds)?,
+                    verify: if verify {
+                        Some(true)
+                    } else if no_verify {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                },
+            },
             Self::List => MissionCommand::List,
             Self::Show { id } => MissionCommand::Get { id },
             Self::Events { id, after } => MissionCommand::Events { id, after },
@@ -116,17 +173,7 @@ impl MissionSubcommand {
                 max_tokens,
                 max_active_seconds,
             } => {
-                let budget = match (max_iterations, max_tokens, max_active_seconds) {
-                    (Some(max_iterations), Some(max_tokens), Some(max_active_seconds)) => {
-                        Some(MissionBudget {
-                            max_iterations,
-                            max_tokens,
-                            max_active_seconds,
-                        })
-                    }
-                    (None, None, None) => None,
-                    _ => return Err(anyhow!("Supply all three budget limits")),
-                };
+                let budget = budget_update(max_iterations, max_tokens, max_active_seconds)?;
                 MissionCommand::Resume {
                     id,
                     reconciliation,
@@ -139,6 +186,19 @@ impl MissionSubcommand {
             Self::Watch { .. } => return Err(anyhow!("Watch requires the streaming interface")),
         })
     }
+}
+
+fn budget_update(
+    max_iterations: Option<u32>,
+    max_tokens: Option<u64>,
+    max_active_seconds: Option<u64>,
+) -> Result<Option<MissionBudgetUpdate>> {
+    let patch = MissionBudgetUpdate {
+        max_iterations,
+        max_tokens,
+        max_active_seconds,
+    };
+    Ok((!patch.is_empty()).then_some(patch))
 }
 
 #[derive(Parser)]
@@ -317,9 +377,9 @@ mod tests {
     }
 
     #[test]
-    fn resume_requires_complete_budget_and_preserves_reconciliation() {
-        assert!(parse("resume abc --max-tokens 100").is_err());
-        let args = parse("resume abc --reconciliation 'confirmed file write' --max-iterations 10 --max-tokens 1000 --max-active-seconds 60").unwrap();
+    fn resume_accepts_one_budget_limit_and_preserves_reconciliation() {
+        let args =
+            parse("resume abc --reconciliation 'confirmed file write' --max-tokens 1000").unwrap();
         let MissionCommand::Resume {
             reconciliation,
             budget,
@@ -329,7 +389,24 @@ mod tests {
             panic!()
         };
         assert_eq!(reconciliation.as_deref(), Some("confirmed file write"));
-        assert_eq!(budget.unwrap().max_tokens, 1000);
+        let budget = budget.unwrap();
+        assert_eq!(budget.max_tokens, Some(1000));
+        assert_eq!(budget.max_iterations, None);
+    }
+
+    #[test]
+    fn update_parses_sparse_changes_for_cli_and_orchestrator() {
+        let args = parse("update abcd --objective 'Check the new target' --scope 'Local only' --model model-a --no-verify").unwrap();
+        let MissionCommand::Update { id, changes } = args.command.into_request().unwrap() else {
+            panic!()
+        };
+        assert_eq!(id, "abcd");
+        assert_eq!(changes.objective.as_deref(), Some("Check the new target"));
+        assert_eq!(changes.scope.as_deref(), Some("Local only"));
+        assert_eq!(changes.model.as_deref(), Some("model-a"));
+        assert_eq!(changes.verify, Some(false));
+        assert!(parse("update abcd --model model-a --clear-model").is_err());
+        assert!(parse("update abcd --max-iterations 100").is_ok());
     }
 
     #[test]

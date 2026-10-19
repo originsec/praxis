@@ -48,19 +48,26 @@ for the execution journal. Pending/uncertain tool calls remain visible. The work
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+N` / `n` | Create a mission with objective, scope, model, budgets and verification |
+| `Ctrl+N` / `n` | Create a mission with a name, objective and scope |
 | `/` | Filter missions |
 | `↑` / `↓` | Select a mission, or scroll the focused detail pane |
 | `Tab` | Switch between list and detail |
 | `1` / `2` / `3` | Overview / Evidence / Events |
 | `p` | Pause the selected running mission |
+| `e` | Edit a stopped mission's name, objective, scope, model, limits or verification |
 | `r` | Resume with reconciliation and total budget fields |
 | `s` | Send a steering instruction |
 | `x` | Open cancellation confirmation |
 | `F5` | Refresh |
 | `Esc` | Dismiss a form, leave filter entry or return to the list |
 
-Forms use `Tab` / `Shift+Tab` to move between fields and `F2` or `Ctrl+S` to submit.
+The creation and edit forms start with three fields; press `F4` to reveal model,
+budget and verification settings. A paused mission with no uncertain actions
+can be resumed with `r`, then `Ctrl+S`; press `F4` in the resume form to adjust
+limits. A budget-stopped mission opens with its exhausted limit selected.
+Forms use `Tab` / `Shift+Tab` to move between visible
+fields and `F2` or `Ctrl+S` to submit. The mission overview puts its status,
+next step, report and verification before the original objective.
 Cancellation requires explicit confirmation. Resume retains the existing total
 budgets unless edited, and exposes reconciliation for uncertain tool calls.
 Requests run asynchronously, so the UI remains navigable while waiting for the

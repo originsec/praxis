@@ -20,6 +20,46 @@ impl Default for MissionBudget {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct MissionBudgetUpdate {
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub max_active_seconds: Option<u64>,
+}
+
+impl MissionBudgetUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.max_iterations.is_none()
+            && self.max_tokens.is_none()
+            && self.max_active_seconds.is_none()
+    }
+
+    pub fn apply(self, budget: &mut MissionBudget) {
+        if let Some(value) = self.max_iterations {
+            budget.max_iterations = value;
+        }
+        if let Some(value) = self.max_tokens {
+            budget.max_tokens = value;
+        }
+        if let Some(value) = self.max_active_seconds {
+            budget.max_active_seconds = value;
+        }
+    }
+}
+
+impl From<MissionBudget> for MissionBudgetUpdate {
+    fn from(budget: MissionBudget) -> Self {
+        Self {
+            max_iterations: Some(budget.max_iterations),
+            max_tokens: Some(budget.max_tokens),
+            max_active_seconds: Some(budget.max_active_seconds),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MissionSpec {
     pub name: String,
@@ -32,6 +72,60 @@ pub struct MissionSpec {
     pub budget: MissionBudget,
     #[serde(default = "default_verify")]
     pub verify: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct MissionSpecUpdate {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub objective: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub clear_model: bool,
+    #[serde(default)]
+    pub budget: Option<MissionBudgetUpdate>,
+    #[serde(default)]
+    pub verify: Option<bool>,
+}
+
+impl MissionSpecUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none()
+            && self.objective.is_none()
+            && self.scope.is_none()
+            && self.model.is_none()
+            && !self.clear_model
+            && self.budget.is_none()
+            && self.verify.is_none()
+    }
+
+    pub fn apply(self, spec: &mut MissionSpec) {
+        if let Some(name) = self.name {
+            spec.name = name;
+        }
+        if let Some(objective) = self.objective {
+            spec.objective = objective;
+        }
+        if let Some(scope) = self.scope {
+            spec.scope = scope;
+        }
+        if self.clear_model {
+            spec.model = None;
+        }
+        if let Some(model) = self.model {
+            spec.model = Some(model);
+        }
+        if let Some(budget) = self.budget {
+            budget.apply(&mut spec.budget);
+        }
+        if let Some(verify) = self.verify {
+            spec.verify = verify;
+        }
+    }
 }
 
 fn default_verify() -> bool {
@@ -91,6 +185,10 @@ pub enum MissionCommand {
     Create {
         spec: MissionSpec,
     },
+    Update {
+        id: String,
+        changes: MissionSpecUpdate,
+    },
     List,
     Get {
         id: String,
@@ -105,7 +203,7 @@ pub enum MissionCommand {
         #[serde(default)]
         reconciliation: Option<String>,
         #[serde(default)]
-        budget: Option<MissionBudget>,
+        budget: Option<MissionBudgetUpdate>,
     },
     Steer {
         id: String,

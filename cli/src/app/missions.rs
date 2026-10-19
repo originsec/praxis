@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use common::missions::{
     Mission, MissionBudget, MissionCommand, MissionEvent, MissionResponse, MissionSpec,
-    MissionStatus,
+    MissionSpecUpdate, MissionStatus,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -63,6 +63,9 @@ pub struct MissionField {
 #[derive(Debug, Clone)]
 pub enum MissionFormKind {
     Create,
+    Edit {
+        id: String,
+    },
     Resume {
         id: String,
         requires_reconciliation: bool,
@@ -81,6 +84,7 @@ pub struct MissionForm {
     pub kind: MissionFormKind,
     pub fields: Vec<MissionField>,
     pub focused: usize,
+    pub advanced: bool,
     pub error: Option<String>,
     pub submitting: bool,
 }
@@ -153,6 +157,7 @@ impl MissionForm {
     pub fn title(&self) -> &'static str {
         match self.kind {
             MissionFormKind::Create => "Create mission",
+            MissionFormKind::Edit { .. } => "Edit mission",
             MissionFormKind::Resume { .. } => "Resume mission",
             MissionFormKind::Steer { .. } => "Steer mission",
             MissionFormKind::Cancel { .. } => "Cancel mission?",
@@ -162,6 +167,7 @@ impl MissionForm {
     pub fn submit_label(&self) -> &'static str {
         match self.kind {
             MissionFormKind::Create => "Start mission",
+            MissionFormKind::Edit { .. } => "Save changes",
             MissionFormKind::Resume { .. } => "Resume",
             MissionFormKind::Steer { .. } => "Send instruction",
             MissionFormKind::Cancel { .. } => "Confirm cancellation",
@@ -229,9 +235,42 @@ impl MissionForm {
             kind: MissionFormKind::Create,
             fields,
             focused: 0,
+            advanced: false,
             error: None,
             submitting: false,
         }
+    }
+
+    fn edit(mission: &Mission) -> Self {
+        let mut form = Self::create(mission.spec.model.as_deref().unwrap_or(""));
+        form.kind = MissionFormKind::Edit {
+            id: mission.id.clone(),
+        };
+        form.fields[0].value = mission.spec.name.clone();
+        form.fields[1].value = mission.spec.objective.clone();
+        form.fields[2].value = mission.spec.scope.clone();
+        form.fields[4].value = mission.spec.budget.max_iterations.to_string();
+        form.fields[5].value = mission.spec.budget.max_tokens.to_string();
+        form.fields[6].value = mission.spec.budget.max_active_seconds.to_string();
+        form.fields[7].value = mission.spec.verify.to_string();
+        for field in &mut form.fields {
+            field.cursor = field.value.len();
+        }
+        form
+    }
+
+    pub fn visible_fields(&self) -> usize {
+        if !self.advanced {
+            match self.kind {
+                MissionFormKind::Create | MissionFormKind::Edit { .. } => return 3,
+                MissionFormKind::Resume {
+                    requires_reconciliation,
+                    ..
+                } => return usize::from(requires_reconciliation),
+                _ => {}
+            }
+        }
+        self.fields.len()
     }
 
     fn command(&self) -> Result<MissionCommand, String> {
@@ -262,7 +301,7 @@ impl MissionForm {
             })
         };
         match &self.kind {
-            MissionFormKind::Create => {
+            MissionFormKind::Create | MissionFormKind::Edit { .. } => {
                 let name = value(0);
                 let objective = value(1);
                 let scope = value(2);
@@ -275,16 +314,30 @@ impl MissionForm {
                 if scope.len() > 16_000 {
                     return Err("Scope must be at most 16,000 bytes".into());
                 }
-                Ok(MissionCommand::Create {
-                    spec: MissionSpec {
-                        name,
-                        objective,
-                        scope,
-                        model: (!value(3).is_empty()).then(|| value(3)),
-                        budget: budget(4)?,
-                        verify: self.fields[7].value == "true",
-                    },
-                })
+                let spec = MissionSpec {
+                    name,
+                    objective,
+                    scope,
+                    model: (!value(3).is_empty()).then(|| value(3)),
+                    budget: budget(4)?,
+                    verify: self.fields[7].value == "true",
+                };
+                match &self.kind {
+                    MissionFormKind::Create => Ok(MissionCommand::Create { spec }),
+                    MissionFormKind::Edit { id } => Ok(MissionCommand::Update {
+                        id: id.clone(),
+                        changes: MissionSpecUpdate {
+                            name: Some(spec.name),
+                            objective: Some(spec.objective),
+                            scope: Some(spec.scope),
+                            clear_model: spec.model.is_none(),
+                            model: spec.model,
+                            budget: Some(spec.budget.into()),
+                            verify: Some(spec.verify),
+                        },
+                    }),
+                    _ => unreachable!(),
+                }
             }
             MissionFormKind::Resume {
                 id,
@@ -297,7 +350,7 @@ impl MissionForm {
                 Ok(MissionCommand::Resume {
                     id: id.clone(),
                     reconciliation: (!note.is_empty()).then_some(note),
-                    budget: Some(budget(1)?),
+                    budget: Some(budget(1)?.into()),
                 })
             }
             MissionFormKind::Steer { id } => {
@@ -502,6 +555,7 @@ impl MissionsState {
                     MissionCommand::Create { .. } => {
                         "Mission started. Work continues when you leave this workspace."
                     }
+                    MissionCommand::Update { .. } => "Mission definition saved. Resume when ready.",
                     MissionCommand::Pause { .. } => "Pause requested. Refreshing current status…",
                     MissionCommand::Resume { .. } => "Mission resumed.",
                     MissionCommand::Steer { .. } => {
@@ -732,7 +786,7 @@ impl MissionsState {
                 };
                 self.set_tab(next);
             }
-            KeyCode::Char(action @ ('p' | 'r' | 's' | 'x')) => {
+            KeyCode::Char(action @ ('e' | 'p' | 'r' | 's' | 'x')) => {
                 if self.pending_mutation.is_some() {
                     self.error = Some("Wait for the pending action to finish".into());
                     return Vec::new();
@@ -751,6 +805,11 @@ impl MissionsState {
                     return Vec::new();
                 }
                 match action {
+                    'e' if mission.status == MissionStatus::Running => {
+                        self.error =
+                            Some("Pause this mission before editing its definition".into());
+                    }
+                    'e' => self.form = Some(MissionForm::edit(&mission)),
                     'p' if mission.status == MissionStatus::Running => {
                         return self.start_mutation(MissionCommand::Pause { id: mission.id });
                     }
@@ -777,7 +836,25 @@ impl MissionsState {
                                 requires_reconciliation,
                             },
                             fields,
-                            focused: 0,
+                            focused: if mission.status == MissionStatus::BudgetExceeded {
+                                if mission.error.as_deref().unwrap_or("").contains("token") {
+                                    2
+                                } else if mission
+                                    .error
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .contains("iteration")
+                                {
+                                    1
+                                } else if mission.error.as_deref().unwrap_or("").contains("time") {
+                                    3
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            },
+                            advanced: mission.status == MissionStatus::BudgetExceeded,
                             error: None,
                             submitting: false,
                         });
@@ -792,6 +869,7 @@ impl MissionsState {
                                 "Clarify priorities or add constraints · required",
                             )],
                             focused: 0,
+                            advanced: true,
                             error: None,
                             submitting: false,
                         })
@@ -804,6 +882,7 @@ impl MissionsState {
                             },
                             fields: Vec::new(),
                             focused: 0,
+                            advanced: true,
                             error: None,
                             submitting: false,
                         })
@@ -836,13 +915,24 @@ impl MissionsState {
         if form.fields.is_empty() {
             return Vec::new();
         }
+        if matches!(
+            form.kind,
+            MissionFormKind::Create | MissionFormKind::Edit { .. } | MissionFormKind::Resume { .. }
+        ) && key.code == KeyCode::F(4)
+        {
+            form.advanced = !form.advanced;
+            form.focused = form.focused.min(form.visible_fields().saturating_sub(1));
+            return Vec::new();
+        }
+        let visible_fields = form.visible_fields();
+        if visible_fields == 0 {
+            return Vec::new();
+        }
         match key.code {
-            KeyCode::Tab => form.focused = (form.focused + 1) % form.fields.len(),
-            KeyCode::BackTab => {
-                form.focused = (form.focused + form.fields.len() - 1) % form.fields.len()
-            }
+            KeyCode::Tab => form.focused = (form.focused + 1) % visible_fields,
+            KeyCode::BackTab => form.focused = (form.focused + visible_fields - 1) % visible_fields,
             KeyCode::Enter if !input::wants_newline(key) => {
-                form.focused = (form.focused + 1) % form.fields.len()
+                form.focused = (form.focused + 1) % visible_fields
             }
             _ => {
                 let field = &mut form.fields[form.focused];
@@ -871,6 +961,9 @@ impl MissionsState {
     pub fn paste(&mut self, text: &str) -> Vec<MissionUiRequest> {
         if let Some(form) = self.form.as_mut() {
             if form.submitting {
+                return Vec::new();
+            }
+            if form.visible_fields() == 0 {
                 return Vec::new();
             }
             if let Some(field) = form.fields.get_mut(form.focused) {
@@ -1002,6 +1095,73 @@ mod tests {
     }
 
     #[test]
+    fn create_form_keeps_advanced_defaults_out_of_basic_navigation() {
+        let mut state = MissionsState::default();
+        state.open_create("configured-model");
+        assert_eq!(state.form.as_ref().unwrap().visible_fields(), 3);
+        for _ in 0..3 {
+            state.handle_key(key(KeyCode::Tab), "");
+        }
+        assert_eq!(state.form.as_ref().unwrap().focused, 0);
+        state.handle_key(key(KeyCode::F(4)), "");
+        assert_eq!(state.form.as_ref().unwrap().visible_fields(), 8);
+        state.handle_key(key(KeyCode::BackTab), "");
+        assert_eq!(state.form.as_ref().unwrap().focused, 7);
+        state.handle_key(key(KeyCode::F(4)), "");
+        assert_eq!(state.form.as_ref().unwrap().focused, 2);
+    }
+
+    #[test]
+    fn budget_recovery_opens_on_exhausted_limit() {
+        let mut state = MissionsState::default();
+        let mut exhausted = mission("a", MissionStatus::BudgetExceeded);
+        exhausted.error = Some("Insufficient remaining token budget for the next context".into());
+        state.missions = vec![exhausted];
+        state.handle_key(key(KeyCode::Char('r')), "");
+        let form = state.form.as_ref().unwrap();
+        assert_eq!(form.focused, 2);
+        assert_eq!(form.fields[2].label, "Tokens");
+    }
+
+    #[test]
+    fn paused_mission_resumes_with_existing_limits_in_one_step() {
+        let mut state = MissionsState::default();
+        state.missions = vec![mission("a", MissionStatus::Paused)];
+        state.handle_key(key(KeyCode::Char('r')), "");
+        assert_eq!(state.form.as_ref().unwrap().visible_fields(), 0);
+        state.handle_key(key(KeyCode::F(4)), "");
+        assert_eq!(state.form.as_ref().unwrap().visible_fields(), 4);
+        state.handle_key(key(KeyCode::F(4)), "");
+        let requests =
+            state.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL), "");
+        assert!(
+            matches!(&requests[0].command, MissionCommand::Resume { id, reconciliation: None, budget: Some(_)} if id == "a")
+        );
+    }
+
+    #[test]
+    fn stopped_mission_can_edit_definition_without_resuming() {
+        let mut state = MissionsState::default();
+        let mut paused = mission("a", MissionStatus::Paused);
+        paused.spec.name = "Original".into();
+        paused.spec.objective = "First objective".into();
+        paused.spec.model = Some("custom-model".into());
+        state.missions = vec![paused];
+        state.handle_key(key(KeyCode::Char('e')), "");
+        assert_eq!(state.form.as_ref().unwrap().visible_fields(), 3);
+        fill_form(&mut state, 1, "Revised objective");
+        let requests = state.submit_form();
+        let MissionCommand::Update { id, changes } = &requests[0].command else {
+            panic!("expected mission update")
+        };
+        assert_eq!(id, "a");
+        assert_eq!(changes.objective.as_deref(), Some("Revised objective"));
+        assert_eq!(changes.model.as_deref(), Some("custom-model"));
+        assert!(!changes.clear_model);
+        assert_eq!(changes.verify, Some(true));
+    }
+
+    #[test]
     fn validation_preserves_draft_and_resume_requires_uncertain_action_note() {
         let mut state = MissionsState::default();
         state.open_create("");
@@ -1028,7 +1188,7 @@ mod tests {
         fill_form(&mut state, 1, "100");
         let requests = state.submit_form();
         assert!(
-            matches!(&requests[0].command, MissionCommand::Resume { reconciliation: Some(note), budget: Some(budget), .. } if note == "Checked file; write completed" && budget.max_iterations == 100)
+            matches!(&requests[0].command, MissionCommand::Resume { reconciliation: Some(note), budget: Some(budget), .. } if note == "Checked file; write completed" && budget.max_iterations == Some(100))
         );
     }
 

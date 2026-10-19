@@ -132,7 +132,7 @@ fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorDa
 #[tool_router]
 impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     #[tool(
-        description = "Create and manage durable missions. Actions: create, list, get, events (after sequence), resume (with reconciliation for uncertain actions), steer, pause, cancel. Commands return immediately; poll events/get for progress. Disconnecting never cancels a mission."
+        description = "Create and manage durable missions. Actions: create, update (stopped missions only), list, get, events (after sequence), resume (with reconciliation for uncertain actions), steer, pause, cancel. Commands return immediately; poll events/get for progress. Disconnecting never cancels a mission."
     )]
     async fn mission(
         &self,

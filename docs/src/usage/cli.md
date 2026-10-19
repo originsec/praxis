@@ -197,6 +197,7 @@ praxis mission events MISSION_ID --after 42
 praxis mission watch MISSION_ID
 praxis mission steer MISSION_ID "Prioritize node abc and cite evidence"
 praxis mission pause MISSION_ID
+praxis mission update MISSION_ID --objective "Inspect the revised target"
 praxis mission resume MISSION_ID
 praxis mission cancel MISSION_ID
 ```
@@ -206,6 +207,14 @@ praxis mission cancel MISSION_ID
 and 3,600 active seconds. Scope is part of the worker instructions, not an
 operating-system sandbox.
 
+`update` edits a stopped, resumable mission. It accepts `--name`, `--objective`,
+`--scope`, `--model` or `--clear-model`, `--verify` or `--no-verify`, and a
+complete set of three budget flags. Omitted fields are unchanged. Pause a
+running mission first; completed and cancelled missions are immutable.
+Consumed budget and evidence remain recorded. The Orchestrator accepts the same
+syntax after a `/mission` prefix, and the MCP `mission` tool accepts
+`{"action":"update","id":"...","changes":{"objective":"..."}}`.
+
 `watch` (alias `attach`) polls events and stops when the mission is no longer
 running. `Ctrl+C` detaches immediately and leaves the mission running. Reconnect
 with `watch ID --after SEQUENCE` to avoid replaying older events. `pause` and
@@ -214,9 +223,9 @@ outstanding work, uncertain tool actions, budget usage, and verification results
 
 After an interrupted tool call, inspect the affected system before resuming.
 Supply `--reconciliation "what was checked and the observed outcome"` when the
-service requires reconciliation. To raise a spent budget, `resume` accepts all
-three limits together: `--max-iterations`, `--max-tokens`, and
-`--max-active-seconds`. These replace total limits, rather than adding allowance.
+service requires reconciliation. To raise a spent budget, `resume` accepts any
+of `--max-iterations`, `--max-tokens`, or `--max-active-seconds` on its own.
+Values replace total limits, rather than adding allowance.
 
 Event requests return at most 500 records; pass the last sequence as `--after`
 to fetch the next page. `watch` drains pages automatically.

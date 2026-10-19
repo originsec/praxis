@@ -121,6 +121,50 @@ impl MissionManager {
                 self.spawn(record, control);
                 Ok(MissionResponse::Mission(mission))
             }
+            MissionCommand::Update { id, changes } => {
+                if changes.is_empty() {
+                    bail!("Specify at least one mission field to update");
+                }
+                if changes.model.is_some() && changes.clear_model {
+                    bail!("Choose either a model or clear_model, not both");
+                }
+                if changes.budget.as_ref().is_some_and(|budget| budget.is_empty()) {
+                    bail!("Specify at least one budget limit to update");
+                }
+                let mut record = self.resolve(&id).await?;
+                let mission_id = record.mission.id.clone();
+                let _control = self.claim(&mission_id)?;
+                let outcome = async {
+                    if matches!(
+                        record.mission.status,
+                        MissionStatus::Running | MissionStatus::Completed | MissionStatus::Cancelled
+                    ) {
+                        bail!("Pause a running mission before editing; completed and cancelled missions cannot be edited");
+                    }
+                    let old_spec = record.mission.spec.clone();
+                    changes.apply(&mut record.mission.spec);
+                    validate_spec(&record.mission.spec)?;
+                    if record.mission.spec.model.as_ref().is_some_and(|model| model.trim().is_empty()) {
+                        bail!("Model name cannot be empty; use clear_model to use the configured default");
+                    }
+                    if record.mission.spec.budget.max_iterations < record.mission.iterations
+                        || record.mission.spec.budget.max_tokens < record.mission.tokens_used
+                        || record.mission.spec.budget.max_active_seconds < record.mission.active_seconds
+                    {
+                        bail!("Budget totals cannot be lower than work already consumed");
+                    }
+                    self.database.save_mission(&mut record).await?;
+                    self.database.append_mission_event(
+                        &mission_id,
+                        "updated",
+                        json!({"previous": old_spec, "current": record.mission.spec}),
+                    ).await?;
+                    Ok::<_, anyhow::Error>(())
+                }.await;
+                self.active.lock().unwrap().remove(&mission_id);
+                outcome?;
+                Ok(MissionResponse::Mission(record.mission))
+            }
             MissionCommand::List => Ok(MissionResponse::Missions(
                 self.database.list_missions().await?,
             )),
@@ -166,7 +210,11 @@ impl MissionManager {
                     if matches!(record.mission.status,MissionStatus::Completed|MissionStatus::Cancelled|MissionStatus::Running) { bail!("Mission cannot be resumed in its current state"); }
                     self.restore_tool_results(&mut record).await?;
                     reconcile(&mut record,reconciliation.as_deref())?;
-                    if let Some(budget) = budget {validate_budget(&budget)?;record.mission.spec.budget=budget;}
+                    if let Some(budget) = budget {
+                        if budget.is_empty() { bail!("Specify at least one budget limit to update"); }
+                        budget.apply(&mut record.mission.spec.budget);
+                        validate_budget(&record.mission.spec.budget)?;
+                    }
                     ensure_budget(&record.mission)?;
                     record.mission.status=MissionStatus::Running;
                     record.run_started_at=Some(chrono::Utc::now().to_rfc3339());

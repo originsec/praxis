@@ -2,6 +2,7 @@ use super::*;
 use crate::database::DatabaseConfig;
 use axum::{Json, Router, body::Body, response::Response, routing::post};
 use common::ai::Role;
+use common::missions::MissionBudgetUpdate;
 use futures_util::stream;
 use std::path::PathBuf;
 use tokio::sync::oneshot;
@@ -167,6 +168,125 @@ fn completed_sse(text: &str) -> String {
         json!({"choices":[{"delta":{},"finish_reason":"stop"}]}),
         json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}),
     )
+}
+
+#[tokio::test]
+async fn paused_mission_definition_can_be_edited_and_journaled() {
+    let fixture = Fixture::new().await;
+    let mut saved = record();
+    saved.mission.status = MissionStatus::Paused;
+    saved.mission.iterations = 3;
+    saved.mission.tokens_used = 1200;
+    saved.mission.active_seconds = 20;
+    fixture.database.insert_mission(&saved).await.unwrap();
+
+    let response = fixture
+        .manager
+        .handle(MissionCommand::Update {
+            id: saved.mission.id.clone(),
+            changes: MissionSpecUpdate {
+                name: Some("revised".into()),
+                objective: Some("Inspect another fixture".into()),
+                scope: Some("fixture two".into()),
+                model: Some("test-model".into()),
+                budget: Some(MissionBudgetUpdate {
+                    max_tokens: Some(5000),
+                    ..Default::default()
+                }),
+                verify: Some(false),
+                ..Default::default()
+            },
+        })
+        .await
+        .unwrap();
+    let MissionResponse::Mission(mission) = response else {
+        panic!()
+    };
+    assert_eq!(mission.spec.name, "revised");
+    assert_eq!(mission.spec.objective, "Inspect another fixture");
+    assert_eq!(mission.spec.scope, "fixture two");
+    assert_eq!(mission.spec.model.as_deref(), Some("test-model"));
+    assert_eq!(mission.spec.budget.max_tokens, 5000);
+    assert_eq!(mission.spec.budget.max_iterations, 50);
+    assert!(!mission.spec.verify);
+    assert_eq!(mission.status, MissionStatus::Paused);
+    let persisted = fixture
+        .database
+        .get_mission(&saved.mission.id)
+        .await
+        .unwrap();
+    assert_eq!(persisted.mission.spec.name, "revised");
+    let events = fixture
+        .database
+        .mission_events(&saved.mission.id, 0)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, "updated");
+}
+
+#[tokio::test]
+async fn mission_definition_update_rejects_running_and_invalid_changes() {
+    let fixture = Fixture::new().await;
+    let running = record();
+    fixture.database.insert_mission(&running).await.unwrap();
+    let change = MissionSpecUpdate {
+        name: Some("later".into()),
+        ..Default::default()
+    };
+    assert!(
+        fixture
+            .manager
+            .handle(MissionCommand::Update {
+                id: running.mission.id.clone(),
+                changes: change.clone()
+            })
+            .await
+            .is_err()
+    );
+    let mut paused = record();
+    paused.mission.status = MissionStatus::Paused;
+    paused.mission.iterations = 4;
+    fixture.database.insert_mission(&paused).await.unwrap();
+    let error = fixture
+        .manager
+        .handle(MissionCommand::Update {
+            id: paused.mission.id.clone(),
+            changes: MissionSpecUpdate {
+                budget: Some(MissionBudgetUpdate {
+                    max_iterations: Some(3),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("already consumed"));
+    assert_eq!(
+        fixture
+            .database
+            .get_mission(&paused.mission.id)
+            .await
+            .unwrap()
+            .mission
+            .spec
+            .budget
+            .max_iterations,
+        50
+    );
+    let response = fixture
+        .manager
+        .handle(MissionCommand::Update {
+            id: paused.mission.id,
+            changes: MissionSpecUpdate {
+                clear_model: true,
+                ..Default::default()
+            },
+        })
+        .await
+        .unwrap();
+    assert!(matches!(response, MissionResponse::Mission(_)));
 }
 
 #[tokio::test]

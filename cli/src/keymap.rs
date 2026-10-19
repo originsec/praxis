@@ -16,7 +16,7 @@ pub mod global {
     pub const QUIT: &str = "^q";
     pub const HELP: &str = "^h";
     pub const ORCHESTRATOR: &str = "^o";
-    pub const MISSIONS: &str = "^b";
+    pub const MISSIONS: &str = "F6";
     pub const NODES: &str = "^l";
     pub const OPERATIONS: &str = "^p";
     pub const INTERCEPT: &str = "^t";

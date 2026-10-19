@@ -39,11 +39,34 @@ responses; watch produces newline-delimited JSON. Ctrl+C while watching detaches
 The TUI has a dedicated **Missions** workspace (`Ctrl+B` or `F6`) with a live
 list, creation and lifecycle forms, and Overview/Evidence/Events tabs. It also
 accepts the same commands in the Orchestrator input with a `/mission` prefix. `/mission attach <id>` follows events and `/mission detach` stops watching.
+Creation and editing show name, objective and scope first; `F4` reveals model,
+budget and verification settings. Paused work without uncertain actions resumes
+with `r` then `Ctrl+S`. Budget-stopped work opens on the exhausted limit.
 Evidence and Events show short previews so large mission journals remain quick
 to scroll. Use `praxis mission events <id> --after <sequence> --json` for complete
 event payloads.
 The MCP `mission` tool exposes the same lifecycle. See [CLI](cli.md),
 [TUI](tui.md), and [MCP](mcp.md) for their controls.
+
+Pause a mission before changing its definition. `update` accepts only the fields
+you supply, so the other fields remain unchanged:
+
+```bash
+praxis mission pause <id>
+praxis mission update <id> --objective "Inspect the new target" --scope "Local lab only"
+praxis mission update <id> --model provider-model --verify
+praxis mission update <id> --clear-model --no-verify
+praxis mission resume <id>
+```
+
+You can also edit its name or any individual total budget limit with
+`--name`, `--max-iterations`, `--max-tokens`, or `--max-active-seconds`.
+Existing usage counts and evidence stay intact. A total budget cannot fall
+below usage already recorded. `update` works for paused, interrupted,
+needs-review, failed, and budget-exceeded missions. Running missions must be
+paused first; completed and cancelled missions cannot be edited. The same
+command is available in the Orchestrator as `/mission update`, and through the
+MCP `mission` action `update` with an `id` and `changes` object.
 
 ## Steering, pause, cancellation, and resume
 
@@ -120,11 +143,10 @@ exceed estimates; no further inference is started after the total is exhausted.
 
 Active time excludes deliberate pauses. After an unclean restart the elapsed
 wall time since the persisted run start is charged conservatively, including
-unknown downtime. To resume after exhaustion, replace all three **total** limits:
+unknown downtime. To resume after exhaustion, raise the exhausted **total** limit:
 
 ```bash
-praxis mission resume <id> --max-iterations 80 \
-  --max-tokens 800000 --max-active-seconds 7200
+praxis mission resume <id> --max-tokens 800000
 ```
 
 ## Verification and status

@@ -189,13 +189,21 @@ Supported actions:
 | Action | Fields |
 |--------|--------|
 | `create` | `spec`: name, objective, optional scope/model/budget/verify |
+| `update` | `id`, `changes`: any name/objective/scope/model/clear_model/budget/verify fields; `budget` may contain only changed limits; pause running work first |
 | `list` | None |
 | `get` | `id` |
 | `events` | `id`, optional `after` event sequence (default 0) |
 | `steer` | `id`, `instruction` |
 | `pause` | `id` |
-| `resume` | `id`, optional `reconciliation`, optional replacement `budget` |
+| `resume` | `id`, optional `reconciliation`, optional `budget` with any total limits to change |
 | `cancel` | `id` |
+
+For example, after pausing a mission, change its scope and token total without
+re-entering the other limits:
+
+```json
+{"action":"update","id":"MISSION_ID","changes":{"scope":"Local lab only","budget":{"max_tokens":800000}}}
+```
 
 Responses are tagged as `mission`, `missions`, or `events`, with their payload in
 `data`. Poll `events` with the last observed sequence for incremental progress,
