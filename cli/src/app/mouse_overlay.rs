@@ -702,6 +702,9 @@ impl App {
                 15 => Some(6),
                 16 => Some(7),
                 17 => Some(8),
+                25 => Some(9),
+                26 => Some(10),
+                27 => Some(11),
                 _ => None,
             },
             SettingsTab::About => {

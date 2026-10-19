@@ -66,6 +66,9 @@ pub enum NodeSignalMessage {
     // Intercept status update
     InterceptStatusUpdate(InterceptStatus),
 
+    // New/updated sessions found by the session probe
+    SessionActivity(SessionActivityReport),
+
     // Outbound ACP frame (response or session/update notification)
     Acp { node_id: String, client_id: String, json_rpc: String },
 }
@@ -109,6 +112,11 @@ Messages broadcast to all nodes via `NodeBroadcast` fanout exchange.
 pub enum NodeBroadcastMessage {
     // Request all nodes to send information update
     NodeInformationUpdateRequest,
+
+    // Run the stat-only session probe and report new/updated sessions
+    // (sent by the trigger engine while session-activity triggers exist;
+    // empty list = all agents)
+    SessionActivityProbeRequest { agent_short_names: Vec<String> },
 
     // Request nodes to re-register
     NodeRefreshRegistration,
@@ -658,7 +666,27 @@ pub enum TriggerConfig {
     InterceptMatch { rule_id: i64 },
     // Fires when a new node registers
     NewNode,
+    // Fires when a stored recon result differs from the previous one
+    ReconChange {
+        agent_short_names: Vec<String>,     // empty = any
+        kinds: Vec<ReconChangeKind>,        // empty = any
+        config_types: Vec<String>,          // config_* changes only
+        path_glob: Option<String>,          // config_* changes only
+    },
+    // Fires when an agent appears / disappears / changes version on a node
+    AgentChange { agent_short_names: Vec<String>, kinds: Vec<AgentChangeKind> },
+    // Fires on new/updated sessions reported by the node session probe
+    SessionActivity { agent_short_names: Vec<String>, new_sessions_only: bool, quiet_period_secs: u64 },
+    // Fires on an authenticated POST /hooks/<trigger_id>
+    Webhook,
 }
+
+pub enum ReconChangeKind {
+    McpServerAdded, McpServerRemoved, SkillAdded, SkillRemoved,
+    ConfigAdded, ConfigRemoved, ConfigChanged,
+}
+
+pub enum AgentChangeKind { Appeared, Disappeared, VersionChanged }
 
 pub enum ScheduleSpec {
     // Fire once per day at hour:minute (UTC)
@@ -680,6 +708,8 @@ pub struct TargetSpec {
     pub agent_short_names: Vec<String>,
     // For event triggers: include the node that triggered the event
     pub include_triggering_node: bool,
+    // For event triggers: run only on the node that triggered the event
+    pub triggering_node_only: bool,
 }
 ```
 
@@ -694,6 +724,9 @@ pub struct ChainTriggerInfo {
     pub enabled: bool,
     pub last_fired_at: Option<DateTime<Utc>>,
     pub next_fire_at: Option<DateTime<Utc>>,
+    // Webhook triggers: plaintext secret, only in the ChainTriggerCreated
+    // (or converting ChainTriggerUpdated) reply to the requesting client
+    pub webhook_secret: Option<String>,
 }
 ```
 

@@ -28,36 +28,60 @@ pub fn render(f: &mut Frame, popup: &Popup) {
     }
 }
 
-pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
-    let is_info = matches!(confirm.action, crate::app::ConfirmKind::Info);
-    let width = (confirm.message.len() as u16 + 8)
-        .min(f.area().width - 4)
+//
+// Confirm/notice popup size: one row per message line plus chrome, as wide
+// as the longest line. Shared with the mouse hit registration.
+//
+pub fn confirm_geometry(message: &str, terminal: Rect) -> (u16, u16) {
+    let longest = message
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    let line_count = message.lines().count().max(1) as u16;
+    let width = (longest as u16 + 8)
+        .min(terminal.width.saturating_sub(4))
         .max(36);
-    let height = 7;
+    (width, line_count + 6)
+}
+
+pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
+    use crate::app::ConfirmKind;
+    let is_info = confirm.action.is_dismiss_only();
+    let (width, height) = confirm_geometry(&confirm.message, f.area());
     let area = centered_rect_fixed(width, height, f.area());
 
-    let title = if is_info { "Error" } else { "Confirm" };
+    let title = match confirm.action {
+        ConfirmKind::Info => "Error",
+        ConfirmKind::Notice => "Notice",
+        _ => "Confirm",
+    };
     let body = chrome::modal_panel(f, area, title, "");
 
+    let line_count = height - 6;
     let body_chunks = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(line_count),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(body);
 
-    let lead = if is_info {
-        chrome::dot(ERROR)
-    } else {
-        chrome::dot(STATUS_RUNNING)
+    let lead = match confirm.action {
+        ConfirmKind::Info => chrome::dot(ERROR),
+        ConfirmKind::Notice => chrome::dot(OK),
+        _ => chrome::dot(STATUS_RUNNING),
     };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            lead,
+    let mut message_lines: Vec<Line> = Vec::new();
+    for (i, text) in confirm.message.lines().enumerate() {
+        let prefix = if i == 0 { lead.clone() } else { Span::raw(" ") };
+        message_lines.push(Line::from(vec![
+            prefix,
             Span::raw(" "),
-            Span::styled(confirm.message.clone(), Style::default().fg(TEXT_BRIGHT)),
-        ]))
-        .style(Style::default().bg(BG_ELEMENT)),
+            Span::styled(text.to_string(), Style::default().fg(TEXT_BRIGHT)),
+        ]));
+    }
+    f.render_widget(
+        Paragraph::new(message_lines).style(Style::default().bg(BG_ELEMENT)),
         body_chunks[0],
     );
 
@@ -549,6 +573,40 @@ pub fn trigger_form_section_rows(form: &TriggerForm) -> Vec<(usize, TriggerFormS
             rows.push((row, TriggerFormSection::Rule, 0));
             row += 1;
         }
+        TriggerKind::ReconChange | TriggerKind::AgentChange => {
+            row += 1; // spacer
+            row += 1; // Event kinds header
+            for i in 0..form.event_kinds.len() {
+                rows.push((row, TriggerFormSection::EventKinds, i));
+                row += 1;
+            }
+            row += 1; // Event agents header
+            for i in 0..form.event_agents.len() {
+                rows.push((row, TriggerFormSection::EventAgents, i));
+                row += 1;
+            }
+            if form.kind == TriggerKind::ReconChange {
+                rows.push((row, TriggerFormSection::ConfigTypes, 0));
+                row += 1;
+                rows.push((row, TriggerFormSection::PathGlob, 0));
+                row += 1;
+            }
+        }
+        TriggerKind::SessionActivity => {
+            row += 1; // spacer
+            row += 1; // Event agents header
+            for i in 0..form.event_agents.len() {
+                rows.push((row, TriggerFormSection::EventAgents, i));
+                row += 1;
+            }
+            rows.push((row, TriggerFormSection::NewSessionsOnly, 0));
+            row += 1;
+            rows.push((row, TriggerFormSection::QuietPeriod, 0));
+            row += 1;
+        }
+        TriggerKind::Webhook => {
+            row += 2; // spacer + info line
+        }
         TriggerKind::NewNode => {}
     }
 
@@ -571,12 +629,11 @@ pub fn trigger_form_section_rows(form: &TriggerForm) -> Vec<(usize, TriggerFormS
         row += 1;
     }
 
-    if matches!(
-        form.kind,
-        TriggerKind::InterceptMatch | TriggerKind::NewNode
-    ) {
+    if form.kind.is_node_event() {
         row += 1; // spacer
         rows.push((row, TriggerFormSection::IncludeTriggering, 0));
+        row += 1;
+        rows.push((row, TriggerFormSection::TriggeringNodeOnly, 0));
     }
 
     rows
@@ -591,6 +648,27 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
 
     lines.push(type_line(form, section_focus(TriggerFormSection::Type)));
+
+    let checklist = |lines: &mut Vec<Line<'static>>,
+                     label: &str,
+                     section: TriggerFormSection,
+                     items: &[(String, bool)]| {
+        let selected = items.iter().filter(|(_, s)| *s).count();
+        let suffix = if selected == 0 {
+            "any".to_string()
+        } else {
+            format!("{}/{}", selected, items.len())
+        };
+        lines.push(section_header(label, section_focus(section), &suffix));
+        for (i, (name, sel)) in items.iter().enumerate() {
+            let is_cursor = section_focus(section) && i == form.cursor;
+            let check = if *sel { "[\u{2713}]" } else { "[ ]" };
+            lines.push(Line::from(Span::styled(
+                format!("  {} {}", check, name),
+                row_style(is_cursor, *sel),
+            )));
+        }
+    };
 
     match form.kind {
         TriggerKind::Scheduled => {
@@ -611,6 +689,66 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
         TriggerKind::InterceptMatch => {
             lines.push(Line::from(""));
             lines.push(rule_line(form, section_focus(TriggerFormSection::Rule)));
+        }
+        TriggerKind::ReconChange | TriggerKind::AgentChange => {
+            lines.push(Line::from(""));
+            checklist(
+                &mut lines,
+                "Changes",
+                TriggerFormSection::EventKinds,
+                &form.event_kinds,
+            );
+            checklist(
+                &mut lines,
+                "Event agents",
+                TriggerFormSection::EventAgents,
+                &form.event_agents,
+            );
+            if form.kind == TriggerKind::ReconChange {
+                lines.push(text_line(
+                    "Config types",
+                    &form.config_types,
+                    "(any, comma-separated)",
+                    section_focus(TriggerFormSection::ConfigTypes),
+                ));
+                lines.push(text_line(
+                    "Path glob",
+                    &form.path_glob,
+                    "(any)",
+                    section_focus(TriggerFormSection::PathGlob),
+                ));
+            }
+        }
+        TriggerKind::SessionActivity => {
+            lines.push(Line::from(""));
+            checklist(
+                &mut lines,
+                "Event agents",
+                TriggerFormSection::EventAgents,
+                &form.event_agents,
+            );
+            lines.push(toggle_line(
+                "New sessions only",
+                form.new_sessions_only,
+                section_focus(TriggerFormSection::NewSessionsOnly),
+            ));
+            lines.push(text_line(
+                "Quiet period (s)",
+                &form.quiet_secs.to_string(),
+                "",
+                section_focus(TriggerFormSection::QuietPeriod),
+            ));
+        }
+        TriggerKind::Webhook => {
+            lines.push(Line::from(""));
+            let info = match form.editing_id {
+                Some(ref id) => format!("POST {}  (Bearer secret)", common::webhook_path(id)),
+                None => "A bearer secret is generated on save and shown once".to_string(),
+            };
+            lines.push(Line::from(Span::styled(
+                info,
+                Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
+            )));
         }
         TriggerKind::NewNode => {}
     }
@@ -643,29 +781,12 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
     }
 
     lines.push(Line::from(""));
-
-    {
-        let focus = section_focus(TriggerFormSection::OsFilter);
-        let label_style = if focus {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        };
-        let value = if form.os_filter.is_empty() {
-            Span::styled(
-                "(none)",
-                Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-            )
-        } else {
-            Span::styled(form.os_filter.clone(), Style::default().fg(TEXT_BRIGHT))
-        };
-        let cursor = if focus { "\u{2588}" } else { "" };
-        lines.push(Line::from(vec![
-            Span::styled("OS filter  ", label_style),
-            value,
-            Span::styled(cursor.to_string(), Style::default().fg(ACCENT)),
-        ]));
-    }
+    lines.push(text_line(
+        "OS filter",
+        &form.os_filter,
+        "(none)",
+        section_focus(TriggerFormSection::OsFilter),
+    ));
     lines.push(Line::from(""));
 
     lines.push(section_header(
@@ -687,19 +808,47 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
         )));
     }
 
-    if matches!(
-        form.kind,
-        TriggerKind::InterceptMatch | TriggerKind::NewNode
-    ) {
+    if form.kind.is_node_event() {
         lines.push(Line::from(""));
         lines.push(toggle_line(
             "Include triggering node",
             form.include_triggering_node,
             section_focus(TriggerFormSection::IncludeTriggering),
         ));
+        lines.push(toggle_line(
+            "Triggering node only",
+            form.triggering_node_only,
+            section_focus(TriggerFormSection::TriggeringNodeOnly),
+        ));
     }
 
     lines
+}
+
+//
+// Editable single-line text field with a block cursor when focused and a
+// dim placeholder when empty.
+//
+fn text_line(label: &str, value: &str, placeholder: &str, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let value = if value.is_empty() {
+        Span::styled(
+            placeholder.to_string(),
+            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+        )
+    } else {
+        Span::styled(value.to_string(), Style::default().fg(TEXT_BRIGHT))
+    };
+    let cursor = if focused { "\u{2588}" } else { "" };
+    Line::from(vec![
+        Span::styled(format!("{}  ", label), label_style),
+        value,
+        Span::styled(cursor.to_string(), Style::default().fg(ACCENT)),
+    ])
 }
 
 fn chain_line(form: &TriggerForm, focused: bool) -> Line<'static> {
@@ -728,24 +877,13 @@ fn type_line(form: &TriggerForm, focused: bool) -> Line<'static> {
     } else {
         Style::default().fg(MUTED)
     };
-    let variants = [
-        (TriggerKind::Scheduled, "Scheduled"),
-        (TriggerKind::InterceptMatch, "InterceptMatch"),
-        (TriggerKind::NewNode, "NewNode"),
-    ];
-    let mut spans = vec![Span::styled("Type   ", label_style)];
-    for (kind, label) in variants {
-        if kind == form.kind {
-            spans.push(chrome::pill(label, ACCENT));
-        } else {
-            spans.push(Span::styled(
-                format!(" {} ", label),
-                Style::default().fg(DIM).bg(BG_ELEMENT),
-            ));
-        }
-        spans.push(Span::raw(" "));
-    }
-    Line::from(spans)
+    Line::from(vec![
+        Span::styled("Type   ", label_style),
+        Span::styled(
+            format!("\u{25c0} {} \u{25b6}", form.kind.label()),
+            Style::default().fg(TEXT_BRIGHT),
+        ),
+    ])
 }
 
 fn schedule_kind_line(form: &TriggerForm, focused: bool) -> Line<'static> {
@@ -868,4 +1006,125 @@ fn toggle_line(label: &str, value: bool, focused: bool) -> Line<'static> {
 
 fn _silence_unused() {
     let _ = (OK, STATUS_FAIL, BG_MENU, TEXT);
+}
+
+#[cfg(test)]
+mod trigger_form_tests {
+    use super::*;
+    use crate::app::ScheduleKind;
+
+    fn form(kind: TriggerKind) -> TriggerForm {
+        TriggerForm {
+            editing_id: None,
+            chains: vec![("c1".into(), "Chain".into())],
+            chain_cursor: 0,
+            kind,
+            schedule_kind: ScheduleKind::Interval,
+            hour: 0,
+            minute: 0,
+            interval_minutes: 60,
+            recurring: true,
+            rules: vec![(1, "rule".into())],
+            rule_cursor: 0,
+            nodes: vec![("n1".into(), "host".into(), false)],
+            agents: vec![("codex".into(), false), ("claudecode".into(), true)],
+            os_filter: String::new(),
+            include_triggering_node: false,
+            triggering_node_only: true,
+            event_kinds: kind
+                .event_kind_options()
+                .into_iter()
+                .map(|k| (k, false))
+                .collect(),
+            event_agents: vec![("codex".into(), true)],
+            config_types: "settings".into(),
+            path_glob: "**/*.json".into(),
+            new_sessions_only: true,
+            quiet_secs: 30,
+            focused_section: TriggerFormSection::Chain,
+            cursor: 0,
+        }
+    }
+
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    //
+    // Mouse hit rows must land on the rendered line of the same field.
+    //
+    #[test]
+    fn hit_rows_align_with_rendered_lines() {
+        for kind in TriggerKind::ALL {
+            let f = form(kind);
+            let lines = trigger_form_lines(&f);
+            for (row, section, cursor) in trigger_form_section_rows(&f) {
+                let text = line_text(&lines[row]);
+                let expect = match section {
+                    TriggerFormSection::Chain => "Chain".to_string(),
+                    TriggerFormSection::Type => "Type".to_string(),
+                    TriggerFormSection::Nodes => f.nodes[cursor].1.clone(),
+                    TriggerFormSection::Agents => f.agents[cursor].0.clone(),
+                    TriggerFormSection::EventKinds => f.event_kinds[cursor].0.clone(),
+                    TriggerFormSection::EventAgents => f.event_agents[cursor].0.clone(),
+                    TriggerFormSection::OsFilter => "OS filter".to_string(),
+                    TriggerFormSection::ConfigTypes => "Config types".to_string(),
+                    TriggerFormSection::PathGlob => "Path glob".to_string(),
+                    TriggerFormSection::NewSessionsOnly => "New sessions only".to_string(),
+                    TriggerFormSection::QuietPeriod => "Quiet period".to_string(),
+                    TriggerFormSection::IncludeTriggering => "Include triggering".to_string(),
+                    TriggerFormSection::TriggeringNodeOnly => "Triggering node only".to_string(),
+                    TriggerFormSection::ScheduleKindRow => "Schedule".to_string(),
+                    TriggerFormSection::ScheduleValueRow => "Interval".to_string(),
+                    TriggerFormSection::Recurring => "Recurring".to_string(),
+                    TriggerFormSection::Rule => "Rule".to_string(),
+                };
+                assert!(
+                    text.contains(&expect),
+                    "{:?}: row {} is '{}' but expected '{}'",
+                    kind.label(),
+                    row,
+                    text,
+                    expect
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn builds_configs_for_new_types() {
+        let mut f = form(TriggerKind::ReconChange);
+        f.event_kinds[0].1 = true;
+        match f.build_config().unwrap() {
+            common::TriggerConfig::ReconChange {
+                agent_short_names,
+                kinds,
+                config_types,
+                path_glob,
+            } => {
+                assert_eq!(agent_short_names, vec!["codex"]);
+                assert_eq!(kinds, vec![common::ReconChangeKind::McpServerAdded]);
+                assert_eq!(config_types, vec!["settings"]);
+                assert_eq!(path_glob.as_deref(), Some("**/*.json"));
+            }
+            other => panic!("unexpected {:?}", other),
+        }
+
+        f.path_glob = "[".into();
+        assert!(f.build_config().is_err());
+
+        let f = form(TriggerKind::SessionActivity);
+        assert!(matches!(
+            f.build_config().unwrap(),
+            common::TriggerConfig::SessionActivity {
+                new_sessions_only: true,
+                quiet_period_secs: 30,
+                ..
+            }
+        ));
+        assert!(matches!(
+            form(TriggerKind::Webhook).build_config().unwrap(),
+            common::TriggerConfig::Webhook
+        ));
+    }
 }

@@ -105,6 +105,12 @@ struct ClientState {
     pending_chain_list: Option<oneshot::Sender<Vec<ChainDefinitionInfo>>>,
     pending_chain_execution_list: Option<oneshot::Sender<Vec<ChainExecutionUpdate>>>,
     pending_chain_trigger_list: Option<oneshot::Sender<Vec<ChainTriggerInfo>>>,
+    //
+    // Awaited trigger create/update. Completed by ChainTriggerCreated /
+    // ChainTriggerUpdated, or failed by a ChainError while it is pending.
+    //
+    pending_chain_trigger_save:
+        Option<oneshot::Sender<std::result::Result<ChainTriggerInfo, String>>>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
     intercept_targets_text: String,
     intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
@@ -733,7 +739,17 @@ impl Client {
                     let _ = tx.send(state.chain_triggers.clone());
                 }
             }
-            ClientDirectMessage::ChainTriggerCreated { trigger } => {
+            ClientDirectMessage::ChainTriggerCreated { trigger }
+            | ClientDirectMessage::ChainTriggerUpdated { trigger } => {
+                if let Some(tx) = state.pending_chain_trigger_save.take() {
+                    let _ = tx.send(Ok(trigger.clone()));
+                }
+                //
+                // The one-time webhook secret goes only to the awaiting
+                // caller, never into the cached list.
+                //
+                let mut trigger = trigger;
+                trigger.webhook_secret = None;
                 if let Some(existing) = state.chain_triggers.iter_mut().find(|t| t.id == trigger.id)
                 {
                     *existing = trigger;
@@ -741,12 +757,9 @@ impl Client {
                     state.chain_triggers.push(trigger);
                 }
             }
-            ClientDirectMessage::ChainTriggerUpdated { trigger } => {
-                if let Some(existing) = state.chain_triggers.iter_mut().find(|t| t.id == trigger.id)
-                {
-                    *existing = trigger;
-                } else {
-                    state.chain_triggers.push(trigger);
+            ClientDirectMessage::ChainError { message } => {
+                if let Some(tx) = state.pending_chain_trigger_save.take() {
+                    let _ = tx.send(Err(message));
                 }
             }
             ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
@@ -1961,21 +1974,6 @@ impl Client {
         self.state.lock().await.chain_triggers.clone()
     }
 
-    pub async fn create_chain_trigger(
-        &self,
-        chain_id: String,
-        trigger_config: TriggerConfig,
-        target_spec: TargetSpec,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerCreate {
-            client_id: self.client_id.clone(),
-            chain_id,
-            trigger_config,
-            target_spec,
-        };
-        self.publish_signal(message).await
-    }
-
     pub async fn update_chain_trigger(
         &self,
         trigger_id: String,
@@ -1991,6 +1989,54 @@ impl Client {
             target_spec,
         };
         self.publish_signal(message).await
+    }
+
+    //
+    // Create a trigger and wait for the service's reply (which carries the
+    // one-time secret for webhook triggers).
+    //
+    pub async fn create_chain_trigger_wait(
+        &self,
+        chain_id: String,
+        trigger_config: TriggerConfig,
+        target_spec: TargetSpec,
+    ) -> Result<ChainTriggerInfo> {
+        let message = ClientSignalMessage::ChainTriggerCreate {
+            client_id: self.client_id.clone(),
+            chain_id,
+            trigger_config,
+            target_spec,
+        };
+        self.request(
+            "chain trigger create",
+            |s| &mut s.pending_chain_trigger_save,
+            message,
+        )
+        .await?
+        .map_err(|e| anyhow!(e))
+    }
+
+    pub async fn update_chain_trigger_wait(
+        &self,
+        trigger_id: String,
+        enabled: Option<bool>,
+        trigger_config: Option<TriggerConfig>,
+        target_spec: Option<TargetSpec>,
+    ) -> Result<ChainTriggerInfo> {
+        let message = ClientSignalMessage::ChainTriggerUpdate {
+            client_id: self.client_id.clone(),
+            trigger_id,
+            enabled,
+            trigger_config,
+            target_spec,
+        };
+        self.request(
+            "chain trigger update",
+            |s| &mut s.pending_chain_trigger_save,
+            message,
+        )
+        .await?
+        .map_err(|e| anyhow!(e))
     }
 
     pub async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {

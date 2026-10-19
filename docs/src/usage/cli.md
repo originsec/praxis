@@ -104,7 +104,24 @@ intercept enable <node-prefix> [--method proxy|vpn|hosts|tproxy]
 intercept disable <node-prefix>
 ```
 
-Enable and disable wait for the selected node to finish setup or cleanup and
+**Chain Triggers:**
+```bash
+trigger list                                      # List triggers (type, chain, config, webhook path)
+trigger create --chain <name|id-prefix> --config '<json>' \
+    [--node <id>]... [--os-filter <text>] [--agent <short-name>]... \
+    [--include-triggering-node] [--triggering-node-only]
+trigger enable <id-prefix>
+trigger disable <id-prefix>
+trigger delete <id-prefix>
+```
+
+`--config` takes the same JSON as the MCP `trigger_create` `trigger` parameter,
+for example `'{"type":"agent_change","kinds":["version_changed"]}'` or
+`'{"type":"webhook"}'` (see [Chain Triggers](./semantic-operations.md#chain-triggers)).
+`trigger create` waits for the service's reply; for a webhook trigger it prints
+the `/hooks/<id>` path and the bearer secret, which is shown only once.
+
+Intercept enable and disable wait for the selected node to finish setup or cleanup and
 return the node's error if the operation fails. Independent node commands are
 correlated separately, so concurrent callers cannot consume one another's
 responses.

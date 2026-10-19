@@ -27,6 +27,12 @@ pub struct NodeState {
     //
     pub factory_config: FactoryConfig,
     pub last_lua_scripts: Vec<String>,
+
+    //
+    // Previous session-probe listing per agent, diffed on each probe to
+    // report only new/updated sessions to the service.
+    //
+    pub session_snapshots: Arc<Mutex<crate::runtime::SessionSnapshots>>,
 }
 
 impl NodeState {
@@ -43,6 +49,7 @@ impl NodeState {
             intercept_targets: Vec::new(),
             factory_config: FactoryConfig::default(),
             last_lua_scripts: Vec::new(),
+            session_snapshots: Arc::new(Mutex::new(Default::default())),
         }
     }
 }

@@ -469,9 +469,50 @@ end
 -- last_modified } to override the defaults (session_id derived from
 -- filename, message_count from line count, last_modified from mtime).
 -- opts.skip_dir(name) -> bool can mark whole project subdirectories to skip.
+-- opts.probe_skip_parse = true skips parse_session during a session probe
+-- (for parsers that read the whole file).
 -- opts.context_path(home, project_dir_name) -> string controls the
 -- context_path written to each SessionItem.
 --
+--
+-- Session probe mode. While run_session_probe is executing, session
+-- discovery functions should only stat files (no content reads, no line
+-- counts) so the probe stays cheap enough for the ~30s cycle. Connector
+-- discovery functions consult M.is_session_probe() to pick the cheap path.
+--
+local session_probe_active = false
+
+function M.is_session_probe()
+  return session_probe_active
+end
+
+--
+-- Enumerate sessions for every user home using config.session_discovery in
+-- probe mode. Returns { items = sessions } (ReconSessions shape). The
+-- message_count of probed sessions is not meaningful.
+--
+function M.run_session_probe(_ctx, config)
+  if not config.session_discovery then
+    return { items = {} }
+  end
+  session_probe_active = true
+  local ok, result = pcall(function()
+    local sessions = {}
+    for _, home in ipairs(praxis.user_homes() or {}) do
+      for _, s in ipairs(config.session_discovery(home) or {}) do
+        table.insert(sessions, s)
+      end
+    end
+    return sessions
+  end)
+  session_probe_active = false
+  if not ok then
+    praxis.log_warn("session probe failed: " .. tostring(result))
+    return { items = {} }
+  end
+  return { items = result }
+end
+
 function M.discover_jsonl_sessions(home, opts)
   local sessions_relpath = opts.sessions_relpath
   if type(sessions_relpath) ~= "string" or sessions_relpath == "" then
@@ -499,13 +540,16 @@ function M.discover_jsonl_sessions(home, opts)
       for _, entry in ipairs(entries) do
         if entry.is_file and M.ends_with(entry.name, ".jsonl") then
           local session_id = string.sub(entry.name, 1, #entry.name - 6)
-          local message_count = praxis.count_file_lines(entry.path)
+          local message_count = 0
+          if not session_probe_active then
+            message_count = praxis.count_file_lines(entry.path)
+          end
           local last_modified = ""
           if entry.modified_unix then
             last_modified = praxis.format_unix_timestamp(entry.modified_unix)
           end
 
-          if parse_session then
+          if parse_session and not (session_probe_active and opts.probe_skip_parse) then
             local overrides = parse_session(entry.path) or {}
             if overrides.session_id ~= nil then session_id = overrides.session_id end
             if overrides.message_count ~= nil then message_count = overrides.message_count end
@@ -1372,11 +1416,16 @@ function M.run_standard_recon(ctx, config)
   end
 
   --
-  -- Drop config contents from the output now that downstream semantic
-  -- helpers have had their chance to consume them.
+  -- Record a content hash per config file (so the service can detect
+  -- content changes between recon runs), then drop the contents now that
+  -- downstream semantic helpers have had their chance to consume them.
   --
 
   for _, item in ipairs(result.config_items) do
+    local content = item.contents or praxis.read_file(item.path)
+    if content then
+      item.content_hash = praxis.sha256_hex(content)
+    end
     item.contents = nil
   end
 

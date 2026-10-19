@@ -72,6 +72,11 @@ return {
     return helpers.run_standard_recon(ctx, recon_config)
   end,
 
+  -- Optional: cheap session listing for session-activity triggers.
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
+  end,
+
   -- Required for sessions.
   create_session = function(ctx)
     return {
@@ -135,6 +140,14 @@ Key points:
 - Semantic recon (driven by `ctx.is_semantic`) populates `tools.internal_tools` by interrogating the agent through `config.session_fns`
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 - **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
+
+### Session Probe (`probe_sessions`)
+
+Session-activity chain triggers rely on a stat-only listing of the connector's sessions that nodes run every ~30 seconds while such triggers exist. Export `probe_sessions` (as above) to opt in; `helpers.run_session_probe` calls `recon_config.session_discovery` for every user home with `helpers.is_session_probe()` returning `true`, and returns `{ items = sessions }`. Only `session_file`, `session_id`, `context_path` and `last_modified` matter; the node diffs `last_modified` per `session_file` between probes.
+
+Keep the probe path cheap: `helpers.discover_jsonl_sessions` already skips line counting in probe mode, and `probe_skip_parse = true` in its options skips a `parse_session` callback that reads whole files. Bespoke discovery functions should check `helpers.is_session_probe()` and take mtimes from `praxis.read_dir` instead of reading or querying session stores (see the Gemini and Cursor connectors). Connectors without `probe_sessions` never produce session activity.
+
+`helpers.run_standard_recon` also records a `content_hash` (SHA-256 of the file contents) for every config item, which recon-change triggers use to detect config edits.
 
 ### Reading Session Content (`read_session_content`)
 

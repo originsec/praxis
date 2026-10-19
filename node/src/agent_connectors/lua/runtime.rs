@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::utils::LockExt;
-use common::{ReconResult, SessionContext};
+use common::{ReconResult, ReconSessions, SessionContext};
 
 static COMMAND_HANDLES: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicU32>>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
@@ -189,6 +189,7 @@ pub struct LuaManifest {
     pub has_recon: bool,
     pub has_fingerprint: bool,
     pub has_read_session_content: bool,
+    pub has_probe_sessions: bool,
 }
 
 pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
@@ -208,6 +209,7 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
     let has_read_session_content = table
         .contains_key("read_session_content")
         .map_err(lua_error)?;
+    let has_probe_sessions = table.contains_key("probe_sessions").map_err(lua_error)?;
 
     Ok(LuaManifest {
         name,
@@ -215,6 +217,7 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
         has_recon,
         has_fingerprint,
         has_read_session_content,
+        has_probe_sessions,
     })
 }
 
@@ -251,6 +254,25 @@ pub fn vm_recon(lua: &Lua, is_semantic: bool, process_path: Option<&str>) -> Res
     let value: Value = func.call(ctx).map_err(lua_error)?;
     let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
     Ok(recon)
+}
+
+//
+// Cheap session enumeration used by the session-activity probe. Connectors
+// opt in by exporting `probe_sessions`, which returns the ReconSessions
+// shape ({ items = { ... } }).
+//
+pub fn vm_probe_sessions(lua: &Lua, process_path: Option<&str>) -> Result<ReconSessions> {
+    let table = connector_table(lua)?;
+    let func: Function = table
+        .get("probe_sessions")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing function 'probe_sessions'"))?;
+    let ctx = lua
+        .to_value(&json!({ "process_path": process_path }))
+        .map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    let sessions: ReconSessions = lua.from_value(value).map_err(lua_error)?;
+    Ok(sessions)
 }
 
 pub fn vm_create_session(

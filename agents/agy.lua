@@ -134,7 +134,8 @@ local function discover_sessions_for_home(home)
           context_path = contexts[conversation.name] or home,
           session_file = transcript,
           last_modified = last_modified,
-          message_count = praxis.count_file_lines(transcript) or 0,
+          message_count = helpers.is_session_probe() and 0
+            or (praxis.count_file_lines(transcript) or 0),
           content = nil,
         })
       end
@@ -313,6 +314,10 @@ return {
 
   recon = function(ctx)
     return helpers.run_standard_recon(ctx, recon_config)
+  end,
+
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
   end,
 
   create_session = function(ctx)

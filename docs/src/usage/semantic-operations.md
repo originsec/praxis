@@ -374,12 +374,76 @@ Scheduled triggers can be **recurring** (fire repeatedly) or **one-shot** (fire 
 
 **New Node** - Fires whenever a new node registers with the service. There is a 10-second delay after registration to allow agent discovery to complete before the chain executes.
 
+**Recon Change** - Fires when a node's stored recon result for an agent changes. Each time the service stores a recon result (any `recon_run`, the Recon window, or a chain/tool that runs recon) it diffs it against the previously stored result for the same node and agent. Detected change kinds:
+
+| Kind | Meaning |
+|------|---------|
+| `mcp_server_added` / `mcp_server_removed` | An MCP server (keyed by name + project scope) appeared or disappeared |
+| `skill_added` / `skill_removed` | A skill / slash command appeared or disappeared |
+| `config_added` / `config_removed` | A config file appeared or disappeared |
+| `config_changed` | A config file's content hash changed |
+
+Filters (all optional, empty = any): agent short names, change kinds, config types (matches `settings` and project-scoped `settings:/path` alike), and a path glob such as `**/.claude/settings.json`. Config-type and path filters only constrain `config_*` changes. Plugins and hooks have no section of their own in the recon model: plugin MCP servers show up as MCP server changes, and hooks live in settings files so they show up as `config_changed`. Internal tools (semantic recon only) and sessions are not diffed. The first recon stored for a node/agent is the baseline and never fires. Content changes need a content hash, which nodes record from this release on.
+
+**Agent Change** - Fires when an agent appears on a node, disappears from it, or its fingerprinted version changes (`appeared`, `disappeared`, `version_changed`). Derived from the node information updates the service already receives every ~30 seconds. Filters: agent short names and event kinds. The first update the service sees from a node after a service restart is the baseline. A node going offline is not reported as agents disappearing. Version changes need a version on both sides, so a connector reporting a version for the first time is not a change.
+
+**Session Activity** - Fires when an agent on a node shows a new session or an updated one (changed modification time) since the previous check. While at least one session-activity trigger is enabled, the trigger engine asks nodes every ~30 seconds to run a stat-only **session probe**: each connector that exports `probe_sessions` lists its session files (no content reads, no line counts) and the node reports only the sessions that are new or modified since its previous probe. Filters: agent short names, **New sessions only** (ignore updates to existing sessions), and **Quiet period** (wait until the session has had no new activity for N seconds before firing; resolution is the ~30s probe cycle; 0 fires on first observation). The first probe after a node starts is the baseline. Supported for Claude Code, Codex CLI, Cursor Agent, Droid CLI, Gemini CLI, Antigravity CLI and Pi Coding Agent. Claude Desktop and Microsoft 365 Copilot have no file-based session store, so they never produce session activity. Claude Code subagent transcripts (nested below the project directory) are not tracked, only top-level session files.
+
+**Webhook** - Fires when an external system calls `POST /hooks/<trigger_id>` on the service's webhook listener with the trigger's bearer secret. The JSON request body becomes the trigger context. See [Webhook Triggers](#webhook-triggers).
+
+Recon-change, agent-change and session-activity triggers are debounced per trigger, node and agent (or session): after firing they will not fire again for the same key for 60 seconds. Webhook triggers accept at most one call per trigger every 5 seconds (later calls get `429`).
+
+#### Trigger Context
+
+Event triggers hand a description of the event to the chain: the Trigger element outputs it, so the first block receives it as its input (the same way intercept-match triggers pass the matched URL and rules). For the new event types the context is pretty-printed JSON:
+
+```json
+{
+  "trigger": "recon_change",
+  "node_id": "…",
+  "agent_short_name": "claudecode",
+  "changes": [
+    { "kind": "mcp_server_added", "name": "filesystem", "detail": "npx @mcp/fs" },
+    { "kind": "config_changed", "name": "/home/u/.claude/settings.json", "config_type": "settings" }
+  ]
+}
+```
+
+- `agent_change`: `node_id`, `agent_short_name`, `agent_name`, `kind`, `old_version`, `new_version`, `timestamp`
+- `session_activity`: `node_id`, `agent_short_name`, `session_id`, `session_file`, `context_path`, `last_modified`, `is_new`
+- `webhook`: `trigger_id`, `received_at`, `payload` (the request body, or `null` for an empty body)
+
+#### Webhook Triggers
+
+The webhook listener is **disabled by default**. Enable it in **Settings → Service → Webhook Listener** (or set `webhook_server_enabled`, see [Configuration](../reference/config.md#webhook-listener)). It binds to `127.0.0.1:8588` unless you change the bind address and port; it serves plain HTTP, so put it behind a TLS-terminating proxy before exposing it beyond the host.
+
+When a webhook trigger is created the service generates a random secret (`pxwh_…`) and returns it **once**: the TUI shows it in a notice (and copies it to the clipboard when a clipboard tool is available), `praxis_cli trigger create` prints it, and MCP `trigger_create` includes it as `webhook_secret`. The service stores only its SHA-256 hash, so a lost secret cannot be recovered: delete the trigger and create a new one. Editing a webhook trigger keeps its secret.
+
+```bash
+curl -X POST "http://127.0.0.1:8588/hooks/<trigger_id>" \
+  -H "Authorization: Bearer pxwh_..." \
+  -H "Content-Type: application/json" \
+  -d '{"ref": "refs/heads/main", "sha": "abc123"}'
+```
+
+| Status | Meaning |
+|--------|---------|
+| `202` | Accepted; the chain runs in the background |
+| `400` | Body is not valid JSON |
+| `401` | Missing, malformed or wrong bearer token |
+| `404` | No webhook trigger with that ID |
+| `409` | The trigger is disabled |
+| `413` | Body larger than 64 KiB |
+| `429` | The trigger was fired less than 5 seconds ago |
+
+The token is compared as a SHA-256 digest in constant time. Secrets and request headers are never logged. Webhook triggers have no triggering node, so the target spec resolves against all registered nodes (narrow it with node IDs, the OS filter or agent names).
+
 #### Creating Triggers
 
 From **Operations** (`Ctrl+P`) → **Triggers**:
 
 1. Press `Ctrl+N` to open the trigger form
-2. Select the target chain, trigger type, and schedule/rule settings
+2. Select the target chain and trigger type (`←/→` on the Type row), then the type's settings: schedule, intercept rule, change kinds / event agents / config filters, or session options. Webhook triggers have no settings; the secret is shown after saving.
 3. Configure the **Target Spec** (see [Flexible Targeting](#flexible-targeting) below)
 4. Save with `Ctrl+S`
 
@@ -406,7 +470,7 @@ The service runs a trigger engine that polls for due scheduled triggers every 30
 4. Updates the trigger's `last_fired_at` timestamp
 5. For scheduled triggers, computes the next fire time (or disables if non-recurring)
 
-Event-based triggers (Intercept Match, New Node) fire immediately in response to the event rather than on a polling schedule.
+Event-based triggers (Intercept Match, New Node, Recon Change, Agent Change, Webhook) fire immediately in response to the event rather than on a polling schedule. Session Activity triggers fire when a node's probe report arrives (or, with a quiet period, on the first 30-second tick after the session has gone quiet).
 
 ### Flexible Targeting
 
@@ -420,10 +484,11 @@ By default, chains run against a single node and agent. The **TargetSpec** syste
 | **OS Filter** | Case-insensitive substring match on the node's OS details | None |
 | **Agent Short Names** | Specific agent types to target | Empty (all available agents) |
 | **Include Triggering Node** | For event triggers: ensure the node that caused the event is included | Off |
+| **Triggering Node Only** | For event triggers: run only on the node that caused the event (the other filters still apply to it) | On for new triggers created in the TUI, off elsewhere |
 
 When a trigger fires, the target spec is resolved against the current set of registered nodes:
 
-1. Start with all registered nodes
+1. Start with all registered nodes (only the triggering node when **Triggering Node Only** is set and the trigger has one)
 2. Filter by specific node IDs (if any specified)
 3. Filter by OS substring (if specified)
 4. For each remaining node, select agents matching the agent filter

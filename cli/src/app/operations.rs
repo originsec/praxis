@@ -1,6 +1,9 @@
 use super::*;
 use common::TriggerConfig;
 
+/// Upper bound for the session-activity quiet period entered in the form.
+const MAX_QUIET_SECS: u64 = 86_400;
+
 impl App {
     pub(crate) fn refresh_operations(&self) {
         let client = self.client.clone();
@@ -1077,15 +1080,11 @@ impl App {
             .map(|n| (n.node_id.clone(), n.machine_name.clone(), false))
             .collect();
 
-        let mut agent_names: Vec<String> = Vec::new();
-        for node in &self.nodes.nodes {
-            for agent in &node.discovered_agents {
-                if agent.available && !agent_names.contains(&agent.short_name) {
-                    agent_names.push(agent.short_name.clone());
-                }
-            }
-        }
-        let agents: Vec<(String, bool)> = agent_names.into_iter().map(|a| (a, false)).collect();
+        let agents: Vec<(String, bool)> = self
+            .known_agent_names()
+            .into_iter()
+            .map(|a| (a, false))
+            .collect();
 
         self.trigger_form = Some(TriggerForm {
             editing_id: None,
@@ -1100,12 +1099,34 @@ impl App {
             rules,
             rule_cursor: 0,
             nodes,
+            event_agents: agents.clone(),
             agents,
             os_filter: String::new(),
             include_triggering_node: false,
+            triggering_node_only: true,
+            event_kinds: Vec::new(),
+            config_types: String::new(),
+            path_glob: String::new(),
+            new_sessions_only: false,
+            quiet_secs: 0,
             focused_section: TriggerFormSection::Chain,
             cursor: 0,
         });
+    }
+
+    //
+    // Agent short names currently available on any connected node.
+    //
+    fn known_agent_names(&self) -> Vec<String> {
+        let mut agent_names: Vec<String> = Vec::new();
+        for node in &self.nodes.nodes {
+            for agent in &node.discovered_agents {
+                if agent.available && !agent_names.contains(&agent.short_name) {
+                    agent_names.push(agent.short_name.clone());
+                }
+            }
+        }
+        agent_names
     }
 
     pub(crate) fn edit_selected_trigger(&mut self) {
@@ -1147,30 +1168,40 @@ impl App {
             })
             .collect();
 
-        let mut agent_names: Vec<String> = Vec::new();
-        for node in &self.nodes.nodes {
-            for agent in &node.discovered_agents {
-                if agent.available && !agent_names.contains(&agent.short_name) {
-                    agent_names.push(agent.short_name.clone());
+        //
+        // Also include any agent referenced by the spec (or the event
+        // filter) so the user can see it even if no node is currently
+        // online advertising it.
+        //
+        let with_selected = |selected: &[String]| -> Vec<(String, bool)> {
+            let mut names = self.known_agent_names();
+            for a in selected {
+                if !names.contains(a) {
+                    names.push(a.clone());
                 }
             }
-        }
-        //
-        // Also include any agent referenced by the spec so the user can see
-        // it even if no node is currently online advertising it.
-        //
-        for a in &trigger.target_spec.agent_short_names {
-            if !agent_names.contains(a) {
-                agent_names.push(a.clone());
+            names
+                .into_iter()
+                .map(|a| {
+                    let sel = selected.contains(&a);
+                    (a, sel)
+                })
+                .collect()
+        };
+        let agents = with_selected(&trigger.target_spec.agent_short_names);
+        let event_agent_filter: &[String] = match &trigger.trigger_config {
+            TriggerConfig::ReconChange {
+                agent_short_names, ..
             }
-        }
-        let agents: Vec<(String, bool)> = agent_names
-            .into_iter()
-            .map(|a| {
-                let sel = trigger.target_spec.agent_short_names.contains(&a);
-                (a, sel)
-            })
-            .collect();
+            | TriggerConfig::AgentChange {
+                agent_short_names, ..
+            }
+            | TriggerConfig::SessionActivity {
+                agent_short_names, ..
+            } => agent_short_names,
+            _ => &[],
+        };
+        let event_agents = with_selected(event_agent_filter);
 
         let (kind, schedule_kind, hour, minute, interval_minutes, recurring, rule_cursor) =
             match &trigger.trigger_config {
@@ -1209,7 +1240,49 @@ impl App {
                     true,
                     0,
                 ),
+                other => {
+                    let kind = match other {
+                        TriggerConfig::ReconChange { .. } => TriggerKind::ReconChange,
+                        TriggerConfig::AgentChange { .. } => TriggerKind::AgentChange,
+                        TriggerConfig::SessionActivity { .. } => TriggerKind::SessionActivity,
+                        _ => TriggerKind::Webhook,
+                    };
+                    (kind, ScheduleKind::Interval, 0, 0, 60, true, 0)
+                }
             };
+
+        let selected_kinds: Vec<&str> = match &trigger.trigger_config {
+            TriggerConfig::ReconChange { kinds, .. } => kinds.iter().map(|k| k.as_str()).collect(),
+            TriggerConfig::AgentChange { kinds, .. } => kinds.iter().map(|k| k.as_str()).collect(),
+            _ => Vec::new(),
+        };
+        let event_kinds = kind
+            .event_kind_options()
+            .into_iter()
+            .map(|k| {
+                let sel = selected_kinds.contains(&k.as_str());
+                (k, sel)
+            })
+            .collect();
+        let (config_types, path_glob) = match &trigger.trigger_config {
+            TriggerConfig::ReconChange {
+                config_types,
+                path_glob,
+                ..
+            } => (
+                config_types.join(", "),
+                path_glob.clone().unwrap_or_default(),
+            ),
+            _ => (String::new(), String::new()),
+        };
+        let (new_sessions_only, quiet_secs) = match &trigger.trigger_config {
+            TriggerConfig::SessionActivity {
+                new_sessions_only,
+                quiet_period_secs,
+                ..
+            } => (*new_sessions_only, *quiet_period_secs),
+            _ => (false, 0),
+        };
 
         self.trigger_form = Some(TriggerForm {
             editing_id: Some(trigger.id.clone()),
@@ -1227,6 +1300,13 @@ impl App {
             agents,
             os_filter: trigger.target_spec.os_filter.clone().unwrap_or_default(),
             include_triggering_node: trigger.target_spec.include_triggering_node,
+            triggering_node_only: trigger.target_spec.triggering_node_only,
+            event_kinds,
+            event_agents,
+            config_types,
+            path_glob,
+            new_sessions_only,
+            quiet_secs,
             focused_section: TriggerFormSection::Chain,
             cursor: 0,
         });
@@ -1241,37 +1321,19 @@ impl App {
             return;
         };
 
-        let trigger_config = match form.kind {
-            TriggerKind::Scheduled => {
-                let schedule = match form.schedule_kind {
-                    ScheduleKind::DailyAt => common::ScheduleSpec::DailyAt {
-                        hour: form.hour.min(23),
-                        minute: form.minute.min(59),
-                    },
-                    ScheduleKind::Interval => common::ScheduleSpec::Interval {
-                        minutes: form.interval_minutes.max(1),
-                    },
-                };
-                TriggerConfig::Scheduled {
-                    schedule,
-                    recurring: form.recurring,
-                }
+        let trigger_config = match form.build_config() {
+            Ok(config) => config,
+            Err(message) => {
+                self.confirm = Some(ConfirmAction {
+                    message,
+                    action: ConfirmKind::Info,
+                });
+                //
+                // Restore the form so the user can fix it.
+                //
+                self.trigger_form = Some(form);
+                return;
             }
-            TriggerKind::InterceptMatch => {
-                let Some((rule_id, _)) = form.rules.get(form.rule_cursor).cloned() else {
-                    self.confirm = Some(ConfirmAction {
-                        message: "Pick an intercept rule first.".to_string(),
-                        action: ConfirmKind::Info,
-                    });
-                    //
-                    // Restore the form so the user can fix it.
-                    //
-                    self.trigger_form = Some(form);
-                    return;
-                };
-                TriggerConfig::InterceptMatch { rule_id }
-            }
-            TriggerKind::NewNode => TriggerConfig::NewNode,
         };
 
         let target_spec = common::TargetSpec {
@@ -1296,25 +1358,38 @@ impl App {
                 .map(|(a, _)| a.clone())
                 .collect(),
             include_triggering_node: form.include_triggering_node,
+            triggering_node_only: form.triggering_node_only,
         };
 
-        let result = if let Some(id) = form.editing_id {
-            self.client
-                .update_chain_trigger(id, None, Some(trigger_config), Some(target_spec))
-                .await
-        } else {
-            self.client
-                .create_chain_trigger(chain_id, trigger_config, target_spec)
-                .await
-        };
-
-        if let Err(e) = result {
-            self.confirm = Some(ConfirmAction {
-                message: format!("Trigger save failed: {}", e),
-                action: ConfirmKind::Info,
-            });
-        }
-        self.refresh_triggers_after(Duration::from_millis(250));
+        //
+        // Saves wait for the service's reply off the event loop: a webhook
+        // trigger's secret is only ever delivered in that reply.
+        //
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+        let editing_id = form.editing_id;
+        tokio::spawn(async move {
+            let result = match editing_id {
+                Some(id) => {
+                    client
+                        .update_chain_trigger_wait(
+                            id,
+                            None,
+                            Some(trigger_config),
+                            Some(target_spec),
+                        )
+                        .await
+                }
+                None => {
+                    client
+                        .create_chain_trigger_wait(chain_id, trigger_config, target_spec)
+                        .await
+                }
+            };
+            if let Some(tx) = tx {
+                let _ = tx.send(AppEvent::TriggerSaved(result.map_err(|e| e.to_string())));
+            }
+        });
     }
 
     pub(crate) async fn handle_trigger_form_key(&mut self, key: KeyEvent) {
@@ -1349,7 +1424,12 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 if let Some(form) = self.trigger_form.as_mut() {
-                    Self::toggle_trigger_form_selection(form);
+                    match form.focused_section {
+                        S::OsFilter => form.os_filter.push(' '),
+                        S::ConfigTypes => form.config_types.push(' '),
+                        S::PathGlob => form.path_glob.push(' '),
+                        _ => Self::toggle_trigger_form_selection(form),
+                    }
                 }
             }
             KeyCode::Enter => {
@@ -1362,6 +1442,15 @@ impl App {
                     match form.focused_section {
                         S::OsFilter => {
                             form.os_filter.pop();
+                        }
+                        S::ConfigTypes => {
+                            form.config_types.pop();
+                        }
+                        S::PathGlob => {
+                            form.path_glob.pop();
+                        }
+                        S::QuietPeriod => {
+                            form.quiet_secs /= 10;
                         }
                         S::ScheduleValueRow if form.kind == TriggerKind::Scheduled => {
                             match form.schedule_kind {
@@ -1389,6 +1478,20 @@ impl App {
                     match form.focused_section {
                         S::OsFilter => {
                             form.os_filter.push(c);
+                        }
+                        S::ConfigTypes => {
+                            form.config_types.push(c);
+                        }
+                        S::PathGlob => {
+                            form.path_glob.push(c);
+                        }
+                        S::QuietPeriod if c.is_ascii_digit() => {
+                            let d = c.to_digit(10).unwrap() as u64;
+                            form.quiet_secs = form
+                                .quiet_secs
+                                .saturating_mul(10)
+                                .saturating_add(d)
+                                .min(MAX_QUIET_SECS);
                         }
                         S::ScheduleValueRow
                             if form.kind == TriggerKind::Scheduled && c.is_ascii_digit() =>
@@ -1446,15 +1549,17 @@ impl App {
                 form.chain_cursor = (((form.chain_cursor as i32) + delta).rem_euclid(n)) as usize;
             }
             S::Type => {
-                let variants = [
-                    TriggerKind::Scheduled,
-                    TriggerKind::InterceptMatch,
-                    TriggerKind::NewNode,
-                ];
+                let variants = TriggerKind::ALL;
                 let idx = variants.iter().position(|k| *k == form.kind).unwrap_or(0) as i32;
                 let n = variants.len() as i32;
                 let next = (idx + delta).rem_euclid(n) as usize;
                 form.kind = variants[next];
+                form.event_kinds = form
+                    .kind
+                    .event_kind_options()
+                    .into_iter()
+                    .map(|k| (k, false))
+                    .collect();
                 form.cursor = 0;
             }
             S::ScheduleKindRow => {
@@ -1503,9 +1608,34 @@ impl App {
                 let n = form.agents.len() as i32;
                 form.cursor = (((form.cursor as i32) + delta).rem_euclid(n)) as usize;
             }
-            S::OsFilter => {}
+            S::EventKinds => {
+                if form.event_kinds.is_empty() {
+                    return;
+                }
+                let n = form.event_kinds.len() as i32;
+                form.cursor = (((form.cursor as i32) + delta).rem_euclid(n)) as usize;
+            }
+            S::EventAgents => {
+                if form.event_agents.is_empty() {
+                    return;
+                }
+                let n = form.event_agents.len() as i32;
+                form.cursor = (((form.cursor as i32) + delta).rem_euclid(n)) as usize;
+            }
+            S::QuietPeriod => {
+                let next =
+                    (form.quiet_secs as i64 + delta as i64 * 10).clamp(0, MAX_QUIET_SECS as i64);
+                form.quiet_secs = next as u64;
+            }
+            S::OsFilter | S::ConfigTypes | S::PathGlob => {}
             S::IncludeTriggering => {
                 form.include_triggering_node = !form.include_triggering_node;
+            }
+            S::TriggeringNodeOnly => {
+                form.triggering_node_only = !form.triggering_node_only;
+            }
+            S::NewSessionsOnly => {
+                form.new_sessions_only = !form.new_sessions_only;
             }
         }
     }
@@ -1527,10 +1657,23 @@ impl App {
                     a.1 = !a.1;
                 }
             }
+            S::EventKinds => {
+                if let Some(k) = form.event_kinds.get_mut(form.cursor) {
+                    k.1 = !k.1;
+                }
+            }
+            S::EventAgents => {
+                if let Some(a) = form.event_agents.get_mut(form.cursor) {
+                    a.1 = !a.1;
+                }
+            }
             S::Recurring => form.recurring = !form.recurring,
             S::IncludeTriggering => {
                 form.include_triggering_node = !form.include_triggering_node;
             }
+            S::TriggeringNodeOnly => form.triggering_node_only = !form.triggering_node_only,
+            S::NewSessionsOnly => form.new_sessions_only = !form.new_sessions_only,
+            S::OsFilter | S::ConfigTypes | S::PathGlob | S::QuietPeriod => {}
             //
             // For scalar pickers, toggle treats Enter like →.
             //

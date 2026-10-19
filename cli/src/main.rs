@@ -89,6 +89,12 @@ enum Commands {
         command: commands::session::SessionCommand,
     },
 
+    /// Chain trigger commands
+    Trigger {
+        #[command(subcommand)]
+        command: commands::trigger::TriggerCommand,
+    },
+
     /// Persist the RabbitMQ URL to ~/.config/praxis/config
     #[command(name = "set-rabbitmqurl")]
     SetRabbitmqUrl {
@@ -108,6 +114,7 @@ impl Commands {
             Commands::Agent { command } => commands::agent::execute(client, command).await,
             Commands::Intercept { command } => commands::intercept::execute(client, command).await,
             Commands::Session { command } => commands::session::execute(client, command).await,
+            Commands::Trigger { command } => commands::trigger::execute(client, command).await,
             Commands::SetRabbitmqUrl { .. } | Commands::Config => {
                 unreachable!("config subcommands handled before connecting to a client")
             }

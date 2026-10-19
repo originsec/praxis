@@ -137,6 +137,18 @@ Access via **Settings** (`Ctrl+S`) > **Service** in the praxis TUI.
 
 The MCP server exposes all Praxis tools via the Model Context Protocol over streamable-HTTP transport. It is used by the built-in Orchestrator and can also be used by external AI agents. See [MCP Server](../usage/mcp.md) for full details.
 
+### Webhook Listener
+
+Access via **Settings** (`Ctrl+S`) > **Service** > **Webhook Listener** in the praxis TUI. Changes apply immediately (the listener is started, rebound or stopped).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `webhook_server_enabled` | `false` | Enable the HTTP listener that fires webhook chain triggers |
+| `webhook_server_bind_address` | `127.0.0.1` | IP address to bind (use `0.0.0.0` to listen on all interfaces) |
+| `webhook_server_port` | `8588` | Port for the listener |
+
+The listener accepts `POST /hooks/<trigger_id>` with `Authorization: Bearer <secret>` and a JSON body of at most 64 KiB. It speaks plain HTTP; terminate TLS in front of it before exposing it off-host. See [Webhook Triggers](../usage/semantic-operations.md#webhook-triggers).
+
 ### Praxis Agent Settings
 
 Access via **Settings** (`Ctrl+S`) > **Agents** in the praxis TUI.
@@ -398,7 +410,7 @@ Tables:
 - `operations` - Operation executions
 - `operation_chains` - Chain workflows
 - `chain_executions` - Chain runs
-- `chain_triggers` - Automated chain triggers (scheduled, intercept-match, new-node)
+- `chain_triggers` - Automated chain triggers (scheduled, intercept-match, new-node, recon-change, agent-change, session-activity, webhook); webhook triggers keep only the SHA-256 of their secret in `webhook_secret_hash`
 - `chain_memories` - Key-value store for chain Memory elements
 - `chain_payloads` - Static content for Payload chain elements
 - `intercepted_traffic` - Intercepted traffic

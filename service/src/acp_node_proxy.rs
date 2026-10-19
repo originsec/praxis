@@ -26,6 +26,7 @@ use tokio::sync::{OnceCell, RwLock, oneshot};
 use crate::database::Database;
 use crate::messaging::{send_to_client, send_to_node};
 use crate::remote_nodes::RemoteNodeManager;
+use crate::trigger_engine::TriggerEngine;
 
 //
 // Prefix for client_ids that represent the service's own orchestrator
@@ -75,6 +76,12 @@ pub struct AcpNodeProxy {
     // nodes as `_praxis/recon` responses. Set once during startup.
     //
     database: OnceCell<Arc<Database>>,
+    //
+    // Trigger engine notified when a persisted recon result differs from
+    // the previously stored one. Weak because the engine itself holds this
+    // proxy.
+    //
+    trigger_engine: OnceCell<std::sync::Weak<TriggerEngine>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -109,6 +116,14 @@ impl AcpNodeProxy {
     //
     pub fn set_database(&self, db: Arc<Database>) {
         let _ = self.database.set(db);
+    }
+
+    //
+    // Wire up the trigger engine so recon changes can fire recon-change
+    // triggers. Called once during startup after the engine is built.
+    //
+    pub fn set_trigger_engine(&self, engine: &Arc<TriggerEngine>) {
+        let _ = self.trigger_engine.set(Arc::downgrade(engine));
     }
 
     //
@@ -189,6 +204,28 @@ impl AcpNodeProxy {
         let Some(db) = self.database.get() else {
             return;
         };
+
+        //
+        // Read the previous result before overwriting it so recon-change
+        // triggers can be fed the diff. No previous result means no baseline,
+        // so nothing fires for a first recon.
+        //
+        let previous = match db
+            .get_recon_result(&meta.node_id, &meta.agent_short_name)
+            .await
+        {
+            Ok(previous) => previous.map(|p| p.recon_result),
+            Err(e) => {
+                common::log_warn!(
+                    "Could not load previous recon for node {} agent {}: {}",
+                    common::short_id(&meta.node_id),
+                    meta.agent_short_name,
+                    e
+                );
+                None
+            }
+        };
+
         if let Err(e) = db
             .upsert_recon_result(
                 &meta.node_id,
@@ -215,6 +252,21 @@ impl AcpNodeProxy {
                 recon.config.items.len(),
                 recon.sessions.items.len()
             );
+
+            if let Some(previous) = previous {
+                let changes = crate::recon_diff::diff_recon(&previous, &recon);
+                if !changes.is_empty()
+                    && let Some(engine) = self.trigger_engine.get().and_then(|w| w.upgrade())
+                {
+                    let node_id = meta.node_id.clone();
+                    let agent = meta.agent_short_name.clone();
+                    tokio::spawn(async move {
+                        engine
+                            .fire_recon_change_triggers(&node_id, &agent, changes)
+                            .await;
+                    });
+                }
+            }
         }
     }
 

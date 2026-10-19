@@ -54,6 +54,15 @@ pub const CLAUDE_CCRV2_PORT: &str = "claude_ccrv2_port";
 pub const CLAUDE_CCRV1_DEFAULT_PORT: u16 = 8586;
 pub const CLAUDE_CCRV2_DEFAULT_PORT: u16 = 8587;
 
+/// Chain-trigger webhook listener configuration keys
+pub const WEBHOOK_SERVER_ENABLED: &str = "webhook_server_enabled";
+pub const WEBHOOK_SERVER_BIND_ADDRESS: &str = "webhook_server_bind_address";
+pub const WEBHOOK_SERVER_PORT: &str = "webhook_server_port";
+
+/// Webhook listener defaults: disabled, loopback only
+pub const WEBHOOK_SERVER_DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
+pub const WEBHOOK_SERVER_DEFAULT_PORT: u16 = 8588;
+
 /// All recognized config keys for validation purposes.
 pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_MODEL_DEFINITIONS,
@@ -74,6 +83,9 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     CLAUDE_CCRV1_PORT,
     CLAUDE_CCRV2_ENABLED,
     CLAUDE_CCRV2_PORT,
+    WEBHOOK_SERVER_ENABLED,
+    WEBHOOK_SERVER_BIND_ADDRESS,
+    WEBHOOK_SERVER_PORT,
 ];
 
 /// A model definition stored in config
@@ -298,5 +310,23 @@ impl ServiceConfig {
         self.get(CLAUDE_CCRV2_PORT)
             .and_then(|s| s.parse().ok())
             .unwrap_or(CLAUDE_CCRV2_DEFAULT_PORT)
+    }
+
+    pub fn is_webhook_server_enabled(&self) -> bool {
+        self.get_bool(WEBHOOK_SERVER_ENABLED, false)
+    }
+
+    pub fn get_webhook_server_bind_address(&self) -> String {
+        self.get(WEBHOOK_SERVER_BIND_ADDRESS)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(WEBHOOK_SERVER_DEFAULT_BIND_ADDRESS)
+            .to_string()
+    }
+
+    pub fn get_webhook_server_port(&self) -> u16 {
+        self.get(WEBHOOK_SERVER_PORT)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(WEBHOOK_SERVER_DEFAULT_PORT)
     }
 }

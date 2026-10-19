@@ -2,6 +2,7 @@ pub mod agent;
 pub mod intercept;
 pub mod node;
 pub mod session;
+pub mod trigger;
 
 //
 // Case-insensitive node lookup by exact id or unique prefix, shared by the

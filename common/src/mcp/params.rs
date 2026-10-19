@@ -1,7 +1,7 @@
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::{ScheduleSpec, TargetSpec, TriggerConfig};
+use crate::{AgentChangeKind, ReconChangeKind, ScheduleSpec, TargetSpec, TriggerConfig};
 
 //
 // Tool parameter types for MCP server operations.
@@ -320,6 +320,59 @@ pub enum TriggerConfigParams {
         rule_id: i64,
     },
     NewNode,
+    ReconChange {
+        #[schemars(
+            description = "Only fire for recon changes of these agent short names (empty = any agent)"
+        )]
+        #[serde(default)]
+        agent_short_names: Vec<String>,
+
+        #[schemars(
+            description = "Change kinds that fire the trigger (empty = any): mcp_server_added, mcp_server_removed, skill_added, skill_removed, config_added, config_removed, config_changed"
+        )]
+        #[serde(default)]
+        kinds: Vec<ReconChangeKind>,
+
+        #[schemars(
+            description = "Config changes only: config_type values to match, e.g. 'settings' (also matches project-scoped 'settings:/path'). Empty = any"
+        )]
+        #[serde(default)]
+        config_types: Vec<String>,
+
+        #[schemars(
+            description = "Config changes only: glob matched against the config file path, e.g. '**/.claude/settings.json'"
+        )]
+        path_glob: Option<String>,
+    },
+    AgentChange {
+        #[schemars(description = "Only fire for these agent short names (empty = any agent)")]
+        #[serde(default)]
+        agent_short_names: Vec<String>,
+
+        #[schemars(
+            description = "Event kinds that fire the trigger (empty = any): appeared, disappeared, version_changed"
+        )]
+        #[serde(default)]
+        kinds: Vec<AgentChangeKind>,
+    },
+    SessionActivity {
+        #[schemars(description = "Only fire for these agent short names (empty = any agent)")]
+        #[serde(default)]
+        agent_short_names: Vec<String>,
+
+        #[schemars(
+            description = "Fire only for sessions that are new since the previous probe (default false = new or updated)"
+        )]
+        #[serde(default)]
+        new_sessions_only: bool,
+
+        #[schemars(
+            description = "Seconds a session must stay idle before the trigger fires (0 = fire on first observation). Resolution is the ~30s probe cycle"
+        )]
+        #[serde(default)]
+        quiet_period_secs: u64,
+    },
+    Webhook,
 }
 
 impl TryFrom<TriggerConfigParams> for TriggerConfig {
@@ -338,6 +391,38 @@ impl TryFrom<TriggerConfigParams> for TriggerConfig {
                 Ok(Self::InterceptMatch { rule_id })
             }
             TriggerConfigParams::NewNode => Ok(Self::NewNode),
+            TriggerConfigParams::ReconChange {
+                agent_short_names,
+                kinds,
+                config_types,
+                path_glob,
+            } => {
+                let config = Self::ReconChange {
+                    agent_short_names,
+                    kinds,
+                    config_types,
+                    path_glob: path_glob.filter(|g| !g.trim().is_empty()),
+                };
+                config.validate()?;
+                Ok(config)
+            }
+            TriggerConfigParams::AgentChange {
+                agent_short_names,
+                kinds,
+            } => Ok(Self::AgentChange {
+                agent_short_names,
+                kinds,
+            }),
+            TriggerConfigParams::SessionActivity {
+                agent_short_names,
+                new_sessions_only,
+                quiet_period_secs,
+            } => Ok(Self::SessionActivity {
+                agent_short_names,
+                new_sessions_only,
+                quiet_period_secs,
+            }),
+            TriggerConfigParams::Webhook => Ok(Self::Webhook),
         }
     }
 }
@@ -362,6 +447,12 @@ pub struct TriggerTargetParams {
     )]
     #[serde(default)]
     pub include_triggering_node: bool,
+
+    #[schemars(
+        description = "For event triggers (new_node, recon_change, agent_change, session_activity, intercept_match), run only on the node that caused the event"
+    )]
+    #[serde(default)]
+    pub triggering_node_only: bool,
 }
 
 impl From<TriggerTargetParams> for TargetSpec {
@@ -371,6 +462,7 @@ impl From<TriggerTargetParams> for TargetSpec {
             os_filter: value.os_filter,
             agent_short_names: value.agent_short_names,
             include_triggering_node: value.include_triggering_node,
+            triggering_node_only: value.triggering_node_only,
         }
     }
 }
@@ -381,7 +473,7 @@ pub struct TriggerCreateParams {
     pub chain: String,
 
     #[schemars(
-        description = "Trigger configuration. Use {\"type\":\"new_node\"} to fire whenever a node registers."
+        description = "Trigger configuration, tagged by type: scheduled, intercept_match, new_node, recon_change, agent_change, session_activity, webhook. Use {\"type\":\"new_node\"} to fire whenever a node registers."
     )]
     pub trigger: TriggerConfigParams,
 

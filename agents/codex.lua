@@ -136,11 +136,13 @@ local function discover_sessions_for_home(home)
     sessions_relpath = ".codex/sessions",
     context_path = function(h, _name) return h end,
     parse_session = parse_codex_session,
+    probe_skip_parse = true,
   })
   append({
     sessions_relpath = ".codex/archived_sessions",
     context_path = function(h, _name) return h end,
     parse_session = parse_codex_session,
+    probe_skip_parse = true,
   })
 
   return sessions
@@ -273,6 +275,10 @@ return {
 
   recon = function(ctx)
     return helpers.run_standard_recon(ctx, recon_config)
+  end,
+
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
   end,
 
   create_session = function(ctx)

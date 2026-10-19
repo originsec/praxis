@@ -125,6 +125,20 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             .await;
         }
 
+        NodeSignalMessage::SessionActivity(report) => {
+            if !ctx.node_handler.is_node_registered(&report.node_id).await {
+                return Ok(());
+            }
+            if let Some(ref trigger_engine) = ctx.trigger_engine
+                && !report.events.is_empty()
+            {
+                let te = trigger_engine.clone();
+                tokio::spawn(async move {
+                    te.handle_session_activity(report).await;
+                });
+            }
+        }
+
         NodeSignalMessage::InformationUpdate(update) => {
             if !ctx.node_handler.is_node_registered(&update.node_id).await {
                 common::log_warn!(

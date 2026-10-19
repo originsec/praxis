@@ -86,7 +86,21 @@ local function discover_sessions_for_home(home)
       local chats_dir = praxis.path_join({ proj.path, "chats" })
       if praxis.path_is_dir(chats_dir) then
         for _, entry in ipairs(praxis.read_dir(chats_dir) or {}) do
-          if entry.is_file and is_session_file(entry.name) then
+          if entry.is_file and is_session_file(entry.name) and helpers.is_session_probe() then
+            --
+            -- Session probe: stat only. The file stem stands in for the
+            -- sessionId and mtime for lastUpdated.
+            --
+            table.insert(sessions, {
+              session_id = (entry.name:gsub("%.json$", "")),
+              context_path = project_hash,
+              session_file = entry.path,
+              last_modified = entry.modified_unix
+                and praxis.format_unix_timestamp(entry.modified_unix) or "",
+              message_count = 0,
+              content = nil,
+            })
+          elseif entry.is_file and is_session_file(entry.name) then
             local parsed = helpers.parse_json(praxis.read_file(entry.path) or "")
             if parsed and type(parsed.sessionId) == "string" then
               local last_updated = parsed.lastUpdated
@@ -381,6 +395,10 @@ return {
 
   recon = function(ctx)
     return helpers.run_standard_recon(ctx, recon_config)
+  end,
+
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
   end,
 
   create_session = function(ctx)

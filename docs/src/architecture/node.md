@@ -64,6 +64,19 @@ last check is never reported as available. The service triggers a
 fingerprint pass on each node roughly every 30 seconds via a
 `NodeInformationUpdateRequest` broadcast.
 
+### Session Probe
+
+While session-activity chain triggers exist, the service also broadcasts
+`SessionActivityProbeRequest` every ~30 seconds. For each available connector
+that exports `probe_sessions` (optionally filtered to the requested agent short
+names) the node runs a stat-only session listing with a 10-second timeout,
+skipping a connector whose Lua VM is busy. It diffs the result against the
+previous listing kept in `NodeState::session_snapshots` (`session_file` →
+`last_modified`) and sends a `NodeSignalMessage::SessionActivity` report with
+only new or modified sessions (at most 50 per agent, newest first). The first
+probe of an agent after node start only records the baseline. See
+`node/src/runtime/session_probe.rs`.
+
 ### Development Builds
 
 In debug builds, `PRAXIS_IGNORE_SERVICE_AGENTS=1` (the default) causes the node

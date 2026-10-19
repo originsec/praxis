@@ -648,6 +648,32 @@ impl App {
 
                 true
             }
+            AppEvent::TriggerSaved(result) => {
+                match result {
+                    Ok(trigger) => {
+                        if let Some(secret) = trigger.webhook_secret {
+                            let copied = crate::clipboard::copy(&secret);
+                            self.confirm = Some(ConfirmAction {
+                                message: format!(
+                                    "Webhook trigger saved. Secret (shown once{}):\n{}\n\nPOST {} with header\nAuthorization: Bearer <secret>",
+                                    if copied { ", copied to clipboard" } else { "" },
+                                    secret,
+                                    common::webhook_path(&trigger.id),
+                                ),
+                                action: ConfirmKind::Notice,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        self.confirm = Some(ConfirmAction {
+                            message: format!("Trigger save failed: {}", e),
+                            action: ConfirmKind::Info,
+                        });
+                    }
+                }
+                self.refresh_triggers_after(std::time::Duration::ZERO);
+                true
+            }
             AppEvent::TriggersRefreshed {
                 triggers,
                 intercept_rules,

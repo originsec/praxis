@@ -4,7 +4,7 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::{
-    AddRemoteNodeForm, App, ConfirmKind, Popup, PopupKind, RunOptions, TriggerForm,
+    AddRemoteNodeForm, App, Popup, PopupKind, RunOptions, TriggerForm,
 };
 use crate::ui::chain_form::{ChainFormHitMap, HitRect};
 use crate::ui::chrome;
@@ -14,11 +14,8 @@ use crate::ui::nodes::sessions_list_rect;
 use crate::ui::popup::trigger_form_section_rows;
 
 pub fn register_confirm_hits(app: &App, terminal: Rect, confirm: &crate::app::ConfirmAction) {
-    let is_info = matches!(confirm.action, ConfirmKind::Info);
-    let width = (confirm.message.len() as u16 + 8)
-        .min(terminal.width.saturating_sub(4))
-        .max(36);
-    let height = 7u16;
+    let is_info = confirm.action.is_dismiss_only();
+    let (width, height) = crate::ui::popup::confirm_geometry(&confirm.message, terminal);
     let area = centered_rect_fixed(width, height, terminal);
     let body = chrome::modal_content_rect(area);
 
@@ -36,7 +33,7 @@ pub fn register_confirm_hits(app: &App, terminal: Rect, confirm: &crate::app::Co
     if is_info {
         app.hits_register(body, MouseAction::ConfirmDismiss);
     } else {
-        let hints_y = body.y.saturating_add(2);
+        let hints_y = body.y.saturating_add(height.saturating_sub(5));
         // " y " (3) + " yes" (4) = 7
         app.hits_register(
             Rect::new(body.x, hints_y, 7, 1),

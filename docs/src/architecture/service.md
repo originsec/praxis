@@ -187,6 +187,10 @@ enum TriggerConfig {
     Scheduled { schedule: ScheduleSpec, recurring: bool },
     InterceptMatch { rule_id: i64 },
     NewNode,
+    ReconChange { agent_short_names, kinds: Vec<ReconChangeKind>, config_types, path_glob },
+    AgentChange { agent_short_names, kinds: Vec<AgentChangeKind> },
+    SessionActivity { agent_short_names, new_sessions_only: bool, quiet_period_secs: u64 },
+    Webhook,
 }
 
 enum ScheduleSpec {
@@ -197,7 +201,7 @@ enum ScheduleSpec {
 
 ### Scheduler Loop
 
-The engine runs a polling loop that checks for due scheduled triggers every 30 seconds. It also accepts refresh signals (via `Notify`) so that CRUD operations on triggers cause an immediate re-check.
+The engine runs a polling loop that checks for due scheduled triggers every 30 seconds. The same tick flushes session-activity observations whose quiet period has elapsed and, while any session-activity trigger is enabled, broadcasts `SessionActivityProbeRequest` to nodes. It also accepts refresh signals (via `Notify`) so that CRUD operations on triggers cause an immediate re-check.
 
 For each due trigger:
 1. Load the associated chain definition
@@ -213,6 +217,16 @@ Event triggers fire outside the polling loop, in direct response to events:
 **InterceptMatch** - When intercepted traffic matches an intercept rule, the node dispatch handler calls `fire_intercept_match_triggers()`. The engine looks up all enabled InterceptMatch triggers whose `rule_id` matches, applies a 60-second debounce per trigger, and fires matching chains.
 
 **NewNode** - When a node registers, the node dispatch handler spawns a delayed task (10 seconds to allow agent discovery) that calls `fire_new_node_triggers()`. The engine fires all enabled NewNode triggers with the registering node ID as the triggering node.
+
+**ReconChange** - `AcpNodeProxy` reads the previously stored recon result before persisting a new `_praxis/recon` response, diffs the two (`recon_diff::diff_recon`: MCP servers, skills, config files by path and content hash) and, if anything changed, calls `fire_recon_change_triggers()` in a background task.
+
+**AgentChange** - `NodeRegistry::update_node_info` keeps the last available-agent list per node (outside the registration record, so it survives re-registration) and publishes an `AgentChangeEvent` (appeared / disappeared / version_changed) on a `tokio::sync::broadcast` channel for every difference. Any service component can call `NodeRegistry::subscribe_agent_events()`; the trigger engine is one subscriber.
+
+**SessionActivity** - Nodes answer `SessionActivityProbeRequest` with a `NodeSignalMessage::SessionActivity` report listing sessions that are new or modified since their previous probe; `handle_session_activity()` fires immediately or parks the session until its quiet period elapses.
+
+**Webhook** - `webhook::WebhookServerManager` runs an axum listener (disabled by default) for `POST /hooks/{trigger_id}`. It verifies the bearer token against the stored SHA-256 hash in constant time, caps bodies at 64 KiB, rate-limits each trigger to one call per 5 seconds and fires the chain in the background (`202 Accepted`).
+
+Recon-change, agent-change and session-activity firings are debounced for 60 seconds per (trigger, node, agent or session). Event context is passed to the chain as the Trigger element's output (pretty-printed JSON for the new types), so the first block receives it as input.
 
 ### Trigger Storage
 
