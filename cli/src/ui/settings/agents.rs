@@ -75,6 +75,12 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
         header_spans.push(Span::styled("space", Style::default().fg(TEXT_BRIGHT)));
         header_spans.push(Span::styled(" toggle", Style::default().fg(MUTED)));
         header_spans.push(Span::raw("    "));
+        header_spans.push(Span::styled("r", Style::default().fg(TEXT_BRIGHT)));
+        header_spans.push(Span::styled(" repair", Style::default().fg(MUTED)));
+        header_spans.push(Span::raw("    "));
+        header_spans.push(Span::styled("v", Style::default().fg(TEXT_BRIGHT)));
+        header_spans.push(Span::styled(" validate", Style::default().fg(MUTED)));
+        header_spans.push(Span::raw("    "));
         header_spans.push(Span::styled("^d", Style::default().fg(TEXT_BRIGHT)));
         header_spans.push(Span::styled(" delete", Style::default().fg(MUTED)));
     }
@@ -156,7 +162,27 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
         ),
     ]));
 
-    let reset_sel = state.selected == 4 + script_count + 1;
+    let gen_sel = state.selected == 4 + script_count + 1;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if gen_sel { "\u{276f} " } else { "  " },
+            if gen_sel {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+        Span::styled(
+            "\u{2726} Generate connector\u{2026}",
+            if gen_sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+    ]));
+
+    let reset_sel = state.selected == 4 + script_count + 2;
     lines.push(Line::from(vec![
         Span::styled(
             if reset_sel { "\u{276f} " } else { "  " },

@@ -31,7 +31,7 @@ pub fn clear_reset() {
     RESET_FLAG.store(false, Ordering::SeqCst);
 }
 
-fn is_reset() -> bool {
+pub(super) fn is_reset() -> bool {
     RESET_FLAG.load(Ordering::SeqCst)
 }
 
@@ -114,7 +114,7 @@ pub fn create_vm(script: &str) -> Result<Lua> {
 // then evaluates source) and make_session_vm (which then evaluates bytecode).
 //
 
-fn init_vm_shell() -> Result<Lua> {
+pub(super) fn init_vm_shell() -> Result<Lua> {
     let lua = Lua::new();
 
     //
@@ -140,7 +140,7 @@ fn init_vm_shell() -> Result<Lua> {
     Ok(lua)
 }
 
-fn set_connector(lua: &Lua, value: Value) -> Result<()> {
+pub(super) fn set_connector(lua: &Lua, value: Value) -> Result<()> {
     match value {
         Value::Table(t) => {
             lua.globals().set("_connector", t).map_err(lua_error)?;
@@ -1195,7 +1195,7 @@ fn install_shared_libraries(lua: &Lua) -> Result<()> {
     Ok(())
 }
 
-fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValue> {
+pub(crate) fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValue> {
     //
     // Empty Lua tables are ambiguous and mlua serializes them as JSON objects
     // rather than arrays. Normalize the args field so serde can deserialize it

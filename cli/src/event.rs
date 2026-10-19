@@ -121,6 +121,10 @@ pub enum AppEvent {
     // Documentation helper agent streaming response, correlated by request_id.
     //
     DocHelper(DocHelperEvent),
+    //
+    // Connector authoring progress / outcome, correlated by request_id.
+    //
+    ConnectorAuthor(ConnectorAuthorEvent),
     Tick,
     AnimationTick,
 }
@@ -134,6 +138,21 @@ pub enum DocHelperEvent {
     FollowUp { request_id: String },
     Complete { request_id: String },
     Error { request_id: String, message: String },
+}
+
+//
+// Progress and the final outcome of a connector authoring workflow,
+// forwarded from the client transport.
+//
+pub enum ConnectorAuthorEvent {
+    Progress {
+        request_id: String,
+        message: String,
+    },
+    Finished {
+        request_id: String,
+        outcome: common::connector_author::ConnectorAuthorOutcome,
+    },
 }
 
 pub struct NodeSessionEntry {

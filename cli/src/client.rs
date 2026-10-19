@@ -162,6 +162,13 @@ struct ClientState {
     // the event payload, so overlapping requests remain distinguishable.
     //
     doc_helper_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::DocHelperEvent>>,
+
+    //
+    // Connector authoring workflows in flight, keyed by request_id. The
+    // entry is removed when the (single) result arrives.
+    //
+    connector_author_subs:
+        HashMap<String, mpsc::UnboundedSender<crate::event::ConnectorAuthorEvent>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1025,6 +1032,32 @@ impl Client {
                 }
             }
 
+            //
+            // Connector authoring progress and outcome.
+            //
+            ClientDirectMessage::ConnectorAuthorProgress {
+                request_id,
+                message,
+            } => {
+                if let Some(tx) = state.connector_author_subs.get(&request_id) {
+                    let _ = tx.send(crate::event::ConnectorAuthorEvent::Progress {
+                        request_id,
+                        message,
+                    });
+                }
+            }
+            ClientDirectMessage::ConnectorAuthorResult {
+                request_id,
+                outcome,
+            } => {
+                if let Some(tx) = state.connector_author_subs.remove(&request_id) {
+                    let _ = tx.send(crate::event::ConnectorAuthorEvent::Finished {
+                        request_id,
+                        outcome,
+                    });
+                }
+            }
+
             _ => {}
         }
     }
@@ -1722,6 +1755,55 @@ impl Client {
             prompt,
             history,
             context,
+        })
+        .await
+    }
+
+    //
+    // Start a connector authoring workflow (generate / repair / validate).
+    // Progress lines and the final outcome arrive on the returned receiver.
+    //
+    pub async fn start_connector_author(
+        &self,
+        request: common::connector_author::ConnectorAuthorRequest,
+    ) -> Result<(
+        String,
+        mpsc::UnboundedReceiver<crate::event::ConnectorAuthorEvent>,
+    )> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.state
+            .lock()
+            .await
+            .connector_author_subs
+            .insert(request_id.clone(), tx);
+        if let Err(e) = self
+            .publish_signal(ClientSignalMessage::ConnectorAuthorStart {
+                client_id: self.client_id.clone(),
+                request_id: request_id.clone(),
+                request,
+            })
+            .await
+        {
+            self.state
+                .lock()
+                .await
+                .connector_author_subs
+                .remove(&request_id);
+            return Err(e);
+        }
+        Ok((request_id, rx))
+    }
+
+    pub async fn cancel_connector_author(&self, request_id: &str) -> Result<()> {
+        self.state
+            .lock()
+            .await
+            .connector_author_subs
+            .remove(request_id);
+        self.publish_signal(ClientSignalMessage::ConnectorAuthorCancel {
+            client_id: self.client_id.clone(),
+            request_id: request_id.to_string(),
         })
         .await
     }

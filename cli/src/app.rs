@@ -1,5 +1,6 @@
 mod agent_scripts;
 mod chain_form;
+mod connector_author;
 mod forms;
 pub mod help;
 mod input;
@@ -16,6 +17,7 @@ mod settings;
 pub use self::chain_form::{
     collect_session_groups, element_issues, input_port_count, output_port_count,
 };
+pub use self::connector_author::*;
 pub use self::forms::*;
 pub use self::intercept::InterceptState;
 pub use self::log_query::LogQueryState;
@@ -538,6 +540,7 @@ impl App {
                 true
             }
             AppEvent::DocHelper(event) => self.apply_doc_helper_event(event),
+            AppEvent::ConnectorAuthor(event) => self.apply_connector_author_event(event).await,
             AppEvent::SessionListPoll => false,
             AppEvent::OrchestratorRetryRecovery => {
                 if self.orchestrator.recovering {
@@ -1253,6 +1256,14 @@ impl App {
         //
         if self.settings.model_form.is_some() {
             self.handle_model_form_key(key).await;
+            return;
+        }
+
+        //
+        // Connector authoring form / review view intercepts all keys.
+        //
+        if self.settings.connector_form.is_some() || self.settings.connector_view.is_some() {
+            self.handle_connector_author_key(key).await;
             return;
         }
 

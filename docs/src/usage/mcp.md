@@ -160,6 +160,20 @@ returning success. `trigger_create` returns the created trigger's full ID as
 `trigger_toggle` return only after the requested trigger is deleted or updated.
 Service-side validation and database errors are returned as MCP tool errors.
 
+### Connector Authoring
+
+- `connector_generate` — Draft a Lua connector for an agent Praxis does not support yet (`node`, `executable`, optional `max_repairs`)
+- `connector_repair` — Propose a patched copy of a failing connector (`node`, `script`, optional `error`, `executable`, `max_repairs`)
+- `connector_validate` — Dry-run a saved script (`script`) or raw Lua (`script_content`) on a node
+
+All three use the model assigned to **Connector Author** (falling back to the
+Orchestrator model) and run on the service, so they can take minutes; MCP
+request cancellation cancels the workflow. Generated and repaired scripts are
+saved as **disabled** user scripts and returned for review — nothing is
+enabled automatically. The tool result is the full outcome (dry-run report,
+saved script id/name, the script, and a unified `diff` for repairs). See
+[LLM-Assisted Generation and Repair](../connectors/adding-new.md#llm-assisted-generation-and-repair).
+
 ### Traffic
 
 - `traffic_search` — Search intercepted traffic

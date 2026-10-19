@@ -3,6 +3,7 @@ pub mod ai;
 pub mod clear_epoch;
 pub mod client_transport;
 pub mod config;
+pub mod connector_author;
 pub mod id;
 pub mod intercept_match;
 pub mod log_query_schema;

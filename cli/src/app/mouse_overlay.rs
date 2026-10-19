@@ -662,7 +662,7 @@ impl App {
                     Some(rel_row - 2)
                 } else if rel_row == 2 + mc {
                     Some(mc)
-                } else if rel_row >= 6 + mc && rel_row < 6 + mc + 7 {
+                } else if rel_row >= 6 + mc && rel_row < 6 + mc + 8 {
                     Some(mc + 1 + (rel_row - 6 - mc))
                 } else {
                     None
@@ -674,10 +674,8 @@ impl App {
                     Some(rel_row - 2)
                 } else if rel_row >= 9 && rel_row < 9 + sc {
                     Some(4 + rel_row - 9)
-                } else if rel_row == 10 + sc {
-                    Some(4 + sc)
-                } else if rel_row == 11 + sc {
-                    Some(4 + sc + 1)
+                } else if (10 + sc..13 + sc).contains(&rel_row) {
+                    Some(4 + sc + (rel_row - 10 - sc))
                 } else {
                     None
                 }

@@ -263,7 +263,13 @@ In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/�
 ## Settings (`Ctrl+S`)
 
 Configuration management:
-- **LLM** — model definitions, provider selection, API keys, feature assignment (orchestrator, documentation helper, semantic ops, semantic parser, traffic parser), and the Traffic Parser body limit
+- **LLM** — model definitions, provider selection, API keys, feature assignment (orchestrator, documentation helper, semantic ops, semantic parser, traffic parser, connector author), and the Traffic Parser body limit
+- **Agents** — the Praxis Agent settings and the Lua connector scripts. `Space` toggles a script, `Enter` edits it in `$EDITOR`, `Ctrl+D` deletes it. The LLM-assisted connector actions live here too (see [LLM-Assisted Generation and Repair](../connectors/adding-new.md#llm-assisted-generation-and-repair)):
+  - **✦ Generate connector…** opens a form (node, executable name or path, repair attempts) that drafts a connector for an agent Praxis does not support yet.
+  - `r` on a script opens **Repair…** (node, optional error description, optional executable, repair attempts) and proposes a patched copy.
+  - `v` on a script opens **Validate…**, a dry run on the chosen node.
+
+  Each action opens a review view that streams progress and then shows the dry-run report and the saved script — or, for a repair, a colourised diff (`d` toggles diff/script). `↑/↓`/`PgUp`/`PgDn` scroll, `Esc` cancels a running workflow or closes the view. When the dry run passed, `e` enables the saved draft; for a repair it also disables the original so the two don't collide on the same `short_name`. Drafts whose dry run failed can't be enabled from the review — fix them in `$EDITOR` first.
 - **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, log query row limits, prompt timeout
 - **About** — connection info
 

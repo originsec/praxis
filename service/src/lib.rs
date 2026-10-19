@@ -6,6 +6,7 @@ mod agent_chat;
 mod banner;
 mod claude_bridge;
 mod config;
+mod connector_author;
 mod conversions;
 mod database;
 mod dispatch;
@@ -487,6 +488,7 @@ async fn run_main_loop() -> Result<()> {
     // Initialize the documentation helper manager.
     //
     let doc_helper_manager = Arc::new(crate::doc_helper::DocHelperManager::new());
+    let connector_author_manager = Arc::new(crate::connector_author::ConnectorAuthorManager::new());
     common::log_info!("Initialized documentation helper manager");
 
     //
@@ -974,6 +976,7 @@ async fn run_main_loop() -> Result<()> {
         chain_executor,
         agent_chat_manager,
         doc_helper_manager,
+        connector_author_manager,
         acp_server,
         acp_node_proxy,
         toolkit_manager,

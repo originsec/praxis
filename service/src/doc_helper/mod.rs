@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
 
-mod retrieval;
+pub(crate) mod retrieval;
 
 const DOC_HELPER_PROMPT: &str = include_str!("../prompts/doc_helper.prompt");
 

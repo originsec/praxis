@@ -21,9 +21,18 @@ fn raw_arc<T: Serialize>(v: &T) -> Arc<RawValue> {
 }
 
 pub use common::acp_ext::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
+    EXT_PRAXIS_CONNECTOR_DRY_RUN, EXT_PRAXIS_CONNECTOR_PROBE, EXT_PRAXIS_GREP_FILES,
+    EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
     EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
+
+//
+// Upper bound on a connector dry run (fingerprint + static recon). Enforced
+// inside the Lua VM by an instruction hook; sandboxed commands are further
+// capped at 10s each.
+//
+
+const CONNECTOR_DRY_RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Debug, Deserialize)]
 struct ReconParams {
@@ -98,6 +107,24 @@ struct WriteSessionContentResult {
     error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ConnectorProbeParams {
+    executable: String,
+    #[serde(default)]
+    extra_names: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectorDryRunParams {
+    script: String,
+    #[serde(default = "default_true")]
+    sandbox: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize)]
 struct ExtError {
     error: String,
@@ -120,6 +147,8 @@ pub async fn dispatch(
         EXT_PRAXIS_WRITE_FILE => handle_write_file(req).await,
         EXT_PRAXIS_GREP_FILES => handle_grep_files(registry, req).await,
         EXT_PRAXIS_WRITE_SESSION_CONTENT => handle_write_session_content(registry, req).await,
+        EXT_PRAXIS_CONNECTOR_PROBE => handle_connector_probe(req).await,
+        EXT_PRAXIS_CONNECTOR_DRY_RUN => handle_connector_dry_run(registry, req).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -166,6 +195,70 @@ async fn handle_recon(
         Some(r) => Ok(ext_ok(&r)),
         None => Ok(ext_err("Recon produced no result (VM busy or failed)")),
     }
+}
+
+//
+// Gather bounded connector-authoring inputs for an agent executable (help /
+// version output, config-dir listing, redacted small config files).
+//
+
+async fn handle_connector_probe(req: ExtRequest) -> Result<ExtResponse, acp::Error> {
+    let params: ConnectorProbeParams = parse_params(&req)?;
+    match tokio::task::spawn_blocking(move || {
+        crate::agent_connectors::probe::probe(&params.executable, &params.extra_names)
+    })
+    .await
+    {
+        Ok(probe) => Ok(ext_ok(&probe)),
+        Err(e) => Ok(ext_err(format!("Connector probe failed: {}", e))),
+    }
+}
+
+//
+// Validate a connector script on this node without registering it or
+// creating a session. When the script's short_name matches an agent that is
+// already registered, a warning is added so the operator knows to disable
+// the existing connector before enabling this one.
+//
+
+async fn handle_connector_dry_run(
+    registry: &Arc<RwLock<AgentRegistry>>,
+    req: ExtRequest,
+) -> Result<ExtResponse, acp::Error> {
+    let params: ConnectorDryRunParams = parse_params(&req)?;
+    let sandboxed = params.sandbox;
+    let mut result = match tokio::task::spawn_blocking(move || {
+        crate::agent_connectors::lua::dry_run::dry_run(
+            &params.script,
+            params.sandbox,
+            CONNECTOR_DRY_RUN_TIMEOUT,
+        )
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => return Ok(ext_err(format!("Connector dry run failed: {}", e))),
+    };
+
+    //
+    // Only unreviewed (sandboxed) scripts are candidates for enabling; an
+    // enabled script trivially matches its own registration.
+    //
+
+    if sandboxed
+        && let Some(short_name) = result.short_name.clone()
+        && registry
+            .read()
+            .await
+            .find_by_short_name(&short_name)
+            .is_some()
+    {
+        result.warnings.push(format!(
+            "an agent with short_name '{}' is already registered on this node; disable it before enabling this script",
+            short_name
+        ));
+    }
+    Ok(ext_ok(&result))
 }
 
 async fn handle_read_file(

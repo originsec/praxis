@@ -153,6 +153,13 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
         state.editing,
         &state.edit_buffer,
     ));
+    lines.push(setting_row(
+        "Connector Author Model",
+        &state.connector_author_model,
+        state.selected == base + 7,
+        state.editing,
+        &state.edit_buffer,
+    ));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);

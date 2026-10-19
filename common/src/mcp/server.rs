@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use super::client::McpClient;
 use super::params::*;
 use crate::acp_ext::{EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE};
+use crate::connector_author::ConnectorAuthorRequest;
 use crate::{AgentFileType, ReconResult};
 
 const SERVER_NAME: &str = "praxis";
@@ -1390,6 +1391,90 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "enabled": enabled,
             "message": if enabled { "Chain trigger enabled" } else { "Chain trigger disabled" }
         }))
+    }
+
+    // ── Connector Authoring ──────────────────────────────────────────────
+
+    #[tool(
+        description = "Generate a draft Lua connector for an agent Praxis does not support yet, using the service's configured LLM. The node probes the executable (--help/--version output, config dir listing, redacted small config files); the draft is dry-run on that node (syntax, callbacks, fingerprint, static recon, sandboxed) and repaired up to max_repairs times. The result is saved as a DISABLED user script with a provenance header and is never enabled automatically: review the returned script, then enable it in Settings > Agents. Takes minutes."
+    )]
+    async fn connector_generate(
+        &self,
+        Parameters(params): Parameters<ConnectorGenerateParams>,
+        ct: tokio_util::sync::CancellationToken,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.run_connector_author(&params.node, ct, |node_id| {
+            ConnectorAuthorRequest::Generate {
+                node_id,
+                executable: params.executable,
+                max_repairs: params.max_repairs,
+            }
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Propose a repair for an existing Lua connector that fails on a node (fingerprint/recon errors, or recon now empty where it previously had data). Dry-runs the current script to capture the failure, probes the agent again, asks the configured LLM for a patched script, validates it, and saves it as a new DISABLED user script. Returns the proposed script and a unified diff; the original is left untouched. Takes minutes."
+    )]
+    async fn connector_repair(
+        &self,
+        Parameters(params): Parameters<ConnectorRepairParams>,
+        ct: tokio_util::sync::CancellationToken,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.run_connector_author(&params.node, ct, |node_id| ConnectorAuthorRequest::Repair {
+            node_id,
+            script: params.script,
+            error: params.error,
+            executable: params.executable,
+            max_repairs: params.max_repairs,
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Dry-run a Lua connector on a node without enabling it: syntax check, required callbacks, fingerprint, then static (non-semantic) recon. No session is created. Disabled scripts and raw script_content run sandboxed (no writes, process control or non --version/--help commands)."
+    )]
+    async fn connector_validate(
+        &self,
+        Parameters(params): Parameters<ConnectorValidateParams>,
+        ct: tokio_util::sync::CancellationToken,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.run_connector_author(&params.node, ct, |node_id| {
+            ConnectorAuthorRequest::Validate {
+                node_id,
+                script: params.script,
+                script_content: params.script_content,
+            }
+        })
+        .await
+    }
+}
+
+impl<C: McpClient + Clone + 'static> PraxisServer<C> {
+    //
+    // Shared body of the connector_* tools. The client is cloned out of the
+    // lock so a multi-minute workflow does not block other tool calls.
+    //
+
+    async fn run_connector_author(
+        &self,
+        node: &str,
+        ct: tokio_util::sync::CancellationToken,
+        build: impl FnOnce(String) -> ConnectorAuthorRequest,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let client = {
+            let guard = acquire_client!(self);
+            guard
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| mcp_err("No client"))?
+        };
+        let node_id = resolve_node!(client, node);
+        let outcome = client
+            .connector_author(build(node_id), ct)
+            .await
+            .map_err(mcp_err)?;
+        json_result(serde_json::to_value(&outcome).map_err(mcp_err)?)
     }
 }
 

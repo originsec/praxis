@@ -17,6 +17,7 @@ pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 pub const LLM_FEATURE_DOC_HELPER: &str = "llm_feature_doc_helper";
+pub const LLM_FEATURE_CONNECTOR_AUTHOR: &str = "llm_feature_connector_author";
 
 /// Maximum text-body data sent to the Traffic Parser, in KiB.
 pub const TRAFFIC_PARSER_BODY_LIMIT_KB: &str = "llm_traffic_parser_body_limit_kb";
@@ -62,6 +63,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
     LLM_FEATURE_DOC_HELPER,
+    LLM_FEATURE_CONNECTOR_AUTHOR,
     TRAFFIC_PARSER_BODY_LIMIT_KB,
     PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
@@ -205,6 +207,12 @@ impl ServiceConfig {
     /// Get the model definition assigned to the documentation helper feature
     pub fn get_doc_helper_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_DOC_HELPER)
+            .and_then(|model_ref| self.find_model_definition(model_ref))
+    }
+
+    /// Get the model definition assigned to the connector author feature
+    pub fn get_connector_author_model_def(&self) -> Option<ModelDefinition> {
+        self.get(LLM_FEATURE_CONNECTOR_AUTHOR)
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 

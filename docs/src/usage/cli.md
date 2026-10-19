@@ -90,6 +90,20 @@ agent session read --node <prefix> --agent <name> <file>    # Read session file
 agent session grep --node <prefix> --agent <name> <file> <pattern> # Grep session file
 ```
 
+**Connector Authoring (LLM-assisted):**
+```bash
+connector generate --node <prefix> --exe <name|path> [--max-repairs N] [--print]
+connector repair --node <prefix> --script <id|prefix|name> [--error <text>] [--exe <name|path>] [--max-repairs N] [--print]
+connector validate --node <prefix> (--script <id|prefix|name> | --file <path.lua>)
+```
+
+Progress is printed to stderr while the service works; `Ctrl+C` cancels the
+workflow on the service. `generate` and `repair` save their result as a
+disabled user script and print the dry-run report (and, for `repair`, the
+diff); `--print` also prints the full script. The command exits non-zero
+when the final dry run failed. See
+[LLM-Assisted Generation and Repair](../connectors/adding-new.md#llm-assisted-generation-and-repair).
+
 **Session Management:**
 ```bash
 session create --node <prefix> --agent <name> [--yolo] [--project <path>] [--timeout <secs>]

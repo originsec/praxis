@@ -46,6 +46,7 @@ pub struct ServiceContext {
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
     pub doc_helper_manager: Arc<crate::doc_helper::DocHelperManager>,
+    pub connector_author_manager: Arc<crate::connector_author::ConnectorAuthorManager>,
     pub acp_server: Arc<AcpServer>,
     pub acp_node_proxy: Arc<AcpNodeProxy>,
     pub toolkit_manager: Arc<ToolkitManager>,

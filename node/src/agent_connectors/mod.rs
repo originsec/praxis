@@ -1,6 +1,7 @@
 pub mod dummy;
 pub mod lua;
 pub mod praxis;
+pub mod probe;
 
 mod factory;
 mod registry;

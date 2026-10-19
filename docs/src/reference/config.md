@@ -81,6 +81,7 @@ name.
 | `llm_feature_semantic_ops` | string | Name of the model definition used for semantic operations |
 | `llm_feature_orchestrator` | string | Name of the model definition used for the Orchestrator |
 | `llm_feature_doc_helper` | string | Name of the model definition used for the documentation helper agent; falls back to `llm_feature_orchestrator` when unset |
+| `llm_feature_connector_author` | string | Name of the model definition used to generate and repair Lua connectors ([LLM-Assisted Generation and Repair](../connectors/adding-new.md#llm-assisted-generation-and-repair)); falls back to `llm_feature_orchestrator` when unset |
 
 Example `llm_model_definitions` value:
 

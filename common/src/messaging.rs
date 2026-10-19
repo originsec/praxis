@@ -1711,6 +1711,22 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // LLM-assisted connector authoring (generate / repair / validate). The
+    // service runs the workflow in the background and reports progress and
+    // the final outcome as `ConnectorAuthor*` direct messages correlated by
+    // `request_id`.
+    //
+    ConnectorAuthorStart {
+        client_id: String,
+        request_id: String,
+        request: crate::connector_author::ConnectorAuthorRequest,
+    },
+    ConnectorAuthorCancel {
+        client_id: String,
+        request_id: String,
+    },
+
+    //
     // Semantic operations.
     //
     /// Run a semantic operation by name - service looks up the definition
@@ -2246,6 +2262,20 @@ pub enum ClientDirectMessage {
     DocHelperError {
         request_id: String,
         message: String,
+    },
+
+    //
+    // Connector authoring progress lines and the final outcome. Exactly one
+    // `ConnectorAuthorResult` is sent per started request, including when it
+    // fails or is cancelled.
+    //
+    ConnectorAuthorProgress {
+        request_id: String,
+        message: String,
+    },
+    ConnectorAuthorResult {
+        request_id: String,
+        outcome: crate::connector_author::ConnectorAuthorOutcome,
     },
 
     //

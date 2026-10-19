@@ -5,6 +5,7 @@
 mod agent_chat;
 mod chains;
 mod config;
+mod connector_author;
 mod doc_helper;
 pub(crate) mod intercept;
 mod intercept_targets;
@@ -20,6 +21,7 @@ mod traffic;
 use agent_chat::*;
 use chains::*;
 use config::*;
+use connector_author::*;
 use doc_helper::*;
 use intercept::*;
 use intercept_targets::*;
@@ -66,6 +68,19 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             client_id: _,
             request_id,
         } => handle_doc_helper_cancel(ctx, request_id).await,
+
+        //
+        // LLM-assisted connector authoring.
+        //
+        ClientSignalMessage::ConnectorAuthorStart {
+            client_id,
+            request_id,
+            request,
+        } => handle_connector_author_start(ctx, client_id, request_id, request).await,
+        ClientSignalMessage::ConnectorAuthorCancel {
+            client_id: _,
+            request_id,
+        } => handle_connector_author_cancel(ctx, request_id).await,
 
         //
         // Semantic operations.

@@ -1,5 +1,6 @@
 mod about;
 mod agents;
+mod connector_author;
 mod forms;
 mod intercept;
 mod llm;
@@ -53,7 +54,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         ..chunks[2]
     };
 
-    if state.model_form.is_none() && !state.dropdown_open {
+    let overlay_open = state.model_form.is_some()
+        || state.dropdown_open
+        || state.connector_form.is_some()
+        || state.connector_view.is_some();
+    if !overlay_open {
         overlay_hits::register_settings_content_hits(app, content);
     }
 
@@ -75,6 +80,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         crate::ui::overlay_hits::register_settings_model_form_hits(app, area, form);
     }
 
+    if let Some(ref form) = state.connector_form {
+        connector_author::render_connector_form(f, area, form);
+    }
+
+    if let Some(ref view) = state.connector_view {
+        connector_author::render_connector_view(f, area, view);
+    }
+
     if let Some(ref msg) = state.status_message {
         let (icon, style) = if msg.starts_with("Failed") || msg.starts_with("Save failed") {
             (
@@ -92,7 +105,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(msg.as_str(), style),
         ]);
         f.render_widget(Paragraph::new(line), chunks[3]);
-    } else if state.model_form.is_none() && !state.dropdown_open {
+    } else if !overlay_open {
         render_settings_hints(f, chunks[3], state);
     }
 }
@@ -112,6 +125,8 @@ fn render_settings_hints(f: &mut Frame, area: Rect, state: &SettingsState) {
         }
         SettingsTab::Agents => {
             items.push(HintItem::new(action::SPACE, "toggle script"));
+            items.push(HintItem::new("r", "repair"));
+            items.push(HintItem::new("v", "validate"));
             items.push(HintItem::new(action::DELETE, "delete script"));
         }
         _ => {}

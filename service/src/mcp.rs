@@ -5,6 +5,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use common::connector_author::{ConnectorAuthorOutcome, ConnectorAuthorRequest};
 use common::{
     CLIENT_SIGNAL_QUEUE, ChainDefinitionInfo, ChainExecutionUpdate, ClientBroadcastMessage,
     ChainTriggerInfo, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
@@ -24,6 +25,8 @@ use uuid::Uuid;
 //
 // MCP client that connects to the service via RabbitMQ like any other client.
 //
+
+const CONNECTOR_AUTHOR_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone)]
 pub struct ServiceMcpClient {
@@ -78,6 +81,7 @@ struct ClientState {
     current_chain: Option<common::ChainDefinitionFull>,
     chain_executions: Vec<ChainExecutionUpdate>,
     chain_triggers: Vec<common::ChainTriggerInfo>,
+    pending_connector_author: HashMap<String, oneshot::Sender<ConnectorAuthorOutcome>>,
 }
 
 impl ServiceMcpClient {
@@ -257,6 +261,14 @@ impl ServiceMcpClient {
                 } else {
                     state.pending_op_def_delete =
                         Some(Err(format!("Failed to delete '{}'", full_name)));
+                }
+            }
+            ClientDirectMessage::ConnectorAuthorResult {
+                request_id,
+                outcome,
+            } => {
+                if let Some(tx) = state.pending_connector_author.remove(&request_id) {
+                    let _ = tx.send(outcome);
                 }
             }
             ClientDirectMessage::OpDefError { message } => {
@@ -1019,6 +1031,65 @@ impl McpClient for ServiceMcpClient {
             node_id: node_id.to_string(),
         };
         self.publish_signal(message).await
+    }
+
+    async fn connector_author(
+        &self,
+        request: ConnectorAuthorRequest,
+        cancel: CancellationToken,
+    ) -> Result<ConnectorAuthorOutcome> {
+        let request_id = Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.state
+            .lock()
+            .await
+            .pending_connector_author
+            .insert(request_id.clone(), tx);
+
+        if let Err(e) = self
+            .publish_signal(ClientSignalMessage::ConnectorAuthorStart {
+                client_id: self.client_id.clone(),
+                request_id: request_id.clone(),
+                request,
+            })
+            .await
+        {
+            self.state
+                .lock()
+                .await
+                .pending_connector_author
+                .remove(&request_id);
+            return Err(e);
+        }
+
+        //
+        // A workflow makes several LLM calls and node dry runs, so it gets a
+        // longer budget than ordinary requests. On cancel or timeout the
+        // service-side workflow is cancelled too.
+        //
+
+        let result = tokio::select! {
+            outcome = rx => outcome.map_err(|_| anyhow!("Connector author response channel closed")),
+            _ = cancel.cancelled() => Err(anyhow!("Cancelled")),
+            _ = tokio::time::sleep(CONNECTOR_AUTHOR_TIMEOUT) => Err(anyhow!(
+                "Timed out after {}s waiting for the connector author",
+                CONNECTOR_AUTHOR_TIMEOUT.as_secs()
+            )),
+        };
+        if result.is_err() {
+            self.state
+                .lock()
+                .await
+                .pending_connector_author
+                .remove(&request_id);
+            let _ = self
+                .publish_signal(ClientSignalMessage::ConnectorAuthorCancel {
+                    client_id: self.client_id.clone(),
+                    request_id,
+                })
+                .await;
+        }
+        result
     }
 }
 

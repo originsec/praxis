@@ -34,6 +34,7 @@ pub struct SettingsState {
     pub traffic_parser_model: String,
     pub traffic_parser_body_limit_kb: String,
     pub doc_helper_model: String,
+    pub connector_author_model: String,
     pub praxis_agent_model_ref: String,
     pub praxis_agent_thinking_effort: String,
     pub praxis_agent_enabled: bool,
@@ -63,13 +64,19 @@ pub struct SettingsState {
     //
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
-    pub dropdown_field: usize, // which model assignment field (1-7) the dropdown is for
+    pub dropdown_field: usize, // which model assignment field (1-8) the dropdown is for
 
     //
     // Agent scripts.
     //
     pub agent_scripts: Vec<common::LuaAgentScriptInfo>,
     pub agent_scripts_loaded: bool,
+
+    //
+    // LLM-assisted connector authoring (generate / repair / validate).
+    //
+    pub connector_form: Option<super::ConnectorAuthorForm>,
+    pub connector_view: Option<super::ConnectorAuthorView>,
 
     //
     // Intercept targets (URLs/filters pushed to nodes). The virtual file
@@ -128,6 +135,7 @@ impl Default for SettingsState {
             traffic_parser_model: String::new(),
             traffic_parser_body_limit_kb: "60".to_string(),
             doc_helper_model: String::new(),
+            connector_author_model: String::new(),
             praxis_agent_model_ref: String::new(),
             praxis_agent_thinking_effort: String::new(),
             praxis_agent_enabled: false,
@@ -145,6 +153,8 @@ impl Default for SettingsState {
             claude_ccrv2_port: "8587".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
+            connector_form: None,
+            connector_view: None,
             intercept_targets: Vec::new(),
             intercept_targets_text: String::new(),
             intercept_targets_error: None,
@@ -169,6 +179,7 @@ impl App {
             "llm_feature_traffic_parser".to_string(),
             "llm_traffic_parser_body_limit_kb".to_string(),
             "llm_feature_doc_helper".to_string(),
+            "llm_feature_connector_author".to_string(),
             "mcp_server_enabled".to_string(),
             "mcp_server_port".to_string(),
             "application_logs_enabled".to_string(),
@@ -220,6 +231,10 @@ impl App {
                     .unwrap_or("60".to_string());
                 s.doc_helper_model = config
                     .get("llm_feature_doc_helper")
+                    .cloned()
+                    .unwrap_or_default();
+                s.connector_author_model = config
+                    .get("llm_feature_connector_author")
                     .cloned()
                     .unwrap_or_default();
                 s.mcp_enabled = config
@@ -427,11 +442,12 @@ impl App {
                 // and max tokens.
                 // Layout: [models...] + add_model + feature assignments.
                 //
-                self.settings.model_definitions.len() + 8
+                self.settings.model_definitions.len() + 9
             }
             SettingsTab::Agents => {
-                // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
-                self.settings.agent_scripts.len() + 6
+                // Praxis Agent (4 items) + scripts list + "Add new" +
+                // "Generate connector" + "Reset defaults"
+                self.settings.agent_scripts.len() + 7
             }
             SettingsTab::Intercept => {
                 //
@@ -503,6 +519,11 @@ impl App {
                 7 => {
                     self.settings.doc_helper_model = name.clone();
                     self.save_setting("llm_feature_doc_helper", &name).await;
+                }
+                8 => {
+                    self.settings.connector_author_model = name.clone();
+                    self.save_setting("llm_feature_connector_author", &name)
+                        .await;
                 }
                 _ => {}
             }
@@ -753,6 +774,27 @@ impl App {
                     self.load_agent_scripts().await;
                 }
             }
+            KeyCode::Char(c @ ('r' | 'v'))
+                if self.settings.tab == SettingsTab::Agents
+                    && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                if let Some(script) = self.selected_agent_script() {
+                    let script_id = script.id.clone();
+                    let script_name = script.name.clone();
+                    let mode = if c == 'r' {
+                        ConnectorAuthorMode::Repair {
+                            script_id,
+                            script_name,
+                        }
+                    } else {
+                        ConnectorAuthorMode::Validate {
+                            script_id,
+                            script_name,
+                        }
+                    };
+                    self.open_connector_author_form(mode);
+                }
+            }
             KeyCode::Char('d')
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && self.settings.tab == SettingsTab::Agents =>
@@ -785,7 +827,7 @@ impl App {
                         0 => {
                             self.open_model_form(None);
                         }
-                        1 | 3 | 4 | 5 | 7 => {
+                        1 | 3 | 4 | 5 | 7 | 8 => {
                             //
                             // Model assignment fields — open dropdown.
                             //
@@ -795,6 +837,7 @@ impl App {
                                 4 => &self.settings.semantic_parser_model,
                                 5 => &self.settings.traffic_parser_model,
                                 7 => &self.settings.doc_helper_model,
+                                8 => &self.settings.connector_author_model,
                                 _ => unreachable!(),
                             };
                             let pos = self
@@ -870,6 +913,9 @@ impl App {
                             self.edit_agent_script_in_editor(None).await;
                         }
                         1 => {
+                            self.open_connector_author_form(ConnectorAuthorMode::Generate);
+                        }
+                        2 => {
                             // Reset defaults.
                             self.confirm = Some(ConfirmAction {
                                 message: "Reset all agent scripts to built-in defaults?"

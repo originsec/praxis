@@ -32,7 +32,7 @@ A connector handles four main capabilities:
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
-**Note**: Agent implementations change over time. Connectors may break when agents update and will require maintenance to work with the latest versions.
+**Note**: Agent implementations change over time. Connectors may break when agents update and will require maintenance to work with the latest versions. The **Repair…** action (Settings → Agents, `connector repair`, or the `connector_repair` MCP tool) diagnoses a failing connector with a dry run and proposes an LLM-patched copy for review.
 
 ## The Trait System
 
@@ -101,6 +101,7 @@ Lua agent scripts can be managed through the **Agents** tab in the praxis TUI's 
 - Enable or disable individual scripts
 - Delete scripts
 - Reset all scripts back to the built-in defaults
+- Generate a draft connector for an unsupported agent, validate a script with a dry run, or propose a repair for a broken one, using the configured LLM (see [LLM-Assisted Generation and Repair](./adding-new.md#llm-assisted-generation-and-repair))
 
 When scripts are modified in the database, the service broadcasts an agent registry update to all connected nodes so they reload the latest scripts.
 

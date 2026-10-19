@@ -405,6 +405,62 @@ pub struct TriggerToggleParams {
     pub enabled: bool,
 }
 
+//
+// Connector authoring (LLM-assisted generate / repair / validate).
+//
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConnectorGenerateParams {
+    #[schemars(description = "Node ID prefix of the node where the agent is installed")]
+    pub node: String,
+
+    #[schemars(
+        description = "Agent executable name (searched on PATH and common user bin directories) or absolute path"
+    )]
+    pub executable: String,
+
+    #[schemars(description = "Maximum repair attempts after a failed dry run (default 2, max 5)")]
+    pub max_repairs: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConnectorRepairParams {
+    #[schemars(description = "Node ID prefix of the node where the connector fails")]
+    pub node: String,
+
+    #[schemars(
+        description = "Agent script id, unique id prefix, or script name (Settings > Agents)"
+    )]
+    pub script: String,
+
+    #[schemars(
+        description = "Optional description of the failure. Without it, a repair is only proposed when a dry run on the node shows the connector failing or recon regressing to empty."
+    )]
+    pub error: Option<String>,
+
+    #[schemars(
+        description = "Optional executable name or path to probe; defaults to the path the connector's fingerprint found"
+    )]
+    pub executable: Option<String>,
+
+    #[schemars(description = "Maximum repair attempts after a failed dry run (default 2, max 5)")]
+    pub max_repairs: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConnectorValidateParams {
+    #[schemars(description = "Node ID prefix to run the dry run on")]
+    pub node: String,
+
+    #[schemars(description = "Agent script id, unique id prefix, or script name to validate")]
+    pub script: Option<String>,
+
+    #[schemars(
+        description = "Raw Lua connector source to validate instead of a saved script (always sandboxed)"
+    )]
+    pub script_content: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

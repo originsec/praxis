@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 
 use super::NodeAcpServer;
 use super::extensions::{
-    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
+    EXT_PRAXIS_CONNECTOR_DRY_RUN, EXT_PRAXIS_CONNECTOR_PROBE, EXT_PRAXIS_GREP_FILES,
+    EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
     EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 use super::sessions::NodeSession;
@@ -59,6 +60,8 @@ pub async fn handle_initialize(
             EXT_PRAXIS_WRITE_FILE: { "version": 1 },
             EXT_PRAXIS_GREP_FILES: { "version": 1 },
             EXT_PRAXIS_WRITE_SESSION_CONTENT: { "version": 1 },
+            EXT_PRAXIS_CONNECTOR_PROBE: { "version": 1 },
+            EXT_PRAXIS_CONNECTOR_DRY_RUN: { "version": 1 },
         },
         "connectors": connectors,
         "nodeId": server.node_id(),

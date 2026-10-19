@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod connector;
 pub mod intercept;
 pub mod node;
 pub mod session;

@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::connector_author::{ConnectorAuthorOutcome, ConnectorAuthorRequest};
 use crate::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainDefinitionInput, ChainExecutionUpdate,
     ChainTriggerInfo, InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult,
@@ -159,4 +160,16 @@ pub trait McpClient: Send + Sync {
 
     /// Reset a node (cancel all operations, tear down state, re-register).
     async fn reset_node(&self, node_id: &str) -> Result<()>;
+
+    //
+    // Run an LLM-assisted connector authoring workflow (generate / repair /
+    // validate) on the service and wait for its outcome. Cancelling `cancel`
+    // aborts the workflow on the service as well.
+    //
+
+    async fn connector_author(
+        &self,
+        request: ConnectorAuthorRequest,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<ConnectorAuthorOutcome>;
 }
