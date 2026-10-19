@@ -39,6 +39,9 @@ responses; watch produces newline-delimited JSON. Ctrl+C while watching detaches
 The TUI has a dedicated **Missions** workspace (`Ctrl+B` or `F6`) with a live
 list, creation and lifecycle forms, and Overview/Evidence/Events tabs. It also
 accepts the same commands in the Orchestrator input with a `/mission` prefix. `/mission attach <id>` follows events and `/mission detach` stops watching.
+Evidence and Events show short previews so large mission journals remain quick
+to scroll. Use `praxis mission events <id> --after <sequence> --json` for complete
+event payloads.
 The MCP `mission` tool exposes the same lifecycle. See [CLI](cli.md),
 [TUI](tui.md), and [MCP](mcp.md) for their controls.
 

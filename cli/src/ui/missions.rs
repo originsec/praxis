@@ -664,19 +664,10 @@ fn evidence_lines(state: &MissionsState) -> Vec<Line<'static>> {
             format!("{id}  ·  {}", event.created_at),
             Style::default().fg(MUTED),
         ));
-        let result = event.data["result"]
-            .as_str()
-            .map(pretty)
-            .unwrap_or_else(|| event.data["result"].to_string());
-        for line in common::truncate_str(&result, 16_000).lines() {
-            lines.push(Line::from(line.to_string()));
-        }
-        if result.len() > 16_000 {
-            lines.push(Line::styled(
-                "[Evidence excerpt shown]",
-                Style::default().fg(MUTED),
-            ));
-        }
+        lines.push(Line::from(format!(
+            "  {}",
+            preview(event.data["result"].as_str().unwrap_or(""), 320)
+        )));
         lines.push(Line::raw(""));
     }
     if lines.is_empty() {
@@ -710,16 +701,10 @@ fn event_lines(state: &MissionsState) -> Vec<Line<'static>> {
                 Style::default().fg(MUTED),
             ),
         ]));
-        let data = serde_json::to_string_pretty(&event.data).unwrap_or_default();
-        for line in common::truncate_str(&data, 16_000).lines() {
-            lines.push(Line::from(line.to_string()));
-        }
-        if data.len() > 16_000 {
-            lines.push(Line::styled(
-                "[Event excerpt shown]",
-                Style::default().fg(MUTED),
-            ));
-        }
+        lines.push(Line::styled(
+            format!("  {}", event_preview(event)),
+            Style::default().fg(TEXT),
+        ));
         lines.push(Line::raw(""));
     }
     if lines.is_empty() {
@@ -729,6 +714,63 @@ fn event_lines(state: &MissionsState) -> Vec<Line<'static>> {
         ));
     }
     lines
+}
+
+fn preview(value: &str, limit: usize) -> String {
+    let mut text = String::new();
+    let mut whitespace = false;
+    let mut count = 0;
+    for character in value.chars() {
+        if count == limit {
+            text.push('…');
+            break;
+        }
+        if character.is_whitespace() {
+            whitespace = true;
+            continue;
+        }
+        if whitespace && !text.is_empty() {
+            text.push(' ');
+            count += 1;
+        }
+        whitespace = false;
+        text.push(character);
+        count += 1;
+    }
+    text
+}
+
+fn event_preview(event: &common::missions::MissionEvent) -> String {
+    let data = &event.data;
+    let detail = match event.kind.as_str() {
+        "tool_dispatch" | "tool_result" => {
+            let name = data["name"].as_str().unwrap_or("tool");
+            let id = data["tool_id"].as_str().unwrap_or("unknown");
+            let outcome = if data["is_error"] == true {
+                " · error"
+            } else {
+                ""
+            };
+            let result = data["result"]
+                .as_str()
+                .or_else(|| data["arguments"].as_str())
+                .unwrap_or("");
+            format!("{name} · {id}{outcome} · {}", preview(result, 220))
+        }
+        "assistant" => preview(data["text"].as_str().unwrap_or(""), 220),
+        "usage" => format!(
+            "{} tokens this turn · {} total",
+            data["total_tokens"], data["tokens_used"]
+        ),
+        "status" => format!(
+            "{} · {}",
+            data["status"].as_str().unwrap_or(""),
+            data["error"].as_str().unwrap_or("")
+        ),
+        "created" => preview(data["name"].as_str().unwrap_or(""), 220),
+        _ => preview(&data.to_string(), 220),
+    };
+    detail
 }
 
 fn empty(f: &mut Frame, area: Rect, title: &str, detail: &str) {
@@ -1144,6 +1186,24 @@ mod tests {
         assert!(text.contains("observed-call"));
         assert!(text.contains("read_fixture"));
         assert!(text.contains("The file exists"));
+    }
+
+    #[test]
+    fn long_mission_events_render_bounded_previews() {
+        let mut state = populated();
+        state.focus = MissionFocus::Detail;
+        state.tab = MissionTab::Events;
+        state.events.push(MissionEvent {
+            mission_id: state.missions[0].id.clone(), sequence: 42, kind: "tool_result".into(),
+            created_at: "2026-10-18T10:01:00Z".into(),
+            data: serde_json::json!({"tool_id":"observed-call","name":"read_fixture","is_error":false,"result":format!("visible {} hidden-tail", "x".repeat(20_000))}),
+        });
+        let lines = event_lines(&state);
+        assert_eq!(lines.len(), 3);
+        let text = snapshot(&state, 140, 40);
+        assert!(text.contains("observed-call"));
+        assert!(text.contains("visible"));
+        assert!(!text.contains("hidden-tail"));
     }
 
     #[test]
