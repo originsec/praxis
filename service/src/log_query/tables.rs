@@ -14,6 +14,7 @@ pub enum VirtualTable {
     ReconToolLogs,
     ReconSessionLogs,
     EventLogs,
+    ExposureLogs,
     ToolkitActionsLog,
     SemanticOperationLogs,
     SemanticOperationChainLogs,
@@ -31,6 +32,7 @@ impl VirtualTable {
             VirtualTable::ReconToolLogs => "ReconToolLogs",
             VirtualTable::ReconSessionLogs => "ReconSessionLogs",
             VirtualTable::EventLogs => "EventLogs",
+            VirtualTable::ExposureLogs => "ExposureLogs",
             VirtualTable::ToolkitActionsLog => "ToolkitActionsLog",
             VirtualTable::SemanticOperationLogs => "SemanticOperationLogs",
             VirtualTable::SemanticOperationChainLogs => "SemanticOperationChainLogs",
@@ -47,6 +49,7 @@ pub const ALL_TABLES: &[VirtualTable] = &[
     VirtualTable::ReconToolLogs,
     VirtualTable::ReconSessionLogs,
     VirtualTable::EventLogs,
+    VirtualTable::ExposureLogs,
     VirtualTable::ToolkitActionsLog,
     VirtualTable::SemanticOperationLogs,
     VirtualTable::SemanticOperationChainLogs,
@@ -300,6 +303,63 @@ pub async fn materialize_recon_session_logs(
                 Value::String(session.last_modified.clone()),
                 Value::Number(session.message_count.into()),
             ]);
+        }
+    }
+
+    Ok((columns, rows))
+}
+
+//
+// Exposure classification rows, one per (agent, capability, class). A
+// capability with no class still gets one row with a null class so benign
+// verdicts and unclassified capabilities stay queryable. Uses stored recon
+// and cached verdicts only (no node probing, no LLM calls).
+//
+
+pub async fn materialize_exposure_logs(
+    database: &Arc<Database>,
+    registry: &Arc<NodeRegistry>,
+) -> anyhow::Result<(Vec<String>, Vec<Vec<Value>>)> {
+    let columns: Vec<String> = table_columns(VirtualTable::ExposureLogs)
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+    let report = crate::exposure::compute_cached(database, registry)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let opt = |v: &Option<String>| v.clone().map(Value::String).unwrap_or(Value::Null);
+    let mut rows = Vec::new();
+    for agent in &report.agents {
+        for cap in &agent.capabilities {
+            let row = |class: Value, reason: String| {
+                vec![
+                    Value::String(agent.performed_at.clone()),
+                    Value::String(agent.node_id.clone()),
+                    Value::String(agent.machine_name.clone()),
+                    Value::String(agent.agent_short_name.clone()),
+                    Value::String(agent.risk.as_str().to_string()),
+                    Value::Bool(agent.trifecta),
+                    Value::String(cap.kind.as_str().to_string()),
+                    opt(&cap.server),
+                    Value::String(cap.name.clone()),
+                    class,
+                    Value::String(reason),
+                ]
+            };
+            if cap.classes.is_empty() {
+                let reason = cap
+                    .verdict
+                    .clone()
+                    .unwrap_or_else(|| "unclassified".to_string());
+                rows.push(row(Value::Null, reason));
+            }
+            for class in &cap.classes {
+                rows.push(row(
+                    Value::String(class.class.as_str().to_string()),
+                    class.reason.clone(),
+                ));
+            }
         }
     }
 

@@ -202,6 +202,14 @@ impl App {
             return;
         }
 
+        //
+        // `x` opens the cross-node exposure overlay from either pane.
+        //
+        if key.code == KeyCode::Char('x') && !key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.open_exposure();
+            return;
+        }
+
         if self.nodes.detail_focus {
             match key.code {
                 KeyCode::Esc | KeyCode::Left => {

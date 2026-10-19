@@ -41,6 +41,7 @@ Node and agent management with integrated session chat and terminal access:
 - **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `Ctrl+D` / `Del` to discard, Esc to dismiss
 - **Terminal** (`Ctrl+Y` to toggle) — full PTY terminal emulation with scrollback (see [Terminal](./terminal.md))
 - **Recon** (`r` with an agent selected in the detail pane) — view reconnaissance results directly in the terminal
+- **Exposure** (`x`) — lethal-trifecta exposure and attack paths across every agent with stored recon (see [Agent Exposure](./exposure.md))
 - **Reset** (`Ctrl+R` with a node selected) — cancel work, close sessions, and re-register the node after confirmation
 
 Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
@@ -89,6 +90,41 @@ seconds. Cached recon data appears instantly on re-open.
 Press `Ctrl+E` on a Config leaf to open the selected file in
 `$VISUAL`/`$EDITOR`; on a clean exit with changes, the new contents are
 written back to the node and the detail pane refreshes.
+
+### Exposure Overlay
+
+Press `x` anywhere in the Nodes browse view to open the exposure overlay.
+It requests the [Agent Exposure](./exposure.md) report from the service and
+shows it as three tabs, each a list with a drill-down detail pane:
+
+- **Agents** — every agent with stored recon, ranked by risk, with
+  `P U X` class badges. The detail pane lists contributing capabilities per
+  class with the rule (or `llm`) that assigned each, modifiers, unclassified
+  capabilities, observed hosts, the agent's trifecta path and the MCP
+  servers / hosts it shares with other agents.
+- **Paths** — one row per trifecta agent; the detail pane shows untrusted
+  sources → agent → private data → exfiltration channels.
+- **Shared** — MCP servers and hosts linked to two or more agents.
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` / `1` `2` `3` | Switch tab (Agents / Paths / Shared) |
+| `↑` / `↓` | Move selection (scroll detail when focused) |
+| `→` / `Enter` | Focus detail pane |
+| `←` | Back to the list |
+| `PgUp` / `PgDn` | Scroll detail pane |
+| `r` | Refresh from stored recon and caches |
+| `p` | Refresh and probe agent settings for YOLO / auto-approve modifiers |
+| `l` | Refresh and classify unmatched capabilities with the Semantic Parser LLM |
+| `e` | Edit the exposure rules in `$VISUAL` / `$EDITOR` |
+| `Ctrl+D` | Reset the exposure rules to the built-in defaults (with confirmation) |
+| `x` | Export the graph to `praxis-exposure-<timestamp>.dot` and `.json` |
+| `Esc` | Leave the detail pane, then close the overlay |
+| `Ctrl+Q` | Close the overlay |
+
+With the mouse, click tabs and rows to select them, click the detail pane
+to focus it, and use the wheel to move through the list or scroll the
+detail.
 
 ## Intercept (`Ctrl+T`)
 

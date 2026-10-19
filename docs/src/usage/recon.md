@@ -146,6 +146,14 @@ This approach has some pitfalls: the agent may refuse to disclose its tools, pro
 
 Understanding available tools helps you craft effective prompts for operations.
 
+## Exposure Analysis
+
+Stored recon also feeds [Agent Exposure](./exposure.md), which classifies
+every MCP tool, skill and built-in tool into the "lethal trifecta" classes
+(private data, untrusted content, exfiltration), flags agents that hold all
+three, and links agents through shared MCP servers and hosts. Press `x` in
+the Nodes window or run `praxis exposure summary`.
+
 ## Best Practices
 
 ### Start with Static

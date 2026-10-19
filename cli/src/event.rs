@@ -111,6 +111,13 @@ pub enum AppEvent {
     //
     LogQueryResult(Result<crate::client::LogQueryResults, String>),
     //
+    // Exposure report for the overlay request with sequence `seq`.
+    //
+    ExposureReport {
+        seq: u64,
+        result: Result<Box<common::exposure::ExposureReport>, String>,
+    },
+    //
     // Full chain definition arrived in response to ChainGet — open the
     // chain edit form populated with this chain.
     //

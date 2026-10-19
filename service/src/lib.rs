@@ -10,6 +10,7 @@ mod conversions;
 mod database;
 mod dispatch;
 mod doc_helper;
+mod exposure;
 mod handlers;
 mod intercept_targets;
 mod log_query;

@@ -1,6 +1,7 @@
 pub mod chain_form;
 pub mod chrome;
 pub mod common;
+pub mod exposure;
 pub mod filter_bar;
 pub mod form_modal;
 pub mod help;

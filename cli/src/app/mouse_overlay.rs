@@ -458,6 +458,29 @@ impl App {
                 true
             }
 
+            MouseAction::ExposureTab(tab) => {
+                if let Some(overlay) = self.nodes.exposure.as_mut() {
+                    overlay.switch_tab(tab);
+                }
+                true
+            }
+            MouseAction::ExposureRow(row) => {
+                if let Some(overlay) = self.nodes.exposure.as_mut() {
+                    overlay.select_row(row);
+                }
+                true
+            }
+            MouseAction::ExposureDetail => {
+                if let Some(overlay) = self.nodes.exposure.as_mut() {
+                    overlay.detail_focused = overlay.item_count(overlay.tab) > 0;
+                }
+                true
+            }
+            MouseAction::ExposureHint(hint) => {
+                self.dispatch_exposure_hint(hint).await;
+                true
+            }
+
             _ => false,
         }
     }

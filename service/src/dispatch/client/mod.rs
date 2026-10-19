@@ -6,6 +6,7 @@ mod agent_chat;
 mod chains;
 mod config;
 mod doc_helper;
+mod exposure;
 pub(crate) mod intercept;
 mod intercept_targets;
 mod logs;
@@ -21,6 +22,7 @@ use agent_chat::*;
 use chains::*;
 use config::*;
 use doc_helper::*;
+use exposure::*;
 use intercept::*;
 use intercept_targets::*;
 use logs::*;
@@ -436,6 +438,24 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         }
         ClientSignalMessage::InterceptTargetsResetDefaults { client_id } => {
             handle_intercept_targets_reset_defaults(ctx, client_id).await
+        }
+
+        //
+        // Agent exposure analysis.
+        //
+        ClientSignalMessage::ExposureReportRequest {
+            client_id,
+            request_id,
+            options,
+        } => handle_exposure_report_request(ctx, client_id, request_id, options).await,
+        ClientSignalMessage::ExposureRulesGet { client_id } => {
+            handle_exposure_rules_get(ctx, client_id).await
+        }
+        ClientSignalMessage::ExposureRulesSet { client_id, text } => {
+            handle_exposure_rules_set(ctx, client_id, text).await
+        }
+        ClientSignalMessage::ExposureRulesResetDefaults { client_id } => {
+            handle_exposure_rules_reset_defaults(ctx, client_id).await
         }
 
         //

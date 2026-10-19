@@ -82,6 +82,16 @@ All recon tools take a `node` prefix and an `agent` short-name.
 - `recon_session_grep` — Grep session files with regex (`node`, `agent`, `pattern`, optional `paths`)
 - `write_file` — Write file content
 
+### Exposure Analysis
+
+Lethal-trifecta exposure computed from stored recon (see
+[Agent Exposure](./exposure.md)).
+
+- `exposure_summary` — Counts and every agent with risk and `P U X` badges (optional `llm`, `probe_configs` to run the LLM classification and config probe passes first)
+- `exposure_agent` — One agent's capabilities with class reasons, modifiers, observed hosts, trifecta path and shared links (`node`, `agent`)
+- `exposure_paths` — Trifecta attack paths and MCP servers / hosts shared across agents (optional `min_risk`, `include_shared`)
+- `exposure_export` — The graph as Graphviz DOT or the full report as JSON (`format` = `dot` / `json`)
+
 ### Sessions
 
 - `session_create` — Create a new ACP session (`node`, `agent`, optional `project`, `yolo`). Returns a `session_id`.

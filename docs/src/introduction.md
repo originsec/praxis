@@ -24,6 +24,7 @@ This matters for:
 |---------|-------------|
 | **Agent Discovery** | Fingerprint and detect computer-use agents on endpoints |
 | **Reconnaissance** | Enumerate tools (MCP servers, skills), configurations, and session histories |
+| **Agent Exposure** | Lethal-trifecta classification of agent capabilities, attack paths, and a cross-node exposure graph |
 | **Config Visibility** | View and edit agent configuration files directly |
 | **Traffic Interception** | MITM proxy for agent-to-LLM traffic |
 | **Agent Dialog** | Create interactive sessions with agents |

@@ -405,6 +405,49 @@ pub struct TriggerToggleParams {
     pub enabled: bool,
 }
 
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ExposureSummaryParams {
+    #[schemars(
+        description = "Ask the Semantic Parser LLM to classify capabilities no exposure rule matched. Verdicts are cached; requires a configured Semantic Parser LLM."
+    )]
+    #[serde(default)]
+    pub llm: bool,
+
+    #[schemars(
+        description = "Read agent settings files on online nodes to detect YOLO / auto-approve modifiers. Results are cached and reused by later reports."
+    )]
+    #[serde(default)]
+    pub probe_configs: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExposureAgentParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(description = "Agent short name, e.g. 'claudecode'")]
+    pub agent: String,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ExposurePathsParams {
+    #[schemars(
+        description = "Only return trifecta paths at or above this risk: low, medium, high or critical (default: all)"
+    )]
+    pub min_risk: Option<String>,
+
+    #[schemars(
+        description = "Include MCP servers and hosts shared by two or more agents (default: true)"
+    )]
+    pub include_shared: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExposureExportParams {
+    #[schemars(description = "Export format: 'dot' (Graphviz) or 'json' (full report)")]
+    pub format: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

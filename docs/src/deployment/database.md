@@ -124,6 +124,7 @@ The schema is created automatically. Key tables:
 | `operation_chains` | Chain workflow definitions |
 | `chain_executions` | Chain execution history |
 | `recon_results` | Agent reconnaissance data |
+| `exposure_cache` | Cached exposure-analysis LLM verdicts and probed agent modifiers |
 | `event_log` | Centralized logging |
 | `service_config` | Key-value configuration |
 | `lua_agent_scripts` | Lua agent connector scripts |

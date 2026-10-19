@@ -2088,6 +2088,27 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Agent exposure analysis. The report is computed on demand from stored
+    // recon; the rule set is a TOML virtual file stored in service_config.
+    //
+    ExposureReportRequest {
+        client_id: String,
+        request_id: String,
+        #[serde(default)]
+        options: crate::exposure::ExposureOptions,
+    },
+    ExposureRulesGet {
+        client_id: String,
+    },
+    ExposureRulesSet {
+        client_id: String,
+        text: String,
+    },
+    ExposureRulesResetDefaults {
+        client_id: String,
+    },
+
+    //
     // LogQuery - KQL query interface over captured logs.
     //
     LogQuery {
@@ -2551,6 +2572,24 @@ pub enum ClientDirectMessage {
     InterceptTargetsState {
         text: String,
         targets: Vec<InterceptTargetConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    //
+    // Exposure responses. `report` is None when `error` is set. The rules
+    // state mirrors InterceptTargetsState: raw text plus parse/save error.
+    //
+    ExposureReportResponse {
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        report: Option<Box<crate::exposure::ExposureReport>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    ExposureRulesState {
+        text: String,
+        rule_count: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

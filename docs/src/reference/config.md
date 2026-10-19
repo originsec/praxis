@@ -405,6 +405,7 @@ Tables:
 - `intercept_rules` - Traffic rules
 - `traffic_matches` - Rule matches
 - `recon_results` - Stored recon data
+- `exposure_cache` - Cached exposure-analysis results (LLM capability verdicts, probed agent modifiers)
 - `event_log` - Centralized logging table (controlled by `application_logs_enabled`)
 - `session_transactions` - Per-prompt transaction records (request/response text, timing, status)
 - `lua_agent_scripts` - Lua agent connector scripts (built-in and custom)

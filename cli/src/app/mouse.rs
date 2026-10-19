@@ -76,6 +76,10 @@ impl App {
                 | MouseAction::ReconTreeRow { .. }
                 | MouseAction::ReconTreeChevron { .. }
                 | MouseAction::ReconFilterBar
+                | MouseAction::ExposureTab(_)
+                | MouseAction::ExposureRow(_)
+                | MouseAction::ExposureDetail
+                | MouseAction::ExposureHint(_)
         )
     }
 
@@ -432,6 +436,7 @@ impl App {
                     }
                 }
             }
+            NodesHintAction::Exposure => self.open_exposure(),
             NodesHintAction::Reset => self.confirm_reset_node(),
             NodesHintAction::Remove => self.confirm_delete_node(),
             NodesHintAction::AddRemote => {

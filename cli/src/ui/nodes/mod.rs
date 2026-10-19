@@ -43,6 +43,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    if let Some(ref exposure) = state.exposure {
+        crate::ui::exposure::render(f, area, app, exposure);
+        return;
+    }
+
     //
     // If a session is foregrounded, draw the chat view. Otherwise fall
     // back to the node browse view. The sessions list overlay is
@@ -111,6 +116,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         }
 
         reg.gap(4);
+        reg.chip("x", MouseAction::NodesHint(NodesHintAction::Exposure));
+        reg.chip(
+            " exposure",
+            MouseAction::NodesHint(NodesHintAction::Exposure),
+        );
+        reg.gap(4);
         reg.chip("^r", MouseAction::NodesHint(NodesHintAction::Reset));
         reg.chip(" reset", MouseAction::NodesHint(NodesHintAction::Reset));
         reg.gap(4);
@@ -120,6 +131,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         reg.chip("^n", MouseAction::NodesHint(NodesHintAction::AddRemote));
         reg.chip(" add remote", MouseAction::NodesHint(NodesHintAction::AddRemote));
 
+        hint_spans.push(Span::raw("    "));
+        hint_spans.push(Span::styled("x", key_style));
+        hint_spans.push(Span::styled(" exposure", label_style));
         hint_spans.push(Span::raw("    "));
         hint_spans.push(Span::styled("^r", key_style));
         hint_spans.push(Span::styled(" reset", label_style));

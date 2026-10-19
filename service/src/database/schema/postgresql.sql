@@ -290,3 +290,11 @@ CREATE TABLE IF NOT EXISTS toolkit_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_execution ON toolkit_actions(execution_id);
 CREATE INDEX IF NOT EXISTS idx_toolkit_actions_created_at ON toolkit_actions(created_at DESC);
+
+-- Exposure analysis cache: Semantic Parser verdicts for capabilities no
+-- exposure rule matched (llm:*) and probed agent modifiers (modifiers:*).
+CREATE TABLE IF NOT EXISTS exposure_cache (
+    cache_key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

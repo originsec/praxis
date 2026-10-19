@@ -1,9 +1,10 @@
 use ratatui::layout::Rect;
 
 use crate::app::{
+    App, EditTarget, ElementKind, ExposureTab, OpsTab, ReconTab, SettingsTab, TriggerFormSection,
+    Window,
     intercept::{InterceptTab, RuleFormField},
     log_query::LogQueryFocus,
-    App, EditTarget, ElementKind, OpsTab, ReconTab, SettingsTab, TriggerFormSection, Window,
 };
 use crate::ui::common::point_in;
 
@@ -51,6 +52,13 @@ pub enum MouseAction {
     /// Click the chevron zone of a tree row (toggle expand only).
     ReconTreeChevron { row: usize },
     ReconFilterBar,
+
+    // Exposure overlay (nodes window)
+    ExposureTab(ExposureTab),
+    /// Click a list row (index into the active tab's list).
+    ExposureRow(usize),
+    ExposureDetail,
+    ExposureHint(ExposureHintAction),
 
     SettingsTab(SettingsTab),
 
@@ -186,11 +194,22 @@ pub enum NodesHintAction {
     SelectDetail,
     StartSession,
     Recon,
+    Exposure,
     Reset,
     Remove,
     AddRemote,
     Terminal,
     Sessions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExposureHintAction {
+    Refresh,
+    Probe,
+    Llm,
+    EditRules,
+    Export,
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

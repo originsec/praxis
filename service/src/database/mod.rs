@@ -7,6 +7,7 @@ pub mod config;
 mod definitions;
 mod event_log;
 pub(crate) mod exec;
+mod exposure;
 mod intercept_targets;
 mod lua_agent_scripts;
 mod operations;
@@ -461,6 +462,25 @@ impl Database {
                 let _ = sqlx::query("ALTER TABLE remote_nodes DROP COLUMN IF EXISTS label")
                     .execute(pool)
                     .await;
+            }
+        }
+
+        //
+        // Migration: create the exposure_cache table (LLM capability verdicts
+        // and probed agent modifiers) for databases created before it was
+        // added to the schema. Same DDL on both backends.
+        //
+        let exposure_cache_ddl = "CREATE TABLE IF NOT EXISTS exposure_cache (
+                cache_key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )";
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(exposure_cache_ddl).execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(exposure_cache_ddl).execute(pool).await;
             }
         }
 

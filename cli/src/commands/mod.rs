@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod exposure;
 pub mod intercept;
 pub mod node;
 pub mod session;

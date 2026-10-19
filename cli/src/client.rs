@@ -57,6 +57,18 @@ struct PendingClear {
 // variant per outcome and callers just need the result.
 //
 
+//
+// Exposure-rules virtual file as returned by the service: raw TOML, number
+// of [[rule]] entries, and a parse/save error when the file was rejected.
+//
+
+#[derive(Debug, Clone)]
+pub struct ExposureRulesState {
+    pub text: String,
+    pub rule_count: usize,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum RuleOpOutcome {
     Created(InterceptRule),
@@ -109,6 +121,9 @@ struct ClientState {
     intercept_targets_text: String,
     intercept_targets_parsed: Vec<common::InterceptTargetConfig>,
     intercept_targets_error: Option<String>,
+    pending_exposure_report:
+        HashMap<String, oneshot::Sender<Result<common::exposure::ExposureReport, String>>>,
+    pending_exposure_rules: Option<oneshot::Sender<ExposureRulesState>>,
 
     //
     // Intercept traffic: one-shot senders keyed by client-generated
@@ -791,6 +806,34 @@ impl Client {
                 state.intercept_targets_text = text;
                 state.intercept_targets_parsed = targets;
                 state.intercept_targets_error = error;
+            }
+
+            ClientDirectMessage::ExposureReportResponse {
+                request_id,
+                report,
+                error,
+            } => {
+                if let Some(tx) = state.pending_exposure_report.remove(&request_id) {
+                    let _ = tx.send(match (report, error) {
+                        (Some(report), _) => Ok(*report),
+                        (None, error) => {
+                            Err(error.unwrap_or_else(|| "no report returned".to_string()))
+                        }
+                    });
+                }
+            }
+            ClientDirectMessage::ExposureRulesState {
+                text,
+                rule_count,
+                error,
+            } => {
+                if let Some(tx) = state.pending_exposure_rules.take() {
+                    let _ = tx.send(ExposureRulesState {
+                        text,
+                        rule_count,
+                        error,
+                    });
+                }
             }
 
             //
@@ -2104,6 +2147,57 @@ impl Client {
             client_id: self.client_id.clone(),
         };
         self.publish_signal(message).await
+    }
+
+    //
+    // Agent exposure analysis.
+    //
+
+    pub async fn request_exposure_report(
+        &self,
+        options: common::exposure::ExposureOptions,
+    ) -> Result<common::exposure::ExposureReport> {
+        let client_id = self.client_id.clone();
+        self.traffic_request(
+            "exposure report",
+            |s| &mut s.pending_exposure_report,
+            |request_id| ClientSignalMessage::ExposureReportRequest {
+                client_id,
+                request_id,
+                options,
+            },
+        )
+        .await
+    }
+
+    pub async fn get_exposure_rules(&self) -> Result<ExposureRulesState> {
+        let message = ClientSignalMessage::ExposureRulesGet {
+            client_id: self.client_id.clone(),
+        };
+        self.request("exposure rules", |s| &mut s.pending_exposure_rules, message)
+            .await
+    }
+
+    //
+    // Save a new rules file. The service validates it first; a rejected
+    // file comes back with `error` set and the stored rules unchanged.
+    //
+
+    pub async fn set_exposure_rules(&self, text: String) -> Result<ExposureRulesState> {
+        let message = ClientSignalMessage::ExposureRulesSet {
+            client_id: self.client_id.clone(),
+            text,
+        };
+        self.request("exposure rules", |s| &mut s.pending_exposure_rules, message)
+            .await
+    }
+
+    pub async fn reset_exposure_rules(&self) -> Result<ExposureRulesState> {
+        let message = ClientSignalMessage::ExposureRulesResetDefaults {
+            client_id: self.client_id.clone(),
+        };
+        self.request("exposure rules", |s| &mut s.pending_exposure_rules, message)
+            .await
     }
 
     //

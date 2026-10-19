@@ -29,6 +29,28 @@ Centralized application log entries from service and nodes. Requires `applicatio
 | target | Log target/module (may be null) |
 | message | Log message text |
 
+### ExposureLogs
+
+Lethal-trifecta classification of every agent capability, computed from
+stored recon, the exposure rules and cached LLM verdicts (see
+[Agent Exposure](./exposure.md)). One row per (agent, capability, class); a
+capability with no class has a single row with a null `class`. Querying the
+table never probes nodes or calls an LLM.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the agent's recon was performed |
+| node_id | Node identifier |
+| machine_name | Machine hostname (empty if the node is no longer registered) |
+| agent_short_name | Agent short name |
+| risk | Agent risk: low, medium, high or critical |
+| trifecta | Whether the agent has all three classes |
+| capability_kind | mcp_tool, mcp_server, skill, internal or builtin |
+| server_name | MCP server name (null for non-MCP capabilities) |
+| capability | Tool, skill or server name |
+| class | private_data, untrusted_content or exfiltration (null when none) |
+| reason | `rule:<id>`, `llm`, or `unclassified` |
+
 ### NodeLogs
 
 Currently connected nodes (in-memory).
@@ -231,6 +253,15 @@ AgentLogs | where available == true
 // Find all MCP tools across agents
 ReconToolLogs | where tool_type == "mcp" | project agent_short_name, server_name, tool_name
 
+// Agents with the full lethal trifecta
+ExposureLogs | where trifecta == true | summarize count() by node_id, agent_short_name, risk
+
+// Which capabilities give agents an exfiltration channel
+ExposureLogs | where class == "exfiltration" | summarize count() by capability_kind, capability
+
+// Capabilities no rule matched (candidates for rules or LLM refinement)
+ExposureLogs | where reason == "unclassified" | distinct capability_kind, server_name, capability
+
 // Correlate traffic matches with rules
 TrafficMatchLogs | project timestamp, rule_name, url, summary | take 50
 
@@ -284,7 +315,7 @@ User-provided string values in LIKE patterns are escaped to prevent SQL wildcard
 
 If any expression in the leading where clauses cannot be translated to SQL (e.g. an unsupported function), the executor falls back to fetching all rows with just a LIMIT and applies all filtering in memory. Operators that appear after a non-pushable operator (like `project`, `extend`, `summarize`) always run in memory.
 
-In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (ReconLogs, ReconToolLogs, etc.) are always materialized fully and filtered in memory.
+In-memory tables (NodeLogs, AgentLogs), JSON-expanded tables (ReconLogs, ReconToolLogs, etc.) and the computed ExposureLogs table are always materialized fully and filtered in memory.
 
 ### Result Limits
 

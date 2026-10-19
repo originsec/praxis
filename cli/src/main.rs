@@ -89,6 +89,12 @@ enum Commands {
         command: commands::session::SessionCommand,
     },
 
+    /// Agent exposure analysis (lethal trifecta, attack paths, graph export)
+    Exposure {
+        #[command(subcommand)]
+        command: commands::exposure::ExposureCommand,
+    },
+
     /// Persist the RabbitMQ URL to ~/.config/praxis/config
     #[command(name = "set-rabbitmqurl")]
     SetRabbitmqUrl {
@@ -108,6 +114,7 @@ impl Commands {
             Commands::Agent { command } => commands::agent::execute(client, command).await,
             Commands::Intercept { command } => commands::intercept::execute(client, command).await,
             Commands::Session { command } => commands::session::execute(client, command).await,
+            Commands::Exposure { command } => commands::exposure::execute(client, command).await,
             Commands::SetRabbitmqUrl { .. } | Commands::Config => {
                 unreachable!("config subcommands handled before connecting to a client")
             }
@@ -609,4 +616,40 @@ fn shell_split(input: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_exposure_subcommands() {
+        let cli = CommandStringCli::try_parse_from([
+            "exposure", "export", "--format", "json", "-o", "out.json", "--llm",
+        ])
+        .expect("export parses");
+        assert!(matches!(
+            cli.command,
+            Commands::Exposure {
+                command: commands::exposure::ExposureCommand::Export { .. }
+            }
+        ));
+
+        for args in [
+            vec!["exposure", "summary", "--probe", "--json"],
+            vec!["exposure", "agent", "abc", "claudecode"],
+            vec!["exposure", "paths", "--min-risk", "critical"],
+            vec!["exposure", "rules", "set", "rules.toml"],
+            vec!["exposure", "rules", "reset"],
+        ] {
+            assert!(
+                CommandStringCli::try_parse_from(&args).is_ok(),
+                "{:?}",
+                args
+            );
+        }
+        assert!(
+            CommandStringCli::try_parse_from(["exposure", "paths", "--min-risk", "bogus"]).is_err()
+        );
+    }
 }

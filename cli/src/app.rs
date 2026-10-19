@@ -1,5 +1,6 @@
 mod agent_scripts;
 mod chain_form;
+mod exposure;
 mod forms;
 pub mod help;
 mod input;
@@ -16,6 +17,7 @@ mod settings;
 pub use self::chain_form::{
     collect_session_groups, element_issues, input_port_count, output_port_count,
 };
+pub use self::exposure::{ExposureOverlay, ExposureTab};
 pub use self::forms::*;
 pub use self::intercept::InterceptState;
 pub use self::log_query::LogQueryState;
@@ -124,6 +126,7 @@ pub struct NodesState {
     pub detail_focus: bool,
     pub agent_selected: usize,
     pub recon: Option<ReconOverlay>,
+    pub exposure: Option<ExposureOverlay>,
 }
 
 pub struct ReconOverlay {
@@ -316,6 +319,7 @@ impl Default for NodesState {
             detail_focus: false,
             agent_selected: 0,
             recon: None,
+            exposure: None,
         }
     }
 }
@@ -894,6 +898,10 @@ impl App {
                 }
                 self.active_window == Window::Intercept
             }
+            AppEvent::ExposureReport { seq, result } => {
+                self.apply_exposure_report(seq, result);
+                self.active_window == Window::Nodes
+            }
             AppEvent::ReconGetResponse {
                 node_id,
                 agent_short_name,
@@ -1213,6 +1221,15 @@ impl App {
         //
         if self.confirm.is_some() {
             self.handle_confirm_key(key).await;
+            return;
+        }
+
+        //
+        // Exposure overlay intercepts all keys while open (after the confirm
+        // dialog, which it uses for "reset rules").
+        //
+        if self.nodes.exposure.is_some() && self.active_window == Window::Nodes {
+            self.handle_exposure_key(key).await;
             return;
         }
 
@@ -2248,6 +2265,11 @@ impl App {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_sub(3);
                     }
+                    Window::Nodes if self.nodes.exposure.is_some() => {
+                        if let Some(overlay) = self.nodes.exposure.as_mut() {
+                            overlay.scroll_wheel(-3);
+                        }
+                    }
                     Window::Nodes if self.nodes.recon.is_some() => {
                         if let Some(recon) = self.nodes.recon.as_mut() {
                             if recon.right_pane_focused {
@@ -2332,6 +2354,11 @@ impl App {
                         let max = self.operations.exec_detail_max_scroll.get();
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_add(3).min(max);
+                    }
+                    Window::Nodes if self.nodes.exposure.is_some() => {
+                        if let Some(overlay) = self.nodes.exposure.as_mut() {
+                            overlay.scroll_wheel(3);
+                        }
                     }
                     Window::Nodes if self.nodes.recon.is_some() => {
                         if let Some(recon) = self.nodes.recon.as_mut() {

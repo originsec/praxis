@@ -12,6 +12,7 @@
 
 - [Nodes & Agents](./usage/nodes-and-agents.md)
 - [Reconnaissance](./usage/recon.md)
+- [Agent Exposure](./usage/exposure.md)
 - [Sessions](./usage/sessions.md)
 - [Terminal](./usage/terminal.md)
 - [Interception](./usage/interception.md)

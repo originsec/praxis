@@ -14,9 +14,9 @@ use crate::database::Database;
 use crate::state::NodeRegistry;
 
 use super::tables::{
-    VirtualTable, materialize_agent_logs, materialize_node_logs, materialize_recon_logs,
-    materialize_recon_session_logs, materialize_recon_tool_logs, materialize_toolkit_actions_log,
-    resolve_table,
+    VirtualTable, materialize_agent_logs, materialize_exposure_logs, materialize_node_logs,
+    materialize_recon_logs, materialize_recon_session_logs, materialize_recon_tool_logs,
+    materialize_toolkit_actions_log, resolve_table,
 };
 
 pub struct LogQueryResult {
@@ -61,11 +61,14 @@ pub async fn execute_log_query(
         _ => return Err(anyhow!("Only table references are supported as source")),
     };
 
-    let table = resolve_table(&table_name)
-        .ok_or_else(|| anyhow!(
-            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, EventLogs, ToolkitActionsLog, OperationLogs, ChainExecutionLogs",
-            table_name
-        ))?;
+    let table = resolve_table(&table_name).ok_or_else(|| {
+        let available: Vec<&str> = super::tables::ALL_TABLES.iter().map(|t| t.name()).collect();
+        anyhow!(
+            "Unknown table '{}'. Available tables: {}",
+            table_name,
+            available.join(", ")
+        )
+    })?;
 
     //
     // Materialize the table. For SQL-backed tables, push all leading where
@@ -378,6 +381,7 @@ async fn materialize_table(
         VirtualTable::ReconToolLogs => materialize_recon_tool_logs(database).await,
         VirtualTable::ReconSessionLogs => materialize_recon_session_logs(database).await,
         VirtualTable::ToolkitActionsLog => materialize_toolkit_actions_log(database).await,
+        VirtualTable::ExposureLogs => materialize_exposure_logs(database, node_registry).await,
         _ => Err(anyhow!("Table has no materializer")),
     }
 }

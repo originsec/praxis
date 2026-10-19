@@ -159,4 +159,10 @@ pub trait McpClient: Send + Sync {
 
     /// Reset a node (cancel all operations, tear down state, re-register).
     async fn reset_node(&self, node_id: &str) -> Result<()>;
+
+    /// Compute the agent exposure (lethal-trifecta) report from stored recon.
+    async fn get_exposure_report(
+        &self,
+        options: crate::exposure::ExposureOptions,
+    ) -> Result<crate::exposure::ExposureReport>;
 }

@@ -97,6 +97,22 @@ session prompt --node <prefix> <text>
 session close --node <prefix>
 ```
 
+**Exposure Analysis** (see [Agent Exposure](./exposure.md)):
+```bash
+exposure summary [--llm] [--probe] [--json]                  # Lethal-trifecta summary for all agents
+exposure agent <node-prefix> <agent> [--llm] [--probe] [--json]  # Capabilities, classes, modifiers, paths
+exposure paths [--min-risk low|medium|high|critical] [--json]    # Trifecta paths and shared servers/hosts
+exposure export [--format dot|json] [-o <file>]              # Graphviz DOT (default) or full JSON report
+exposure rules show                                          # Print the exposure rules file
+exposure rules set <file>                                    # Replace the rules (validated first)
+exposure rules reset                                         # Restore the built-in default rules
+```
+
+`--llm` classifies capabilities no rule matched with the Semantic Parser
+LLM and `--probe` reads agent settings on online nodes for YOLO /
+auto-approve modifiers; both cache their results for later runs. `paths`,
+`export` and `agent` accept the same two flags.
+
 **Traffic Interception:**
 ```bash
 intercept status [node-prefix]                    # Show interception state

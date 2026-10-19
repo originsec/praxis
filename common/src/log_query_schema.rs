@@ -84,6 +84,57 @@ pub const TABLES: &[TableSchema] = &[
         ],
     },
     TableSchema {
+        name: "ExposureLogs",
+        description: "Lethal-trifecta classification per agent capability",
+        source: "DB",
+        columns: &[
+            ColumnSchema {
+                name: "timestamp",
+                description: "Recon time",
+            },
+            ColumnSchema {
+                name: "node_id",
+                description: "Node identifier",
+            },
+            ColumnSchema {
+                name: "machine_name",
+                description: "Hostname",
+            },
+            ColumnSchema {
+                name: "agent_short_name",
+                description: "Agent short name",
+            },
+            ColumnSchema {
+                name: "risk",
+                description: "Agent risk (low/medium/high/critical)",
+            },
+            ColumnSchema {
+                name: "trifecta",
+                description: "Agent has all three classes",
+            },
+            ColumnSchema {
+                name: "capability_kind",
+                description: "mcp_tool/mcp_server/skill/internal/builtin",
+            },
+            ColumnSchema {
+                name: "server_name",
+                description: "MCP server name",
+            },
+            ColumnSchema {
+                name: "capability",
+                description: "Tool/skill/server name",
+            },
+            ColumnSchema {
+                name: "class",
+                description: "private_data/untrusted_content/exfiltration",
+            },
+            ColumnSchema {
+                name: "reason",
+                description: "rule:<id>, llm, or unclassified",
+            },
+        ],
+    },
+    TableSchema {
         name: "NodeLogs",
         description: "Connected nodes",
         source: "MEM",

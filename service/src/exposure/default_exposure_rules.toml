@@ -1,0 +1,417 @@
+# Praxis exposure rules.
+#
+# Classifies every capability an agent has (MCP tools and servers, skills,
+# built-in tools) into the three "lethal trifecta" classes described by
+# Simon Willison (https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/):
+#
+#   private_data       access to private data (files, mail, databases, ...)
+#   untrusted_content  exposure to content an attacker can control
+#   exfiltration       ability to communicate externally / leak data
+#
+# An agent holding all three is flagged as a trifecta agent. Edit this file
+# from the TUI exposure view (`e`) or `praxis exposure rules set <file>`;
+# "Reset to defaults" restores the shipped contents.
+#
+# ---------------------------------------------------------------------------
+# [builtins]
+#   Well-known built-in tools per agent short_name. Used only when recon has
+#   not enumerated the agent's internal tools (static recon); they appear as
+#   kind "builtin". Entries for m365copilot are conceptual capability names,
+#   not literal tool names.
+#
+# [[rule]]
+#   id           unique id, reported as the classification reason (rule:<id>)
+#   classes      classes assigned on match; [] records an explicit benign verdict
+#   kinds        optional filter: mcp_tool, mcp_server, skill, internal, builtin
+#   agents       optional filter: agent short names
+#   name         regex on the tool / skill / server name
+#   description  regex on the description
+#   server       regex on the MCP server name
+#   command      regex on the stdio MCP server command line
+#   url          regex on the remote MCP server URL
+#   stop         when true, no later rule is evaluated for a matching subject
+#
+#   Regexes are case-insensitive. Every matcher given must match and at least
+#   one matcher is required. All matching rules contribute their classes, in
+#   file order. An MCP server only appears as a capability of its own (kind
+#   mcp_server) when recon could not list its tools. Capabilities no rule
+#   matches are "unclassified" and can be refined with the Semantic Parser
+#   LLM (cached).
+#
+# [[modifier]]
+#   Agent-level modifiers read from settings files when configs are probed
+#   (TUI `p`, `--probe`, MCP `probe_configs`).
+#   id           unique id (reported as rule:<id>)
+#   kind         yolo | auto_approve
+#   agents       optional filter: agent short names
+#   config_types recon config types to read (prefix before ':')
+#   key          dotted key path; `*` matches any object key
+#   equals       optional list of values; without it, a true boolean, a
+#                non-empty string, or each string in an array matches
+# ---------------------------------------------------------------------------
+
+[builtins]
+claudecode = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit", "TodoWrite"]
+codex = ["shell", "apply_patch", "update_plan", "view_image", "web_search"]
+gemini = ["read_file", "read_many_files", "write_file", "replace", "list_directory", "glob", "search_file_content", "run_shell_command", "web_fetch", "google_web_search", "save_memory"]
+cursor = ["read_file", "edit_file", "delete_file", "list_dir", "codebase_search", "grep_search", "file_search", "run_terminal_cmd", "web_search"]
+droid = ["Read", "LS", "Grep", "Glob", "Create", "Edit", "ApplyPatch", "Execute", "WebSearch", "FetchUrl", "TodoWrite"]
+pi = ["read", "write", "edit", "bash", "grep", "find", "ls"]
+agy = ["view_file", "list_dir", "grep_search", "find_by_name", "write_to_file", "replace_file_content", "run_command", "read_url_content", "search_web", "browser_subagent"]
+m365copilot = ["microsoft_graph_grounding", "web_grounding", "link_and_image_rendering"]
+
+# --- Explicitly benign capabilities -----------------------------------------
+
+[[rule]]
+id = "benign-planning"
+classes = []
+name = '^(task|todowrite|todo_write|update_plan|save_memory|exitplanmode|sequentialthinking|sequential_thinking|think|get_current_time|convert_time)$'
+stop = true
+
+[[rule]]
+id = "benign-mcp-server"
+classes = []
+kinds = ["mcp_server"]
+name = '^(memory|sequential[-_]?thinking|time|everything)$'
+stop = true
+
+[[rule]]
+id = "file-write"
+classes = []
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(write|edit|multiedit|create|applypatch|apply_patch|write_file|edit_file|delete_file|replace|write_to_file|replace_file_content|notebookedit|create_directory|move_file|view_image)$'
+stop = true
+
+# --- Shell / command execution ----------------------------------------------
+
+[[rule]]
+id = "shell-exec"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(bash|shell|powershell|execute|exec|local_shell|terminal)$|^(run|exec|execute)_(shell_command|terminal_cmd|terminal_command|command|cmd|script|process)$|^(start|interact_with)_process$'
+
+# --- Code execution and browser automation -----------------------------------
+# Browser-automation servers drive a real browser: anything it loads is
+# untrusted and any URL it opens can carry data out. `stop` keeps generic
+# name rules (e.g. "messages" in list_console_messages) from adding noise.
+
+[[rule]]
+id = "code-exec"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(js|javascript|python|eval|repl|evaluate_script|execute_code|run_code|exec_code|run_python|run_js|run_javascript|execute_python|code_interpreter)$'
+
+[[rule]]
+id = "browser-automation"
+classes = ["untrusted_content", "exfiltration"]
+kinds = ["mcp_tool"]
+server = 'chrome|browser|puppeteer|playwright|selenium'
+stop = true
+
+# --- Local files ------------------------------------------------------------
+
+[[rule]]
+id = "file-read-private"
+classes = ["private_data"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(read|read_file|read_many_files|read_text_file|read_multiple_files|read_media_file|view_file|view|cat|open_file|notebookread)$'
+
+[[rule]]
+id = "file-read-repo-content"
+classes = ["untrusted_content"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(read|read_file|read_many_files|read_text_file|read_multiple_files|view_file|view|cat|open_file|notebookread)$'
+
+[[rule]]
+id = "file-search"
+classes = ["private_data"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(grep|glob|ls|find|list_dir|list_directory|directory_tree|search_files|search_file_content|grep_search|file_search|find_by_name|codebase_search|search_code)$'
+
+# --- Web access -------------------------------------------------------------
+
+[[rule]]
+id = "web-fetch"
+classes = ["untrusted_content", "exfiltration"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(webfetch|web_fetch|fetch|fetchurl|fetch_url|fetch_html|fetch_markdown|read_url_content|http_request|curl)$|(^|_)(scrape|crawl|navigate|browse|browser|screenshot)(_|$)|^browser_subagent$'
+
+[[rule]]
+id = "web-search"
+classes = ["untrusted_content", "exfiltration"]
+kinds = ["builtin", "internal", "mcp_tool"]
+name = '^(websearch|search_web|google_web_search)$|(^|_)web_?search(_|$)|^(brave|tavily|exa|serper|perplexity|duckduckgo|bing)_'
+
+[[rule]]
+id = "web-description"
+classes = ["untrusted_content"]
+kinds = ["mcp_tool", "internal"]
+description = '\bfetch(es|ing)?\b.{0,40}\b(url|web ?page|website|internet)\b|\bbrows(e|es|ing)\b.{0,20}\b(web|internet|page)\b|\bsearch(es|ing)? the (web|internet)\b'
+
+# --- Remote MCP endpoints ---------------------------------------------------
+# Every call to a tool on a remote (non-local) MCP server sends its arguments
+# off the machine, so the server itself is an exfiltration channel.
+
+[[rule]]
+id = "remote-mcp-endpoint"
+classes = ["exfiltration"]
+kinds = ["mcp_tool", "mcp_server"]
+url = '^(https?|wss?)://[^/?#]*\.[a-z]{2,}(:[0-9]+)?([/?#]|$)'
+
+# --- Messaging, mail, tickets and code hosting (MCP tools) ------------------
+
+[[rule]]
+id = "mail-and-messages-read"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_tool", "internal"]
+name = '(^|_)(get|list|read|search|fetch|query)_[a-z_]*(email|emails|mail|inbox|message|messages|thread|threads|conversation|conversations|channel_history|chat|chats|dm|dms)(_|$)'
+
+[[rule]]
+id = "tickets-and-code-review-read"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_tool", "internal"]
+name = '(^|_)(get|list|read|search|fetch)_[a-z_]*(issue|issues|pull_request|pull_requests|pr|prs|comment|comments|review|reviews|ticket|tickets|discussion|discussions|notification|notifications|post|posts|page|pages|wiki)(_|$)'
+
+[[rule]]
+id = "repo-content-read"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_tool"]
+name = '^(get_file_contents|get_file|search_code|search_repositories|list_commits|get_commit|get_repository_tree)$'
+
+[[rule]]
+id = "outbound-messaging"
+classes = ["exfiltration"]
+kinds = ["mcp_tool", "internal"]
+name = '(^|_)(send|publish|upload|share|tweet|reply|notify|forward|invite)(_|$)|^post(_|$)|(^|_)post_(message|messages|comment|update|tweet|status|to)(_|$)|(^|_)(create|add|update)_[a-z_]*(issue|pull_request|pr|comment|gist|discussion|message|post|page|ticket|event|draft|reply|review|release|webhook|file|files|document|record)(_|$)|(^|_)(push|commit)(_|$)|^(fork_repository|create_branch|merge_pull_request)$'
+
+[[rule]]
+id = "webhook-or-http-description"
+classes = ["exfiltration"]
+kinds = ["mcp_tool", "internal"]
+description = '\bwebhook\b|\b(make|makes|perform|performs|send|sends)\b.{0,40}\bhttp\b|\bsends? (an? )?(email|message|sms)\b'
+
+[[rule]]
+id = "mail-description"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_tool", "internal"]
+description = '\b(read|search|list|retrieve|get)s?\b.{0,30}\b(email|emails|inbox|gmail|outlook|slack messages)\b'
+
+# --- Data stores and cloud --------------------------------------------------
+
+[[rule]]
+id = "database-query"
+classes = ["private_data"]
+kinds = ["mcp_tool", "internal"]
+name = '(^|_)(query|sql|select|read_query|execute_sql|run_query|run_sql|describe_table|list_tables|get_schema|find|aggregate)(_|$)'
+
+[[rule]]
+id = "private-records-read"
+classes = ["private_data"]
+kinds = ["mcp_tool", "internal"]
+name = '(^|_)(get|list|read|search|download|export)_[a-z_]*(file|files|document|documents|doc|docs|record|records|contact|contacts|calendar|event|events|secret|secrets|credential|credentials|password|passwords|key|keys|customer|customers|user|users|repo|repos|repository|database|table|tables|spreadsheet|sheet|sheets|drive|folder|note|notes|log|logs|metric|metrics)(_|$)'
+
+[[rule]]
+id = "secrets-description"
+classes = ["private_data"]
+kinds = ["mcp_tool", "internal"]
+description = '\b(secret|secrets|credential|credentials|password|passwords|api key|private key|vault|keychain)\b'
+
+# --- Built-ins that need an agent-specific reading --------------------------
+
+[[rule]]
+id = "m365-graph-grounding"
+classes = ["private_data", "untrusted_content"]
+agents = ["m365copilot"]
+name = '^microsoft_graph_grounding$'
+
+[[rule]]
+id = "m365-web-grounding"
+classes = ["untrusted_content"]
+agents = ["m365copilot"]
+name = '^web_grounding$'
+
+[[rule]]
+id = "m365-link-rendering"
+classes = ["exfiltration"]
+agents = ["m365copilot"]
+name = '^link_and_image_rendering$'
+
+# --- Skills -----------------------------------------------------------------
+# Skills are instructions rather than tools; only flag the ones that steer
+# the agent towards untrusted input or outbound channels.
+
+[[rule]]
+id = "skill-untrusted-input"
+classes = ["untrusted_content"]
+kinds = ["skill"]
+description = '\b(issue|issues|pull request|pr review|ticket|tickets|email|emails|inbox|slack|web ?page|website|url|browse|scrape|search the web)\b'
+
+[[rule]]
+id = "skill-outbound"
+classes = ["exfiltration"]
+kinds = ["skill"]
+description = '\b(push|publish|post|send|upload|deploy|webhook|notify|comment on)\b'
+
+# --- Well-known MCP servers whose tools could not be listed -----------------
+
+[[rule]]
+id = "server-code-hosting"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+name = 'github|gitlab|bitbucket|gitea'
+
+[[rule]]
+id = "server-code-hosting-endpoint"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+command = 'github|gitlab|bitbucket'
+
+[[rule]]
+id = "server-messaging-and-mail"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+name = 'slack|discord|teams|telegram|whatsapp|gmail|outlook|mail|google[-_ ]?workspace|gsuite|m365|microsoft[-_ ]?365'
+
+[[rule]]
+id = "server-work-tracking"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+name = 'notion|confluence|atlassian|jira|linear|asana|trello|clickup|monday|zendesk|intercom|hubspot|salesforce'
+
+[[rule]]
+id = "server-documents"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_server"]
+name = 'drive|onedrive|sharepoint|dropbox|box|docs|sheets'
+
+[[rule]]
+id = "server-web"
+classes = ["untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+name = 'fetch|puppeteer|playwright|browser|chrome|firecrawl|brave|tavily|exa|serper|perplexity|duckduckgo|search|context7|scrape'
+
+[[rule]]
+id = "server-web-command"
+classes = ["untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+command = 'server-fetch|mcp-server-fetch|puppeteer|playwright|chrome-devtools|firecrawl|brave-search|tavily|exa-mcp|context7'
+
+[[rule]]
+id = "server-filesystem"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_server"]
+command = 'server-filesystem|filesystem'
+
+[[rule]]
+id = "server-shell"
+classes = ["private_data", "untrusted_content", "exfiltration"]
+kinds = ["mcp_server"]
+command = 'desktop-commander|shell|terminal|ssh'
+
+[[rule]]
+id = "server-notes"
+classes = ["private_data"]
+kinds = ["mcp_server"]
+name = 'obsidian|notes|evernote|logseq|bear|joplin|roam'
+
+[[rule]]
+id = "server-public-reference"
+classes = ["untrusted_content"]
+kinds = ["mcp_server"]
+name = 'wikipedia|gutenberg|arxiv|news|reddit|hacker-?news|youtube|rss'
+
+[[rule]]
+id = "server-database"
+classes = ["private_data"]
+kinds = ["mcp_server"]
+name = 'postgres|mysql|sqlite|mongo|redis|supabase|bigquery|snowflake|clickhouse|database|duckdb|elastic'
+
+[[rule]]
+id = "server-cloud"
+classes = ["private_data", "exfiltration"]
+kinds = ["mcp_server"]
+name = 'aws|gcp|azure|kubernetes|k8s|docker|terraform|cloudflare|vercel|heroku|netlify'
+
+[[rule]]
+id = "server-observability"
+classes = ["private_data", "untrusted_content"]
+kinds = ["mcp_server"]
+name = 'sentry|datadog|grafana|splunk|honeycomb|newrelic'
+
+# --- Agent-level modifiers --------------------------------------------------
+
+[[modifier]]
+id = "claude-bypass-permissions"
+kind = "yolo"
+agents = ["claudecode"]
+config_types = ["global_settings", "project_settings", "project_settings_local"]
+key = "permissions.defaultMode"
+equals = ["bypassPermissions"]
+
+[[modifier]]
+id = "claude-allow-list"
+kind = "auto_approve"
+agents = ["claudecode"]
+config_types = ["global_settings", "project_settings", "project_settings_local"]
+key = "permissions.allow"
+
+[[modifier]]
+id = "claude-all-project-mcp"
+kind = "auto_approve"
+agents = ["claudecode"]
+config_types = ["global_settings", "project_settings", "project_settings_local"]
+key = "enableAllProjectMcpServers"
+equals = ["true"]
+
+[[modifier]]
+id = "codex-approval-never"
+kind = "yolo"
+agents = ["codex"]
+config_types = ["global_settings", "project_settings"]
+key = "approval_policy"
+equals = ["never"]
+
+[[modifier]]
+id = "codex-full-access-sandbox"
+kind = "yolo"
+agents = ["codex"]
+config_types = ["global_settings", "project_settings"]
+key = "sandbox_mode"
+equals = ["danger-full-access"]
+
+[[modifier]]
+id = "gemini-auto-accept"
+kind = "auto_approve"
+agents = ["gemini"]
+config_types = ["global_settings", "project_settings"]
+key = "tools.autoAccept"
+equals = ["true"]
+
+[[modifier]]
+id = "gemini-allowed-tools"
+kind = "auto_approve"
+agents = ["gemini"]
+config_types = ["global_settings", "project_settings"]
+key = "tools.allowed"
+
+[[modifier]]
+id = "gemini-trusted-mcp-server"
+kind = "auto_approve"
+agents = ["gemini"]
+config_types = ["global_settings", "project_settings"]
+key = "mcpServers.*.trust"
+equals = ["true"]
+
+[[modifier]]
+id = "cursor-allow-list"
+kind = "auto_approve"
+agents = ["cursor"]
+config_types = ["global_settings", "project_settings"]
+key = "permissions.allow"
+
+[[modifier]]
+id = "droid-command-allowlist"
+kind = "auto_approve"
+agents = ["droid"]
+config_types = ["global_settings", "global_settings_local", "project_settings", "project_settings_local"]
+key = "commandAllowlist"

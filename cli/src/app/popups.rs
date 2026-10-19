@@ -31,6 +31,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetInterceptTargets,
+    ResetExposureRules,
     ResetNode(String),  // node_id
     DeleteNode(String), // node_id — service handles whether it's local or remote
     ClearAllTraffic,
@@ -195,6 +196,9 @@ impl App {
             }
             ConfirmKind::ResetInterceptTargets => {
                 self.reset_intercept_targets_to_defaults().await;
+            }
+            ConfirmKind::ResetExposureRules => {
+                self.reset_exposure_rules().await;
             }
             ConfirmKind::DeleteNode(node_id) => {
                 let _ = self.client.remove_node(&node_id).await;

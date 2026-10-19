@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use super::client::McpClient;
 use super::params::*;
 use crate::acp_ext::{EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE};
+use crate::exposure::{ExposureOptions, RiskLevel};
 use crate::{AgentFileType, ReconResult};
 
 const SERVER_NAME: &str = "praxis";
@@ -1390,6 +1391,133 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "enabled": enabled,
             "message": if enabled { "Chain trigger enabled" } else { "Chain trigger disabled" }
         }))
+    }
+
+    // ── Exposure Analysis ────────────────────────────────────────────────
+
+    #[tool(
+        description = "Summarise agent exposure across all nodes using Simon Willison's 'lethal trifecta' (private data + untrusted content + exfiltration). Computed from stored recon; returns counts and every agent with its risk (low/medium/high/critical) and P/U/X class badges."
+    )]
+    async fn exposure_summary(
+        &self,
+        Parameters(params): Parameters<ExposureSummaryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let report = client
+            .get_exposure_report(ExposureOptions {
+                llm: params.llm,
+                probe_configs: params.probe_configs,
+            })
+            .await
+            .map_err(mcp_err)?;
+
+        let mut agents: Vec<&crate::exposure::AgentExposure> = report.agents.iter().collect();
+        agents.sort_by(|a, b| b.risk.cmp(&a.risk).then_with(|| a.id.cmp(&b.id)));
+        let agents: Vec<_> = agents
+            .iter()
+            .map(|a| {
+                json!({
+                    "node_id": a.node_id,
+                    "machine_name": a.machine_name,
+                    "agent": a.agent_short_name,
+                    "risk": a.risk,
+                    "trifecta": a.trifecta,
+                    "classes": a.badges(),
+                    "capabilities": a.capabilities.len(),
+                    "unclassified": a.unclassified_count(),
+                    "modifiers": a.modifiers.len(),
+                })
+            })
+            .collect();
+        json_result(json!({
+            "generated_at": report.generated_at,
+            "rule_count": report.rule_count,
+            "llm_classified": report.llm_classified,
+            "probed": report.probed,
+            "summary": report.summary(),
+            "agents": agents,
+            "warnings": report.warnings,
+        }))
+    }
+
+    #[tool(
+        description = "Exposure detail for one agent: every capability with its lethal-trifecta classes and the rule (or 'llm') that assigned them, agent modifiers (YOLO / auto-approve), observed hosts, its trifecta path and shared MCP servers/hosts linking it to other agents."
+    )]
+    async fn exposure_agent(
+        &self,
+        Parameters(params): Parameters<ExposureAgentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let report = client
+            .get_exposure_report(ExposureOptions::default())
+            .await
+            .map_err(mcp_err)?;
+        let agent = report
+            .find_agent(&params.node, &params.agent)
+            .map_err(mcp_err)?;
+        json_result(json!({
+            "agent": agent,
+            "paths": report.paths_for_agent(&agent.id),
+            "shared": report.shared_for_agent(&agent.id),
+        }))
+    }
+
+    #[tool(
+        description = "Attack paths from the exposure graph: per trifecta agent, untrusted-input sources -> agent -> private-data capabilities -> exfiltration channels (plus any YOLO / auto-approve modifiers that remove the human from the loop), and MCP servers / hosts shared across agents and nodes."
+    )]
+    async fn exposure_paths(
+        &self,
+        Parameters(params): Parameters<ExposurePathsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let min_risk = match params.min_risk.as_deref() {
+            None => RiskLevel::Low,
+            Some(s) => RiskLevel::parse(s).ok_or_else(|| {
+                mcp_err(format!(
+                    "Unknown min_risk '{}'; use low, medium, high or critical",
+                    s
+                ))
+            })?,
+        };
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let report = client
+            .get_exposure_report(ExposureOptions::default())
+            .await
+            .map_err(mcp_err)?;
+        let paths: Vec<_> = report.paths.iter().filter(|p| p.risk >= min_risk).collect();
+        let mut response = json!({ "paths": paths });
+        if params.include_shared.unwrap_or(true) {
+            response["shared"] = json!(report.shared);
+        }
+        json_result(response)
+    }
+
+    #[tool(
+        description = "Export the agent exposure graph as Graphviz DOT ('dot') or the full JSON report ('json')."
+    )]
+    async fn exposure_export(
+        &self,
+        Parameters(params): Parameters<ExposureExportParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let report = client
+            .get_exposure_report(ExposureOptions::default())
+            .await
+            .map_err(mcp_err)?;
+        let text = match params.format.trim().to_lowercase().as_str() {
+            "dot" => report.to_dot(),
+            "json" => serde_json::to_string_pretty(&report).map_err(mcp_err)?,
+            other => {
+                return Err(mcp_err(format!(
+                    "Unknown format '{}'; use 'dot' or 'json'",
+                    other
+                )));
+            }
+        };
+        Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 }
 

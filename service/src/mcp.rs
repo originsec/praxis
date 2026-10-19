@@ -67,6 +67,7 @@ struct ClientState {
     pending_traffic_search:
         HashMap<String, Result<(Vec<InterceptedTrafficEntry>, usize), String>>,
     pending_recon_get: Option<Option<ReconResult>>,
+    pending_exposure: HashMap<String, Result<common::exposure::ExposureReport, String>>,
     pending_op_def_add: Option<Result<String, String>>,
     pending_op_def_delete: Option<Result<String, String>>,
     pending_chain_create: Option<Result<ChainDefinitionInfo, String>>,
@@ -217,6 +218,17 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
                 state.pending_recon_get = Some(recon_result);
+            }
+            ClientDirectMessage::ExposureReportResponse {
+                request_id,
+                report,
+                error,
+            } => {
+                let result = match (report, error) {
+                    (Some(report), _) => Ok(*report),
+                    (None, error) => Err(error.unwrap_or_else(|| "no report returned".to_string())),
+                };
+                state.pending_exposure.insert(request_id, result);
             }
             ClientDirectMessage::ChainTriggerListResponse { triggers } => {
                 state.chain_triggers = triggers;
@@ -854,6 +866,36 @@ impl McpClient for ServiceMcpClient {
             .await
     }
 
+    async fn get_exposure_report(
+        &self,
+        options: common::exposure::ExposureOptions,
+    ) -> Result<common::exposure::ExposureReport> {
+        let request_id = Uuid::new_v4().to_string();
+        self.publish_signal(ClientSignalMessage::ExposureReportRequest {
+            client_id: self.client_id.clone(),
+            request_id: request_id.clone(),
+            options,
+        })
+        .await?;
+
+        //
+        // Probing nodes and LLM refinement can take a while; wait up to the
+        // client timeout rather than the short default used for lookups.
+        //
+        let max_polls = (self.timeout.as_millis() / 100) as usize;
+        let result = self
+            .poll_pending(
+                max_polls,
+                |s| s.pending_exposure.remove(&request_id),
+                "exposure report",
+            )
+            .await;
+        if result.is_err() {
+            self.state.lock().await.pending_exposure.remove(&request_id);
+        }
+        result?.map_err(anyhow::Error::msg)
+    }
+
     async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
         let message = ClientSignalMessage::ChainTriggerList {
             client_id: self.client_id.clone(),
@@ -1220,6 +1262,41 @@ mod tests {
         ] {
             assert!(server.get_tool(name).is_some(), "missing MCP tool {name}");
         }
+    }
+
+    #[test]
+    fn advertises_exposure_tools() {
+        let server = PraxisServer::<ServiceMcpClient>::new(|| async {
+            Err(anyhow!("client factory should not run while listing tools"))
+        });
+        for name in [
+            "exposure_summary",
+            "exposure_agent",
+            "exposure_paths",
+            "exposure_export",
+        ] {
+            assert!(server.get_tool(name).is_some(), "missing MCP tool {name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn exposure_response_completes_pending_request() {
+        let state = Arc::new(Mutex::new(ClientState::default()));
+        let message = ClientDirectMessage::ExposureReportResponse {
+            request_id: "req-1".to_string(),
+            report: None,
+            error: Some("rules invalid".to_string()),
+        };
+        ServiceMcpClient::handle_direct_message(
+            &state,
+            &serde_json::to_vec(&message).expect("message should serialize"),
+        )
+        .await;
+        let mut state = state.lock().await;
+        assert!(matches!(
+            state.pending_exposure.remove("req-1"),
+            Some(Err(e)) if e == "rules invalid"
+        ));
     }
 
     #[tokio::test]
