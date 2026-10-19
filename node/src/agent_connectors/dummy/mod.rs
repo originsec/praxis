@@ -168,16 +168,19 @@ impl DummyAgent {
             ConfigItem {
                 path: "~/.dummy/settings.json".to_string(),
                 contents: None, // Contents fetched on-demand
+                content_hash: None,
                 config_type: "settings".to_string(),
             },
             ConfigItem {
                 path: "~/.dummy/CLAUDE.md".to_string(),
                 contents: None, // Contents fetched on-demand
+                content_hash: None,
                 config_type: "instructions".to_string(),
             },
             ConfigItem {
                 path: "~/project/.dummy/local.json".to_string(),
                 contents: None, // Contents fetched on-demand
+                content_hash: None,
                 config_type: "project".to_string(),
             },
         ]

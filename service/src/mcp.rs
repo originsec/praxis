@@ -1198,10 +1198,12 @@ mod tests {
                 os_filter: None,
                 agent_short_names: Vec::new(),
                 include_triggering_node: false,
+                triggering_node_only: false,
             },
             enabled: true,
             last_fired_at: None,
             next_fire_at: None,
+            webhook_secret: None,
         }
     }
 

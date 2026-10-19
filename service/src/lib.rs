@@ -16,12 +16,14 @@ mod log_query;
 mod mcp;
 mod messaging;
 mod orchestrator;
+pub mod recon_diff;
 mod remote_nodes;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
 mod tools;
 pub mod trigger_engine;
+pub mod webhook;
 
 use anyhow::Result;
 pub use common::rabbitmq_url;
@@ -887,7 +889,17 @@ async fn run_main_loop() -> Result<()> {
         toolkit_manager.clone(),
     ));
     trigger_engine.start_scheduler();
+    acp_node_proxy.set_trigger_engine(&trigger_engine);
     common::log_info!("Initialized trigger engine");
+
+    //
+    // Chain-trigger webhook listener (disabled by default).
+    //
+    let webhook_manager = Arc::new(webhook::WebhookServerManager::new());
+    {
+        let config = service_config.read().await;
+        webhook_manager.apply_config(&config, &trigger_engine).await;
+    }
 
     //
     // Spawn the live intercept broadcaster. Coalesces new traffic
@@ -981,6 +993,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv1_manager,
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
+        webhook_manager,
         intercept_processor: intercept_processor.clone(),
         traffic_query_processor: traffic_query_processor.clone(),
         rules_snapshot,

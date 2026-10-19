@@ -27,6 +27,7 @@ use crate::semantic_ops::{ChainExecutor, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 use crate::tools::ToolkitManager;
 use crate::trigger_engine::TriggerEngine;
+use crate::webhook::WebhookServerManager;
 use crate::database::rules_snapshot::RulesSnapshot;
 use intercept_processing::InterceptProcessor;
 use traffic_queries::TrafficQueryProcessor;
@@ -53,6 +54,7 @@ pub struct ServiceContext {
     pub ccrv1_manager: Arc<CcrV1Manager>,
     pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
+    pub webhook_manager: Arc<WebhookServerManager>,
     pub intercept_processor: Arc<InterceptProcessor>,
     pub traffic_query_processor: Arc<TrafficQueryProcessor>,
     pub rules_snapshot: Arc<RulesSnapshot>,

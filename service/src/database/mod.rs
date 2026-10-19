@@ -503,6 +503,26 @@ impl Database {
             }
         }
 
+        //
+        // Migration: add the webhook secret hash column to chain_triggers.
+        // Webhook triggers store only the SHA-256 of their bearer secret.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ =
+                    sqlx::query("ALTER TABLE chain_triggers ADD COLUMN webhook_secret_hash TEXT")
+                        .execute(pool)
+                        .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(
+                    "ALTER TABLE chain_triggers ADD COLUMN IF NOT EXISTS webhook_secret_hash TEXT",
+                )
+                .execute(pool)
+                .await;
+            }
+        }
+
         Ok(())
     }
 

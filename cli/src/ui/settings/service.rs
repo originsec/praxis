@@ -106,6 +106,37 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     ]));
 
     lines.push(Line::raw(""));
+    lines.push(section_header("Webhook Listener"));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "POST /hooks/<trigger_id> fires webhook chain triggers (plain HTTP)",
+            Style::default().fg(MUTED),
+        ),
+    ]));
+    lines.push(Line::raw(""));
+
+    lines.push(toggle_row(
+        "Webhook Listener",
+        state.webhook_enabled,
+        state.selected == 9,
+    ));
+    lines.push(setting_row(
+        "  Bind Address",
+        &state.webhook_bind,
+        state.selected == 10,
+        state.editing,
+        &state.edit_buffer,
+    ));
+    lines.push(setting_row(
+        "  Port",
+        &state.webhook_port,
+        state.selected == 11,
+        state.editing,
+        &state.edit_buffer,
+    ));
+
+    lines.push(Line::raw(""));
     lines.push(section_header("Connection"));
     lines.push(Line::raw(""));
 

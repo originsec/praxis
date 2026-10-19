@@ -15,7 +15,8 @@ pub struct ResolvedTarget {
 /// 1. Get all registered nodes
 /// 2. Filter by node_ids if non-empty
 /// 3. Filter by os_filter (case-insensitive substring on os_details)
-/// 4. If include_triggering_node, ensure that node is included
+/// 4. If include_triggering_node, ensure that node is included; if
+///    triggering_node_only, drop every other node
 /// 5. For each node, get discovered_agents from last_update
 /// 6. Filter agents by agent_short_names if non-empty; otherwise use all available
 /// 7. Return flattened Vec<ResolvedTarget>
@@ -28,6 +29,13 @@ pub async fn resolve_targets(
     let mut targets = Vec::new();
 
     for node in &all_nodes {
+        if spec.triggering_node_only
+            && let Some(tid) = triggering_node_id
+            && tid != node.id
+        {
+            continue;
+        }
+
         //
         // Filter by specific node IDs if provided.
         //

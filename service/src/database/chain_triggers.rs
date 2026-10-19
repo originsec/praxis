@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use common::{ChainTriggerInfo, ScheduleSpec, TargetSpec, TriggerConfig};
 use uuid::Uuid;
@@ -14,6 +14,7 @@ impl Database {
         trigger_config: &TriggerConfig,
         target_spec: &TargetSpec,
     ) -> Result<ChainTriggerInfo> {
+        trigger_config.validate().map_err(|e| anyhow!(e))?;
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let now_str = now.to_rfc3339();
@@ -22,8 +23,16 @@ impl Database {
         let next_fire = compute_next_fire_at(trigger_config, None);
         let next_fire_str = next_fire.map(|t| t.to_rfc3339());
 
-        let sql = "INSERT INTO chain_triggers (id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 1, NULL, $5, $6, $7)";
+        //
+        // Webhook triggers get a freshly generated bearer secret. Only its
+        // hash is stored; the plaintext goes back to the creating client once.
+        //
+        let webhook_secret =
+            matches!(trigger_config, TriggerConfig::Webhook).then(crate::webhook::generate_secret);
+        let secret_hash = webhook_secret.as_deref().map(crate::webhook::hash_secret);
+
+        let sql = "INSERT INTO chain_triggers (id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at, created_at, updated_at, webhook_secret_hash)
+             VALUES ($1, $2, $3, $4, 1, NULL, $5, $6, $7, $8)";
 
         self.db_execute(
             sql,
@@ -35,6 +44,7 @@ impl Database {
                 next_fire_str,
                 &now_str,
                 &now_str,
+                secret_hash,
             ],
         )
         .await?;
@@ -47,6 +57,7 @@ impl Database {
             enabled: true,
             last_fired_at: None,
             next_fire_at: next_fire,
+            webhook_secret,
         })
     }
 
@@ -58,8 +69,11 @@ impl Database {
         trigger_config: Option<&TriggerConfig>,
         target_spec: Option<&TargetSpec>,
     ) -> Result<Option<ChainTriggerInfo>> {
-        let existing = self.get_chain_trigger(trigger_id).await?;
-        let Some(mut trigger) = existing else {
+        if let Some(tc) = trigger_config {
+            tc.validate().map_err(|e| anyhow!(e))?;
+        }
+        let existing = self.get_webhook_trigger(trigger_id).await?;
+        let Some((mut trigger, existing_hash)) = existing else {
             return Ok(None);
         };
 
@@ -81,13 +95,31 @@ impl Database {
                 compute_next_fire_at(&trigger.trigger_config, trigger.last_fired_at.as_ref());
         }
 
+        //
+        // Keep the webhook secret across edits; issue one when a trigger is
+        // converted to a webhook and drop it when converted away.
+        //
+        let secret_hash = if matches!(trigger.trigger_config, TriggerConfig::Webhook) {
+            match existing_hash {
+                Some(hash) => Some(hash),
+                None => {
+                    let secret = crate::webhook::generate_secret();
+                    let hash = crate::webhook::hash_secret(&secret);
+                    trigger.webhook_secret = Some(secret);
+                    Some(hash)
+                }
+            }
+        } else {
+            None
+        };
+
         let now_str = Utc::now().to_rfc3339();
         let config_json = serde_json::to_string(&trigger.trigger_config)?;
         let spec_json = serde_json::to_string(&trigger.target_spec)?;
         let enabled_int: i32 = if trigger.enabled { 1 } else { 0 };
         let next_fire_str = trigger.next_fire_at.map(|t| t.to_rfc3339());
 
-        let sql = "UPDATE chain_triggers SET trigger_config = $1, target_spec = $2, enabled = $3, next_fire_at = $4, updated_at = $5 WHERE id = $6";
+        let sql = "UPDATE chain_triggers SET trigger_config = $1, target_spec = $2, enabled = $3, next_fire_at = $4, updated_at = $5, webhook_secret_hash = $6 WHERE id = $7";
 
         self.db_execute(
             sql,
@@ -97,6 +129,7 @@ impl Database {
                 enabled_int,
                 next_fire_str,
                 &now_str,
+                secret_hash,
                 trigger_id,
             ],
         )
@@ -124,6 +157,20 @@ impl Database {
         let sql = "SELECT id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at FROM chain_triggers WHERE id = $1";
         let row = self.db_fetch_optional(sql, db_args![trigger_id]).await?;
         row.map(|row| parse_trigger_row(&row)).transpose()
+    }
+
+    /// Get a trigger together with its stored webhook secret hash (if any).
+    pub async fn get_webhook_trigger(
+        &self,
+        trigger_id: &str,
+    ) -> Result<Option<(ChainTriggerInfo, Option<String>)>> {
+        let sql = "SELECT id, chain_id, trigger_config, target_spec, enabled, last_fired_at, next_fire_at, webhook_secret_hash FROM chain_triggers WHERE id = $1";
+        let row = self.db_fetch_optional(sql, db_args![trigger_id]).await?;
+        row.map(|row| {
+            let hash: Option<String> = row.get("webhook_secret_hash");
+            parse_trigger_row(&row).map(|t| (t, hash))
+        })
+        .transpose()
     }
 
     /// List all triggers for a specific chain
@@ -216,6 +263,7 @@ fn parse_trigger_row(row: &DbRow) -> Result<ChainTriggerInfo> {
                 .ok()
                 .map(|d| d.with_timezone(&Utc))
         }),
+        webhook_secret: None,
     })
 }
 
@@ -246,6 +294,158 @@ pub fn compute_next_fire_at(
                 Some(base + chrono::Duration::minutes(*minutes as i64))
             }
         },
-        TriggerConfig::InterceptMatch { .. } | TriggerConfig::NewNode => None,
+        TriggerConfig::InterceptMatch { .. }
+        | TriggerConfig::NewNode
+        | TriggerConfig::ReconChange { .. }
+        | TriggerConfig::AgentChange { .. }
+        | TriggerConfig::SessionActivity { .. }
+        | TriggerConfig::Webhook => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::DatabaseConfig;
+    use super::*;
+
+    fn spec() -> TargetSpec {
+        TargetSpec {
+            node_ids: vec![],
+            os_filter: None,
+            agent_short_names: vec![],
+            include_triggering_node: false,
+            triggering_node_only: true,
+        }
+    }
+
+    //
+    // Start from a database whose chain_triggers table predates the webhook
+    // column, then open it twice to prove the migration adds the column and
+    // is idempotent.
+    //
+    async fn legacy_db() -> (Database, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!("praxis-trig-{}.db", Uuid::new_v4()));
+        {
+            use sqlx::sqlite::SqliteConnectOptions;
+            let opts = SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true);
+            let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE chain_triggers (
+                    id TEXT PRIMARY KEY, chain_id TEXT NOT NULL,
+                    trigger_config TEXT NOT NULL, target_spec TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1, last_fired_at TEXT,
+                    next_fire_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+        let config = DatabaseConfig::Sqlite { path: path.clone() };
+        drop(Database::new(&config).await.unwrap());
+        (Database::new(&config).await.unwrap(), path)
+    }
+
+    fn remove_db(path: &std::path::Path) {
+        for suffix in ["", "-wal", "-shm"] {
+            let mut p = path.as_os_str().to_owned();
+            p.push(suffix);
+            let _ = std::fs::remove_file(p);
+        }
+    }
+
+    #[tokio::test]
+    async fn webhook_secret_is_hashed_and_survives_edits() {
+        let (db, path) = legacy_db().await;
+
+        let created = db
+            .create_chain_trigger("chain", &TriggerConfig::Webhook, &spec())
+            .await
+            .unwrap();
+        let secret = created.webhook_secret.clone().expect("secret issued");
+
+        let (stored, hash) = db.get_webhook_trigger(&created.id).await.unwrap().unwrap();
+        assert!(stored.webhook_secret.is_none());
+        assert_eq!(
+            hash.as_deref(),
+            Some(crate::webhook::hash_secret(&secret).as_str())
+        );
+        assert!(stored.target_spec.triggering_node_only);
+
+        //
+        // Listing never carries the secret; editing keeps the same hash.
+        //
+        let listed = db.list_all_chain_triggers().await.unwrap();
+        assert!(listed.iter().all(|t| t.webhook_secret.is_none()));
+        let updated = db
+            .update_chain_trigger(
+                &created.id,
+                Some(false),
+                Some(&TriggerConfig::Webhook),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(updated.webhook_secret.is_none());
+        let (_, hash_after) = db.get_webhook_trigger(&created.id).await.unwrap().unwrap();
+        assert_eq!(hash, hash_after);
+
+        //
+        // Converting away drops the secret.
+        //
+        db.update_chain_trigger(&created.id, None, Some(&TriggerConfig::NewNode), None)
+            .await
+            .unwrap();
+        let (_, hash_gone) = db.get_webhook_trigger(&created.id).await.unwrap().unwrap();
+        assert!(hash_gone.is_none());
+
+        remove_db(&path);
+    }
+
+    #[tokio::test]
+    async fn new_trigger_types_round_trip_and_filter_by_type() {
+        let (db, path) = legacy_db().await;
+        let recon = TriggerConfig::ReconChange {
+            agent_short_names: vec!["claudecode".into()],
+            kinds: vec![common::ReconChangeKind::McpServerAdded],
+            config_types: vec![],
+            path_glob: Some("**/*.json".into()),
+        };
+        db.create_chain_trigger("c", &recon, &spec()).await.unwrap();
+        db.create_chain_trigger(
+            "c",
+            &TriggerConfig::SessionActivity {
+                agent_short_names: vec![],
+                new_sessions_only: true,
+                quiet_period_secs: 60,
+            },
+            &spec(),
+        )
+        .await
+        .unwrap();
+
+        let found = db
+            .list_enabled_triggers_by_type("ReconChange")
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(matches!(
+            found[0].trigger_config,
+            TriggerConfig::ReconChange { .. }
+        ));
+        assert!(found[0].next_fire_at.is_none());
+
+        let bad = TriggerConfig::ReconChange {
+            agent_short_names: vec![],
+            kinds: vec![],
+            config_types: vec![],
+            path_glob: Some("[".into()),
+        };
+        assert!(db.create_chain_trigger("c", &bad, &spec()).await.is_err());
+
+        remove_db(&path);
     }
 }

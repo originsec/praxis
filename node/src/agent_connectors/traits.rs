@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use common::{PermissionDecision, ReconResult, SessionContext, SessionUpdateKind};
+use common::{PermissionDecision, ReconResult, SessionContext, SessionItem, SessionUpdateKind};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
@@ -77,6 +77,15 @@ pub trait AgentSession: Send + Sync {
 #[async_trait]
 pub trait AgentRecon: Send + Sync {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
+
+    //
+    // Cheap stat-only session enumeration for the session-activity probe.
+    // None means the connector has no probe (or the probe could not run
+    // right now); callers must not treat None as "no sessions".
+    //
+    async fn probe_sessions(&self) -> Option<Vec<SessionItem>> {
+        None
+    }
 }
 
 //

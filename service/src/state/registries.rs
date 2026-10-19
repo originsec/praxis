@@ -1,11 +1,11 @@
 use chrono::{DateTime, Utc};
 use common::{
-    InterceptStatus, NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState,
-    NodeStatus, SystemState,
+    AgentChangeEvent, DiscoveredAgent, InterceptStatus, NodeCapability, NodeInformationUpdate,
+    NodeRegistration, NodeState, NodeStatus, SystemState,
 };
 use std::collections::HashMap;
 use std::time::Instant;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
 
 /// A registered node in the system
 #[derive(Debug, Clone)]
@@ -68,16 +68,38 @@ pub fn merge_command_enabled_into_status(
     }
 }
 
+/// Capacity of the agent change broadcast; slow subscribers that fall this
+/// far behind skip events (and are told how many via RecvError::Lagged).
+const AGENT_EVENT_CAPACITY: usize = 256;
+
 /// Registry of connected nodes
 pub struct NodeRegistry {
     agents: RwLock<HashMap<String, RegisteredNode>>,
+    //
+    // Last available-agent list per node, kept outside RegisteredNode so it
+    // survives re-registration (a node restart after an agent upgrade still
+    // yields a version-change event).
+    //
+    agent_baselines: RwLock<HashMap<String, Vec<DiscoveredAgent>>>,
+    agent_events: broadcast::Sender<AgentChangeEvent>,
 }
 
 impl NodeRegistry {
     pub fn new() -> Self {
         Self {
             agents: RwLock::new(HashMap::new()),
+            agent_baselines: RwLock::new(HashMap::new()),
+            agent_events: broadcast::channel(AGENT_EVENT_CAPACITY).0,
         }
+    }
+
+    //
+    // Subscribe to agent appeared / disappeared / version-changed events
+    // derived from node information updates. Any service component may
+    // subscribe; events are dropped when nobody is listening.
+    //
+    pub fn subscribe_agent_events(&self) -> broadcast::Receiver<AgentChangeEvent> {
+        self.agent_events.subscribe()
     }
 
     pub async fn register(&self, registration: &NodeRegistration) -> RegisteredNode {
@@ -172,6 +194,25 @@ impl NodeRegistry {
             node.intercept_active = update.intercept_enabled;
             node.last_update = Some(update.clone());
             node.last_update_received = Utc::now();
+        } else {
+            return;
+        }
+        drop(agents);
+
+        let previous = self
+            .agent_baselines
+            .write()
+            .await
+            .insert(update.node_id.clone(), update.discovered_agents.clone());
+        if let Some(previous) = previous {
+            for event in super::agent_events::diff_discovered_agents(
+                &update.node_id,
+                &previous,
+                &update.discovered_agents,
+                Utc::now(),
+            ) {
+                let _ = self.agent_events.send(event);
+            }
         }
     }
 

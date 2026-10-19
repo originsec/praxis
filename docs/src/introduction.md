@@ -30,7 +30,7 @@ This matters for:
 | **Orchestrator** | Free-form multi-tool AI operator across the Praxis network |
 | **Help Assistant** | In-TUI documentation chat (`Ctrl+H`) grounded in the shipped docs |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
-| **Chain Automation** | Trigger chains automatically on schedules, intercept matches, or new node events |
+| **Chain Automation** | Trigger chains automatically on schedules, intercept matches, new nodes, recon/agent/session changes, or webhooks |
 | **Terminal Access** | PTY terminal on remote nodes |
 
 ## The Components

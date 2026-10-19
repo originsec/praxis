@@ -44,6 +44,16 @@ pub enum ConfirmKind {
     DeleteChain(String),   // chain_id
     DiscardChainForm,
     Info,
+    //
+    // Multi-line informational message (not an error), dismissed by any key.
+    //
+    Notice,
+}
+
+impl ConfirmKind {
+    pub fn is_dismiss_only(&self) -> bool {
+        matches!(self, ConfirmKind::Info | ConfirmKind::Notice)
+    }
 }
 
 #[derive(Clone)]
@@ -296,7 +306,7 @@ impl App {
                 }
                 self.refresh_triggers_after(Duration::from_millis(200));
             }
-            ConfirmKind::Info => {}
+            ConfirmKind::Info | ConfirmKind::Notice => {}
         }
     }
 
@@ -305,7 +315,7 @@ impl App {
             _ if self
                 .confirm
                 .as_ref()
-                .is_some_and(|c| matches!(c.action, ConfirmKind::Info)) =>
+                .is_some_and(|c| c.action.is_dismiss_only()) =>
             {
                 self.confirm = None;
             }

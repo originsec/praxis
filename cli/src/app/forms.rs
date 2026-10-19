@@ -111,6 +111,59 @@ pub enum TriggerKind {
     Scheduled,
     InterceptMatch,
     NewNode,
+    ReconChange,
+    AgentChange,
+    SessionActivity,
+    Webhook,
+}
+
+impl TriggerKind {
+    pub const ALL: [TriggerKind; 7] = [
+        TriggerKind::Scheduled,
+        TriggerKind::InterceptMatch,
+        TriggerKind::NewNode,
+        TriggerKind::ReconChange,
+        TriggerKind::AgentChange,
+        TriggerKind::SessionActivity,
+        TriggerKind::Webhook,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            TriggerKind::Scheduled => "Scheduled",
+            TriggerKind::InterceptMatch => "Intercept Match",
+            TriggerKind::NewNode => "New Node",
+            TriggerKind::ReconChange => "Recon Change",
+            TriggerKind::AgentChange => "Agent Change",
+            TriggerKind::SessionActivity => "Session Activity",
+            TriggerKind::Webhook => "Webhook",
+        }
+    }
+
+    //
+    // Event triggers have a triggering node, so the include/only
+    // triggering-node targeting toggles apply.
+    //
+    pub fn is_node_event(&self) -> bool {
+        !matches!(self, TriggerKind::Scheduled | TriggerKind::Webhook)
+    }
+
+    //
+    // Selectable event kinds for types that filter on them (wire names).
+    //
+    pub fn event_kind_options(&self) -> Vec<String> {
+        match self {
+            TriggerKind::ReconChange => common::ReconChangeKind::ALL
+                .iter()
+                .map(|k| k.as_str().to_string())
+                .collect(),
+            TriggerKind::AgentChange => common::AgentChangeKind::ALL
+                .iter()
+                .map(|k| k.as_str().to_string())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -152,6 +205,19 @@ pub struct TriggerForm {
     pub agents: Vec<(String, bool)>,
     pub os_filter: String,
     pub include_triggering_node: bool,
+    pub triggering_node_only: bool,
+
+    //
+    // Event-trigger filters. `event_kinds` holds the options for the current
+    // type (wire name, selected; none selected = any); `event_agents` picks
+    // which agents' events fire the trigger (none selected = any).
+    //
+    pub event_kinds: Vec<(String, bool)>,
+    pub event_agents: Vec<(String, bool)>,
+    pub config_types: String,
+    pub path_glob: String,
+    pub new_sessions_only: bool,
+    pub quiet_secs: u64,
 
     //
     // Focus: 0=Chain, 1=Type, 2..=type-specific-rows, then nodes, agents,
@@ -174,6 +240,13 @@ pub enum TriggerFormSection {
     OsFilter,
     Agents,
     IncludeTriggering,
+    TriggeringNodeOnly,
+    EventKinds,
+    EventAgents,
+    ConfigTypes,
+    PathGlob,
+    NewSessionsOnly,
+    QuietPeriod,
 }
 
 //
@@ -573,17 +646,101 @@ impl TriggerForm {
             TriggerKind::InterceptMatch => {
                 order.push(TriggerFormSection::Rule);
             }
-            TriggerKind::NewNode => {}
+            TriggerKind::ReconChange => {
+                order.push(TriggerFormSection::EventKinds);
+                order.push(TriggerFormSection::EventAgents);
+                order.push(TriggerFormSection::ConfigTypes);
+                order.push(TriggerFormSection::PathGlob);
+            }
+            TriggerKind::AgentChange => {
+                order.push(TriggerFormSection::EventKinds);
+                order.push(TriggerFormSection::EventAgents);
+            }
+            TriggerKind::SessionActivity => {
+                order.push(TriggerFormSection::EventAgents);
+                order.push(TriggerFormSection::NewSessionsOnly);
+                order.push(TriggerFormSection::QuietPeriod);
+            }
+            TriggerKind::NewNode | TriggerKind::Webhook => {}
         }
         order.push(TriggerFormSection::Nodes);
         order.push(TriggerFormSection::OsFilter);
         order.push(TriggerFormSection::Agents);
-        if matches!(
-            self.kind,
-            TriggerKind::InterceptMatch | TriggerKind::NewNode
-        ) {
+        if self.kind.is_node_event() {
             order.push(TriggerFormSection::IncludeTriggering);
+            order.push(TriggerFormSection::TriggeringNodeOnly);
         }
         order
+    }
+
+    //
+    // Build the TriggerConfig for the current form state. Errors are
+    // user-facing messages.
+    //
+    pub fn build_config(&self) -> Result<common::TriggerConfig, String> {
+        use common::TriggerConfig;
+
+        let selected = |items: &[(String, bool)]| -> Vec<String> {
+            items
+                .iter()
+                .filter(|(_, s)| *s)
+                .map(|(n, _)| n.clone())
+                .collect()
+        };
+        let kind_selected = |name: &str| self.event_kinds.iter().any(|(n, s)| *s && n == name);
+
+        let config = match self.kind {
+            TriggerKind::Scheduled => {
+                let schedule = match self.schedule_kind {
+                    ScheduleKind::DailyAt => common::ScheduleSpec::DailyAt {
+                        hour: self.hour.min(23),
+                        minute: self.minute.min(59),
+                    },
+                    ScheduleKind::Interval => common::ScheduleSpec::Interval {
+                        minutes: self.interval_minutes.max(1),
+                    },
+                };
+                TriggerConfig::Scheduled {
+                    schedule,
+                    recurring: self.recurring,
+                }
+            }
+            TriggerKind::InterceptMatch => {
+                let Some((rule_id, _)) = self.rules.get(self.rule_cursor) else {
+                    return Err("Pick an intercept rule first.".to_string());
+                };
+                TriggerConfig::InterceptMatch { rule_id: *rule_id }
+            }
+            TriggerKind::NewNode => TriggerConfig::NewNode,
+            TriggerKind::ReconChange => TriggerConfig::ReconChange {
+                agent_short_names: selected(&self.event_agents),
+                kinds: common::ReconChangeKind::ALL
+                    .into_iter()
+                    .filter(|k| kind_selected(k.as_str()))
+                    .collect(),
+                config_types: self
+                    .config_types
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+                path_glob: Some(self.path_glob.trim().to_string()).filter(|g| !g.is_empty()),
+            },
+            TriggerKind::AgentChange => TriggerConfig::AgentChange {
+                agent_short_names: selected(&self.event_agents),
+                kinds: common::AgentChangeKind::ALL
+                    .into_iter()
+                    .filter(|k| kind_selected(k.as_str()))
+                    .collect(),
+            },
+            TriggerKind::SessionActivity => TriggerConfig::SessionActivity {
+                agent_short_names: selected(&self.event_agents),
+                new_sessions_only: self.new_sessions_only,
+                quiet_period_secs: self.quiet_secs,
+            },
+            TriggerKind::Webhook => TriggerConfig::Webhook,
+        };
+        config.validate()?;
+        Ok(config)
     }
 }

@@ -129,8 +129,20 @@ local function discover_sessions_for_home(home)
 
       local message_count = 0
       local store_db = praxis.path_join({ entry.path, "store.db" })
+      local last_modified_unix = entry.modified_unix
 
-      if praxis.path_exists(store_db) then
+      if helpers.is_session_probe() then
+        --
+        -- Session probe: the chat directory mtime only moves when files
+        -- are added/removed, so take the newest file mtime (store.db and
+        -- its WAL) instead of querying SQLite.
+        --
+        for _, f in ipairs(praxis.read_dir(entry.path) or {}) do
+          if f.modified_unix and (last_modified_unix == nil or f.modified_unix > last_modified_unix) then
+            last_modified_unix = f.modified_unix
+          end
+        end
+      elseif praxis.path_exists(store_db) then
         local count_str = praxis.sqlite_query(store_db, "SELECT count(*) FROM blobs;")
         if count_str then
           message_count = tonumber(count_str) or 0
@@ -143,8 +155,8 @@ local function discover_sessions_for_home(home)
       end
 
       local last_modified = ""
-      if entry.modified_unix then
-        last_modified = praxis.format_unix_timestamp(entry.modified_unix)
+      if last_modified_unix then
+        last_modified = praxis.format_unix_timestamp(last_modified_unix)
       end
 
       table.insert(sessions, {
@@ -505,6 +517,10 @@ return {
 
   recon = function(ctx)
     return helpers.run_standard_recon(ctx, recon_config)
+  end,
+
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
   end,
 
   create_session = function(ctx)

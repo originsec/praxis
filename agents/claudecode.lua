@@ -449,6 +449,10 @@ return {
     return helpers.run_standard_recon(ctx, recon_config)
   end,
 
+  probe_sessions = function(ctx)
+    return helpers.run_session_probe(ctx, recon_config)
+  end,
+
   create_session = function(ctx)
     return session_fns.create(ctx)
   end,

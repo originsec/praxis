@@ -1,5 +1,8 @@
 mod forwarders;
 mod info;
+mod session_probe;
+
+pub use session_probe::SessionSnapshots;
 
 use crate::agent_connectors::{AgentFactory, AgentRegistry};
 use crate::app::{NodeState, registration::publish_registration};
@@ -748,6 +751,21 @@ async fn handle_broadcast_message(
             .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
+            }
+        }
+        NodeBroadcastMessage::SessionActivityProbeRequest { agent_short_names } => {
+            let snapshots = node_state.read().await.session_snapshots.clone();
+            if let Err(e) = session_probe::probe_and_report(
+                channel,
+                node_id,
+                registry,
+                fingerprint_cache,
+                &snapshots,
+                &agent_short_names,
+            )
+            .await
+            {
+                common::log_error!("Failed to send session activity report: {}", e);
             }
         }
         NodeBroadcastMessage::NodeRefreshRegistration => {

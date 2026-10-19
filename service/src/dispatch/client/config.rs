@@ -6,7 +6,8 @@ use common::{
 use crate::config::service_config::{
     APPLICATION_LOGS_ENABLED, CLAUDE_CCRV1_ENABLED, CLAUDE_CCRV1_PORT, CLAUDE_CCRV2_ENABLED,
     CLAUDE_CCRV2_PORT, KNOWN_CONFIG_KEYS, MCP_SERVER_ENABLED, MCP_SERVER_PORT,
-    PRAXIS_AGENT_SETTINGS, PRAXIS_AGENT_SYSTEM_PROMPT,
+    PRAXIS_AGENT_SETTINGS, PRAXIS_AGENT_SYSTEM_PROMPT, WEBHOOK_SERVER_BIND_ADDRESS,
+    WEBHOOK_SERVER_ENABLED, WEBHOOK_SERVER_PORT,
 };
 use crate::messaging::send_to_client;
 
@@ -58,6 +59,7 @@ pub(super) async fn handle_config_set(
         let mut mcp_server_changed = false;
         let mut ccrv1_changed = false;
         let mut ccrv2_changed = false;
+        let mut webhook_changed = false;
         let mut praxis_agent_changed = false;
         for (key, value) in values {
             if !KNOWN_CONFIG_KEYS.contains(&key.as_str()) {
@@ -76,6 +78,12 @@ pub(super) async fn handle_config_set(
             }
             if key == CLAUDE_CCRV2_ENABLED || key == CLAUDE_CCRV2_PORT {
                 ccrv2_changed = true;
+            }
+            if key == WEBHOOK_SERVER_ENABLED
+                || key == WEBHOOK_SERVER_BIND_ADDRESS
+                || key == WEBHOOK_SERVER_PORT
+            {
+                webhook_changed = true;
             }
             if key == PRAXIS_AGENT_SETTINGS || key == PRAXIS_AGENT_SYSTEM_PROMPT {
                 praxis_agent_changed = true;
@@ -177,6 +185,10 @@ pub(super) async fn handle_config_set(
                     common::log_info!("MCP server config changed, stopping server");
                     ctx.mcp_manager.stop().await;
                 }
+            }
+
+            if webhook_changed && let Some(ref engine) = ctx.trigger_engine {
+                ctx.webhook_manager.apply_config(&config, engine).await;
             }
 
             //

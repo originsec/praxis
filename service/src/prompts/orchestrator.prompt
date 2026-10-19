@@ -86,9 +86,18 @@ IMPORTANT: op_run behavior:
 
 ### Triggers
 - Triggers automate chain execution: `scheduled` (cron-like), `intercept_match`
-  (fires when traffic matches an intercept rule), and `new_node` (fires when a
-  node registers). Manage them with `trigger_list`, `trigger_create`,
-  `trigger_delete`, `trigger_toggle`.
+  (fires when traffic matches an intercept rule), `new_node` (fires when a
+  node registers), `recon_change` (a stored recon result gained/lost MCP
+  servers, skills or config files, or a config file changed), `agent_change`
+  (an agent appeared, disappeared or changed version on a node),
+  `session_activity` (new/updated agent sessions on a node) and `webhook`
+  (an external `POST /hooks/<id>` with a bearer secret). Event triggers pass a
+  JSON description of the event to the chain's first block. Use
+  `target.triggering_node_only=true` to run only where the event happened.
+  Manage them with `trigger_list`, `trigger_create`, `trigger_delete`,
+  `trigger_toggle`.
+- A webhook trigger's secret is returned once by `trigger_create`; relay it to
+  the Operator, it cannot be retrieved later.
 - `trigger_create`'s `target.agent_short_names` is matched exactly and
   case-sensitively against each node's discovered agents. A near-miss doesn't
   error: it silently resolves to zero targets, and the trigger fires as a

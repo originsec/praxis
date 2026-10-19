@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS chain_triggers (
     last_fired_at TEXT,
     next_fire_at TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    webhook_secret_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id);
 CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled);

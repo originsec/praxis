@@ -186,6 +186,9 @@ fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     if spec.include_triggering_node {
         lines.push(chrome::kv("include triggering", "yes"));
     }
+    if spec.triggering_node_only {
+        lines.push(chrome::kv("triggering node only", "yes"));
+    }
     let _ = ACCENT;
 
     f.render_widget(
@@ -224,5 +227,64 @@ pub fn describe_trigger(t: &ChainTriggerInfo, rules: &[common::InterceptRule]) -
             ("Intercept".to_string(), format!("match: {}", name))
         }
         TriggerConfig::NewNode => ("NewNode".to_string(), "new node connected".to_string()),
+        TriggerConfig::ReconChange {
+            agent_short_names,
+            kinds,
+            config_types,
+            path_glob,
+        } => {
+            let mut parts = vec![list_or_any(kinds.iter().map(|k| k.as_str()))];
+            parts.push(format!("agents: {}", list_or_any(agent_short_names.iter())));
+            if !config_types.is_empty() {
+                parts.push(format!("types: {}", config_types.join(",")));
+            }
+            if let Some(glob) = path_glob {
+                parts.push(format!("path: {}", glob));
+            }
+            ("Recon".to_string(), parts.join("; "))
+        }
+        TriggerConfig::AgentChange {
+            agent_short_names,
+            kinds,
+        } => (
+            "Agent".to_string(),
+            format!(
+                "{}; agents: {}",
+                list_or_any(kinds.iter().map(|k| k.as_str())),
+                list_or_any(agent_short_names.iter())
+            ),
+        ),
+        TriggerConfig::SessionActivity {
+            agent_short_names,
+            new_sessions_only,
+            quiet_period_secs,
+        } => {
+            let mut summary = format!(
+                "{} sessions; agents: {}",
+                if *new_sessions_only {
+                    "new"
+                } else {
+                    "new/updated"
+                },
+                list_or_any(agent_short_names.iter())
+            );
+            if *quiet_period_secs > 0 {
+                summary.push_str(&format!("; quiet {}s", quiet_period_secs));
+            }
+            ("Session".to_string(), summary)
+        }
+        TriggerConfig::Webhook => (
+            "Webhook".to_string(),
+            format!("POST {}", common::webhook_path(&t.id)),
+        ),
+    }
+}
+
+fn list_or_any<T: AsRef<str>>(items: impl Iterator<Item = T>) -> String {
+    let items: Vec<String> = items.map(|s| s.as_ref().to_string()).collect();
+    if items.is_empty() {
+        "any".to_string()
+    } else {
+        items.join(",")
     }
 }

@@ -125,7 +125,8 @@ and connects them in the given order between a manual start element and a
 termination element. The resulting chain can then be passed by name to
 `trigger_create`.
 
-`trigger_create` accepts `scheduled`, `intercept_match`, and `new_node` trigger
+`trigger_create` accepts `scheduled`, `intercept_match`, `new_node`,
+`recon_change`, `agent_change`, `session_activity` and `webhook` trigger
 configurations. For example, an Orchestrator can make an existing chain run
 whenever a node registers:
 
@@ -145,7 +146,32 @@ whenever a node registers:
 New-node triggers run after a 10-second discovery delay. Target node IDs must be
 full IDs from `node_list`; leaving `node_ids` empty targets all registered nodes.
 For event triggers, `include_triggering_node` ensures that the node which caused
-the event is included even when an explicit node list would otherwise exclude it.
+the event is included even when an explicit node list would otherwise exclude it,
+and `triggering_node_only` restricts the run to that node.
+
+The other event and external trigger types (see
+[Chain Triggers](./semantic-operations.md#chain-triggers) for semantics and the
+JSON context each passes to the chain):
+
+```json
+{ "type": "recon_change", "agent_short_names": ["claudecode"],
+  "kinds": ["mcp_server_added", "config_changed"],
+  "config_types": ["settings"], "path_glob": "**/.claude/settings.json" }
+
+{ "type": "agent_change", "agent_short_names": ["codex"], "kinds": ["version_changed"] }
+
+{ "type": "session_activity", "agent_short_names": ["claudecode"],
+  "new_sessions_only": true, "quiet_period_secs": 120 }
+
+{ "type": "webhook" }
+```
+
+Every filter field is optional; an empty list matches everything. For a
+`webhook` trigger the `trigger_create` response additionally contains
+`webhook_path` (`/hooks/<id>`), `webhook_secret` and `webhook_usage`. The secret
+is only ever returned here (the service stores its hash), so record it
+immediately. `trigger_list` includes `webhook_path` for webhook triggers but
+never the secret.
 
 `agent_short_names` matching is exact and case-sensitive against each node's
 discovered agents — a name that doesn't match anything silently resolves to

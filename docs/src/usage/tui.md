@@ -256,7 +256,14 @@ A newly created chain is seeded with a connected `Trigger → Termination` pair 
 
 ### Triggers tab
 
-Triggers fire a chain on a schedule, when an intercept rule matches, or when a new node connects. Each trigger picks a target chain, a trigger type, and a target spec (nodes + agents, with an optional OS substring filter and, for event triggers, an "include triggering node" toggle).
+Triggers fire a chain on a schedule, when an intercept rule matches, when a new node connects, when an agent's stored recon changes, when an agent appears / disappears / changes version, when an agent shows new session activity, or when a webhook is called. Each trigger picks a target chain, a trigger type (`←/→` on the **Type** row), the type's settings, and a target spec (nodes + agents, with an optional OS substring filter and, for event triggers, **Include triggering node** and **Triggering node only** toggles; the latter defaults on for new triggers). See [Chain Triggers](./semantic-operations.md#chain-triggers).
+
+Type-specific rows:
+
+- **Recon Change** — **Changes** checklist (MCP server / skill / config added, removed, changed; none ticked = any), **Event agents** (whose recon; none = any), **Config types** (comma-separated) and **Path glob**
+- **Agent Change** — **Changes** (`appeared`, `disappeared`, `version_changed`) and **Event agents**
+- **Session Activity** — **Event agents**, **New sessions only**, **Quiet period (s)** (type digits or `←/→` in steps of 10)
+- **Webhook** — no settings. After `Ctrl+S` a notice shows the generated bearer secret once (also copied to the clipboard when `wl-copy`/`xclip`/`xsel`/`pbcopy`/`clip` is available) together with the `/hooks/<id>` path. The edit form and the trigger detail pane show the path
 
 | Key | Action |
 |-----|--------|
@@ -271,7 +278,7 @@ In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/�
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, feature assignment (orchestrator, documentation helper, semantic ops, semantic parser, traffic parser), and the Traffic Parser body limit
-- **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, log query row limits, prompt timeout
+- **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), Webhook Listener (enable, bind address, port; applied immediately), logging, log query row limits, prompt timeout
 - **About** — connection info
 
 ## Help Assistant (`Ctrl+H`)

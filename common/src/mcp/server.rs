@@ -1290,7 +1290,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let trigger_values: Vec<_> = triggers
             .iter()
             .map(|trigger| {
-                json!({
+                let mut value = json!({
                     "id": trigger.id,
                     "id_short": crate::short_id(&trigger.id),
                     "chain_id": trigger.chain_id,
@@ -1300,7 +1300,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                     "enabled": trigger.enabled,
                     "last_fired_at": trigger.last_fired_at.map(|value| value.to_rfc3339()),
                     "next_fire_at": trigger.next_fire_at.map(|value| value.to_rfc3339()),
-                })
+                });
+                if matches!(trigger.trigger_config, crate::TriggerConfig::Webhook) {
+                    value["webhook_path"] = json!(crate::webhook_path(&trigger.id));
+                }
+                value
             })
             .collect();
 
@@ -1311,7 +1315,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 
     #[tool(
-        description = "Create and immediately enable an automatic trigger for an existing chain. Supports scheduled, intercept_match, and new_node triggers. New-node triggers fire 10 seconds after node registration so agent discovery can complete. Use target.include_triggering_node=true when an event's node must be included despite an explicit node_ids filter."
+        description = "Create and immediately enable an automatic trigger for an existing chain. Supports scheduled, intercept_match, new_node, recon_change (stored recon diff: MCP servers/skills/config files added, removed or changed), agent_change (agent appeared/disappeared/version changed on a node), session_activity (new or updated agent sessions, via the node session probe) and webhook (authenticated POST to the service webhook listener) triggers. New-node triggers fire 10 seconds after node registration so agent discovery can complete. Event triggers pass a JSON summary of the event into the chain's first block. Use target.triggering_node_only=true to run only on the node that caused an event, or target.include_triggering_node=true when an event's node must be included despite an explicit node_ids filter. For webhook triggers the response contains the bearer secret exactly once -- store it, it cannot be retrieved later."
     )]
     async fn trigger_create(
         &self,
@@ -1343,6 +1347,13 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             "enabled": trigger.enabled,
             "message": "Chain trigger created and enabled"
         });
+        if let Some(secret) = trigger.webhook_secret {
+            result["webhook_path"] = json!(crate::webhook_path(&trigger_id));
+            result["webhook_secret"] = json!(secret);
+            result["webhook_usage"] = json!(
+                "POST the JSON body to the service webhook listener at webhook_path with header 'Authorization: Bearer <webhook_secret>'. The secret is shown only once. The listener is disabled by default (Settings -> Service -> Webhook Listener)."
+            );
+        }
         if let Some(warning) = warning {
             result["warning"] = json!(warning);
         }

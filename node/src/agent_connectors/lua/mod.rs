@@ -6,7 +6,7 @@ mod uia;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
-use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext};
+use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext, SessionItem};
 use mlua::Lua;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -55,6 +55,7 @@ pub struct LuaAgent {
     session_vms: RwLock<HashMap<Uuid, Arc<Mutex<Lua>>>>,
     has_recon: bool,
     has_read_session_content: bool,
+    has_probe_sessions: bool,
     fingerprint_process_path: RwLock<Option<String>>,
     fingerprint_version: RwLock<Option<String>>,
     fingerprint_at: RwLock<Option<Instant>>,
@@ -81,6 +82,7 @@ impl LuaAgent {
             session_vms: RwLock::new(HashMap::new()),
             has_recon: manifest.has_recon,
             has_read_session_content: manifest.has_read_session_content,
+            has_probe_sessions: manifest.has_probe_sessions,
             fingerprint_process_path: RwLock::new(None),
             fingerprint_version: RwLock::new(None),
             fingerprint_at: RwLock::new(None),
@@ -289,6 +291,42 @@ impl AgentRecon for LuaAgent {
         }
 
         Some(result)
+    }
+
+    async fn probe_sessions(&self) -> Option<Vec<SessionItem>> {
+        if !self.has_probe_sessions {
+            return None;
+        }
+        let vm = Arc::clone(&self.vm);
+        let process_path = self.fingerprint_process_path.read().unwrap().clone();
+        let short_name = self.short_name.clone();
+
+        //
+        // Never wait on a VM that a recon/fingerprint is using: skip this
+        // probe cycle instead and try again on the next request.
+        //
+        let result = tokio::task::spawn_blocking(move || {
+            let lua = vm.try_lock().ok()?;
+            Some(runtime::vm_probe_sessions(&lua, process_path.as_deref()))
+        })
+        .await;
+
+        match result {
+            Ok(Some(Ok(sessions))) => Some(sessions.items),
+            Ok(Some(Err(e))) => {
+                common::log_warn!("Lua session probe failed for '{}': {}", short_name, e);
+                None
+            }
+            Ok(None) => None,
+            Err(e) => {
+                common::log_error!(
+                    "Lua session probe task panicked for '{}': {}",
+                    short_name,
+                    e
+                );
+                None
+            }
+        }
     }
 }
 
@@ -543,6 +581,106 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("test files should be removed");
+    }
+
+    #[test]
+    fn claudecode_recon_hashes_configs_and_probe_lists_sessions() {
+        let script = EMBEDDED_LUA_SCRIPTS
+            .iter()
+            .find(|script| script.contains("AGENT_SHORT_NAME = \"claudecode\""))
+            .expect("Claude Code connector should be embedded");
+        let root = std::env::temp_dir().join(format!("praxis-lua-probe-{}", Uuid::new_v4()));
+        let home = root.join("home");
+        let claude_dir = home.join(".claude");
+        let session_dir = claude_dir.join("projects").join("proj");
+        fs::create_dir_all(&session_dir).expect("session directory should be created");
+        fs::write(claude_dir.join("settings.json"), "{\"a\":1}").expect("settings written");
+        fs::write(
+            claude_dir.join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"test-token"}}"#,
+        )
+        .expect("credentials should be written");
+        fs::write(session_dir.join("abc.jsonl"), "{}\n{}\n").expect("session written");
+
+        let lua = runtime::create_vm(script).expect("Claude Code connector should load");
+        let manifest = runtime::vm_parse_manifest(&lua).expect("manifest");
+        assert!(manifest.has_probe_sessions);
+        let home_json =
+            serde_json::to_string(&home.to_string_lossy().replace('\\', "/")).expect("json");
+        lua.load(format!(
+            "praxis.user_homes = function() return {{ {} }} end",
+            home_json
+        ))
+        .exec()
+        .expect("test home override should load");
+
+        let recon = runtime::vm_recon(&lua, false, None).expect("recon should complete");
+        let settings = recon
+            .config
+            .items
+            .iter()
+            .find(|c| c.path.ends_with("settings.json"))
+            .expect("settings.json discovered");
+        assert_eq!(settings.content_hash.as_deref().map(str::len), Some(64));
+        assert!(settings.contents.is_none());
+
+        let probed = runtime::vm_probe_sessions(&lua, None).expect("probe should complete");
+        assert_eq!(probed.items.len(), 1);
+        assert_eq!(probed.items[0].session_id, "abc");
+        assert_eq!(
+            probed.items[0].message_count, 0,
+            "probe must not count lines"
+        );
+
+        fs::remove_dir_all(root).expect("test files should be removed");
+    }
+
+    #[test]
+    fn probes_run_stat_only_for_gemini_and_cursor_layouts() {
+        let root = std::env::temp_dir().join(format!("praxis-lua-probe-{}", Uuid::new_v4()));
+        let home = root.join("home");
+        let gemini_chats = home.join(".gemini/tmp").join("a".repeat(64)).join("chats");
+        let cursor_chat = home.join(".config/cursor/chats/proj/chat-1");
+        fs::create_dir_all(&gemini_chats).expect("gemini dir");
+        fs::create_dir_all(&cursor_chat).expect("cursor dir");
+        fs::write(gemini_chats.join("session-1.json"), "not json").expect("gemini session");
+        fs::write(cursor_chat.join("store.db"), "x").expect("cursor store");
+        let home_json =
+            serde_json::to_string(&home.to_string_lossy().replace('\\', "/")).expect("json");
+
+        for (short, expected_id) in [("gemini", "session-1"), ("cursor", "chat-1")] {
+            let script = EMBEDDED_LUA_SCRIPTS
+                .iter()
+                .find(|s| s.contains(&format!("AGENT_SHORT_NAME = \"{}\"", short)))
+                .expect("connector embedded");
+            let lua = runtime::create_vm(script).expect("connector should load");
+            lua.load(format!(
+                "praxis.user_homes = function() return {{ {} }} end",
+                home_json
+            ))
+            .exec()
+            .expect("home override");
+            let probed = runtime::vm_probe_sessions(&lua, None).expect("probe should complete");
+            assert_eq!(probed.items.len(), 1, "{}", short);
+            assert_eq!(probed.items[0].session_id, expected_id, "{}", short);
+            assert!(!probed.items[0].last_modified.is_empty(), "{}", short);
+        }
+
+        fs::remove_dir_all(root).expect("test files should be removed");
+    }
+
+    #[test]
+    fn session_capable_connectors_export_probe() {
+        for script in EMBEDDED_LUA_SCRIPTS {
+            let lua = runtime::create_vm(script).expect("embedded connector should load");
+            let manifest = runtime::vm_parse_manifest(&lua).expect("manifest");
+            let has_discovery = script.contains("session_discovery =");
+            assert_eq!(
+                manifest.has_probe_sessions, has_discovery,
+                "{}: probe_sessions should be exported iff session_discovery is configured",
+                manifest.short_name
+            );
+        }
     }
 }
 

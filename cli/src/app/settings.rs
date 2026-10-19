@@ -59,6 +59,13 @@ pub struct SettingsState {
     pub claude_ccrv2_port: String,
 
     //
+    // Chain-trigger webhook listener settings.
+    //
+    pub webhook_enabled: bool,
+    pub webhook_bind: String,
+    pub webhook_port: String,
+
+    //
     // Model select dropdown for feature assignments.
     //
     pub dropdown_open: bool,
@@ -143,6 +150,9 @@ impl Default for SettingsState {
             claude_ccrv1_port: "8586".to_string(),
             claude_ccrv2_enabled: false,
             claude_ccrv2_port: "8587".to_string(),
+            webhook_enabled: false,
+            webhook_bind: "127.0.0.1".to_string(),
+            webhook_port: "8588".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
             intercept_targets: Vec::new(),
@@ -178,6 +188,9 @@ impl App {
             "claude_ccrv1_port".to_string(),
             "claude_ccrv2_enabled".to_string(),
             "claude_ccrv2_port".to_string(),
+            "webhook_server_enabled".to_string(),
+            "webhook_server_bind_address".to_string(),
+            "webhook_server_port".to_string(),
             "praxis_agent_settings".to_string(),
             "praxis_agent_system_prompt".to_string(),
         ];
@@ -258,6 +271,18 @@ impl App {
                     .get("claude_ccrv2_port")
                     .cloned()
                     .unwrap_or("8587".to_string());
+                s.webhook_enabled = config
+                    .get("webhook_server_enabled")
+                    .map(|v| v == "true" || v == "1" || v == "yes")
+                    .unwrap_or(false);
+                s.webhook_bind = config
+                    .get("webhook_server_bind_address")
+                    .cloned()
+                    .unwrap_or("127.0.0.1".to_string());
+                s.webhook_port = config
+                    .get("webhook_server_port")
+                    .cloned()
+                    .unwrap_or("8588".to_string());
 
                 s.praxis_agent_model_ref.clear();
                 s.praxis_agent_thinking_effort.clear();
@@ -412,7 +437,7 @@ impl App {
                 //
                 2
             }
-            SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
+            SettingsTab::Service => 12, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port, webhook_enabled, webhook_bind, webhook_port
             SettingsTab::About => 0,
         }
     }
@@ -432,8 +457,8 @@ impl App {
             SettingsTab::Intercept => false,
             SettingsTab::Service => {
                 // 1 = MCP port, 3 = log query row limit, 4 = prompt timeout,
-                // 6 = CCRv1 port, 8 = CCRv2 port
-                sel == 1 || sel == 3 || sel == 4 || sel == 6 || sel == 8
+                // 6 = CCRv1 port, 8 = CCRv2 port, 10 = webhook bind, 11 = webhook port
+                matches!(sel, 1 | 3 | 4 | 6 | 8 | 10 | 11)
             }
             SettingsTab::About => false,
         }
@@ -539,6 +564,8 @@ impl App {
                 4 => self.settings.prompt_timeout_secs.clone(),
                 6 => self.settings.claude_ccrv1_port.clone(),
                 8 => self.settings.claude_ccrv2_port.clone(),
+                10 => self.settings.webhook_bind.clone(),
+                11 => self.settings.webhook_port.clone(),
                 _ => String::new(),
             },
             SettingsTab::About => String::new(),
@@ -937,6 +964,24 @@ impl App {
                         self.settings.editing = true;
                         self.settings.edit_buffer = self.settings.claude_ccrv2_port.clone();
                     }
+                    9 => {
+                        // Toggle webhook listener.
+                        self.settings.webhook_enabled = !self.settings.webhook_enabled;
+                        let val = if self.settings.webhook_enabled {
+                            "true"
+                        } else {
+                            "false"
+                        };
+                        self.save_setting("webhook_server_enabled", val).await;
+                    }
+                    10 => {
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.webhook_bind.clone();
+                    }
+                    11 => {
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.webhook_port.clone();
+                    }
                     _ => {}
                 }
             }
@@ -994,6 +1039,14 @@ impl App {
                 8 => {
                     self.settings.claude_ccrv2_port = val.clone();
                     self.save_setting("claude_ccrv2_port", &val).await;
+                }
+                10 => {
+                    self.settings.webhook_bind = val.clone();
+                    self.save_setting("webhook_server_bind_address", &val).await;
+                }
+                11 => {
+                    self.settings.webhook_port = val.clone();
+                    self.save_setting("webhook_server_port", &val).await;
                 }
                 _ => {}
             },

@@ -40,6 +40,11 @@ pub enum AppEvent {
         triggers: Vec<ChainTriggerInfo>,
         intercept_rules: Vec<InterceptRule>,
     },
+    //
+    // Service reply to a trigger create/update from the trigger form. A new
+    // webhook trigger carries its one-time secret here.
+    //
+    TriggerSaved(Result<ChainTriggerInfo, String>),
     SessionResponse(SessionResult),
     TerminalCreated {
         node_id: String,
