@@ -539,7 +539,7 @@ fn draw_block(
     }
 
     //
-    // Ports. Loop labels: port 0 = retry (↻), port 1 = exit (x).
+    // Ports. Loop labels: port 0 = repeat (↻), port 1 = exit (x).
     //
     if input_port_count(el.kind) > 0 {
         let px = vx - 1;
@@ -627,7 +627,7 @@ fn element_summary(el: &ChainElementDraft) -> String {
                 format!("{} {}", mode, el.memory_key)
             }
         }
-        ElementKind::Loop => format!("max {} iters", el.max_iterations),
+        ElementKind::Loop => format!("{} total iters", el.max_iterations),
         ElementKind::Tool => {
             if el.tool_name.is_empty() {
                 "(no tool)".to_string()
@@ -1066,12 +1066,12 @@ fn render_block_properties(
             rows.push(PropRow::field(
                 el,
                 BlockField::MaxIterations,
-                "Max iters",
+                "Total iterations",
                 &el.max_iterations,
                 None,
             ));
             rows.push(PropRow::label(
-                "Ports: r = retry (0), x = exit (1)".to_string(),
+                "Ports: r = repeat (0), x = exit (1)".to_string(),
             ));
         }
         ElementKind::Tool => {

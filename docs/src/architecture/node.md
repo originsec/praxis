@@ -237,7 +237,7 @@ Standard ACP methods supported:
     "cwd": "/path",
     "_meta": {
       "praxis": {
-        "connector": "claude-code",
+        "connector": "claudecode",
         "yolo": false,
         "promptTimeoutSecs": 600,
         "interactive": true

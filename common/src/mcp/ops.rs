@@ -972,7 +972,7 @@ pub async fn trigger_create(
 // Trigger target specs match agent short names by exact, case-sensitive
 // string equality (see resolve_targets), and distinct connectors can
 // register visually similar short names for genuinely different things
-// (e.g. the CLI-discovered "claudecode" vs the "claude-code" Claude Code
+// (e.g. the CLI-discovered "claudecode" vs the "claude-bridge" Claude Code
 // Bridge connector). Getting it wrong doesn't error -- it silently resolves
 // zero targets forever, so warn eagerly when a requested name doesn't match
 // any currently discovered agent. This is advisory only, not a hard

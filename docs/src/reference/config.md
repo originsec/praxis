@@ -44,6 +44,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 | `RUST_LOG` | `info` | Log level filter |
 | `RUST_LOG` | `debug` | Verbose logging |
 | `RUST_LOG` | `praxis_node::intercept=debug` | Module-specific logging |
+| `RUST_LOG` | `common::ai::provider=debug` | Full AI provider request/response bodies (Anthropic, Gemini, OpenAI), including OpenAI SSE stream chunks |
 
 ## Service Configuration
 

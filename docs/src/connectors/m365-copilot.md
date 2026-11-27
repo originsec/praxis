@@ -37,7 +37,7 @@ Traffic is intercepted for:
 When you create a session:
 1. All running `M365Copilot.exe` processes are killed by name
 2. All existing CDP connections are drained and their process trees terminated
-3. App is launched with a random debugging port via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+3. App is launched with a random debugging port via `--edge-webview-switches=--remote-debugging-port=<port>`. Current M365 Copilot versions ignore `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`; reconnaissance uses the same command-line switch.
 4. On Windows, the process is spawned on a **hidden desktop** so the window is invisible (release builds by default; debug builds default to visible). Override with `PRAXIS_NOT_HIDDEN=1` to show the window, or `PRAXIS_NOT_HIDDEN=0` to hide it in debug builds. Independent of the hidden-desktop outcome, the window is also **minimized** after DevTools connects, unconditionally whenever a process id is available.
 5. CDP connection is established via chromiumoxide (5 attempts, 2s interval)
 6. Post-initialization: waits for input element, clicks Work/Web toggle, opens new private chat
@@ -106,6 +106,21 @@ Not implemented for this connector. Recon always returns an empty tools result, 
 - Look for firewall blocking debugging ports (9222-9999 range)
 - Check node logs for CDP errors
 - Set `PRAXIS_NOT_HIDDEN=1` to see the app window for debugging
+
+After closing any running M365 Copilot instance, you can check its debugging
+endpoint from PowerShell:
+
+```powershell
+$copilotPackage = Get-AppxPackage -Name Microsoft.MicrosoftOfficeHub | Select-Object -First 1
+& (Join-Path $copilotPackage.InstallLocation M365Copilot.exe) '--edge-webview-switches=--remote-debugging-port=9250'
+# Once the app has opened:
+Invoke-RestMethod http://127.0.0.1:9250/json/list
+```
+
+An unreachable endpoint means CDP did not start; a reachable endpoint with a
+sign-in page means the app still needs authentication before a session can be
+created. If the service still supplies an older built-in connector script,
+reset the agent scripts to the current built-in defaults in **Settings → Agents**.
 
 ### "Responses not captured"
 

@@ -5,6 +5,7 @@ mod clipboard;
 mod commands;
 mod config;
 mod event;
+mod editor;
 mod intercept_live;
 mod keymap;
 mod markdown;
@@ -461,11 +462,11 @@ async fn run_tui(
 
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = disable_raw_mode();
         if keyboard_enhancement {
             let _ = execute!(io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
         }
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = disable_raw_mode();
         original_hook(info);
     }));
 
@@ -489,21 +490,14 @@ async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let terminal_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let terminal_resume = Arc::new(tokio::sync::Notify::new());
-    let mut events = EventHandler::new(
-        client.clone(),
-        terminal_paused.clone(),
-        terminal_resume.clone(),
-    );
+    let mut events = EventHandler::new(client.clone());
     let mut app = App::new(
         client.clone(),
         rabbitmq_url.to_string(),
         client_id,
         events.sender(),
     );
-    app.terminal_paused = terminal_paused;
-    app.terminal_resume = terminal_resume;
+    app.terminal_input = Some(events.terminal_input.clone());
     if let Some(stored) = resume {
         app.seed_orchestrator_resume(stored);
     }
@@ -545,18 +539,23 @@ async fn run_tui(
         }
     }
 
-    disable_raw_mode()?;
-    if keyboard_enhancement {
+    let keyboard_restore = if keyboard_enhancement {
         execute!(
             terminal.backend_mut(),
             crossterm::event::PopKeyboardEnhancementFlags,
-        )?;
-    }
-    execute!(
+        )
+    } else {
+        Ok(())
+    };
+    let screen_restore = execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture,
-    )?;
+    );
+    let input_restore = disable_raw_mode();
+    keyboard_restore?;
+    screen_restore?;
+    input_restore?;
 
     if let Ok(client) = Arc::try_unwrap(client) {
         client.disconnect().await;

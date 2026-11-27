@@ -624,6 +624,7 @@ fn spawn_child(
     u32,
 )> {
     let mut cmd = tokio::process::Command::new(program);
+    crate::intercept::env_vars::apply_to_command(cmd.as_std_mut());
     cmd.args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

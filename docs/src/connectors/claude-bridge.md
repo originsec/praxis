@@ -12,6 +12,22 @@ Traditional Praxis nodes discover Claude Code on the target machine, fingerprint
 
 The bridge implements two protocol versions that correspond to the two transport modes Claude Code supports.
 
+## Connector short name and upgrades
+
+Use `claude-bridge` when selecting this connector, including
+`_meta.praxis.connector` in ACP requests and `agent_short_names` in chain trigger
+targets. The locally discovered Claude Code CLI connector is `claudecode`.
+
+The bridge was previously named `claude-code`. On upgrade, the service migrates
+stored chain trigger targets from `claude-code` to `claude-bridge` in both SQLite
+and PostgreSQL. This preserves their bridge targeting; a trigger that was
+mistakenly intended for the CLI must be corrected to `claudecode` manually.
+Update external clients, scripts, exported workflows, and custom tool parameters
+that use the old bridge short name; it is no longer accepted for new ACP sessions.
+Bridge ACP sessions are held in memory and end when the service restarts, so no
+stored session state needs migration. Historical execution and audit records
+retain the short name used at the time.
+
 ## Protocol Versions
 
 ### CCRv1 (WebSocket)
@@ -157,7 +173,7 @@ When Claude connects, the bridge registers a virtual node with the service. This
 - **Node type**: `claude-ccrv1` or `claude-ccrv2` (shown in the TUI)
 - **Machine name**: Same as the node type
 - **Capabilities**: Session only (no interception, recon, or terminal)
-- **Agent**: Claude Code (auto-selected, with version reported from the `system/init` message)
+- **Agent**: Claude Code (`claude-bridge`, auto-selected, with version reported from the `system/init` message)
 - **Session**: Automatically active in YOLO mode (bypassPermissions)
 - **Working directory**: Reported by Claude's `system/init` message (the cwd where Claude was launched)
 

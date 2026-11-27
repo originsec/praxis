@@ -25,7 +25,7 @@ use common::{
 use super::Transport;
 use crate::state::NodeRegistry;
 
-const BRIDGE_CONNECTOR_SHORT_NAME: &str = "claude-code";
+const BRIDGE_CONNECTOR_SHORT_NAME: &str = "claude-bridge";
 const BRIDGE_CONNECTOR_NAME: &str = "Claude Code";
 const BRIDGE_AGENT_NAME: &str = "praxis-claude-bridge";
 
@@ -1049,4 +1049,19 @@ fn session_notification_to_json(notif: &SessionNotification) -> Result<String> {
 
 fn truncate_id(id: &str) -> &str {
     common::short_id(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_advertises_distinct_connector_name() {
+        let session = BridgeSession::new("claude-ccrv1", Arc::new(NodeRegistry::new()), None);
+        let response = serde_json::to_value(session.handle_initialize()).unwrap();
+        assert_eq!(
+            response["_meta"]["connectors"][0]["shortName"],
+            "claude-bridge"
+        );
+    }
 }

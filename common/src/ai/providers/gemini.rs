@@ -90,6 +90,21 @@ impl GeminiClient {
         };
 
         //
+        // Wire dump at debug — log URL without the API key query param.
+        // Full body uses tracing::debug (not event-log macros) so multi-KB
+        // payloads do not flood the application event log.
+        //
+        let url_for_log = format!("{}/{}:generateContent", GEMINI_API_BASE, request.model);
+        if let Ok(json) = serde_json::to_string(&body) {
+            tracing::debug!(
+                target: "common::ai::provider",
+                "Gemini request to {}: {}",
+                url_for_log,
+                json
+            );
+        }
+
+        //
         // Send request.
         //
         let response = self
@@ -104,12 +119,27 @@ impl GeminiClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            tracing::debug!(
+                target: "common::ai::provider",
+                "Gemini response error {}: {}",
+                status,
+                body
+            );
             return Err(anyhow!("Gemini API error {}: {}", status, body));
         }
 
-        let api_response: GeminiResponse = response
-            .json()
+        let response_body = response
+            .text()
             .await
+            .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+        tracing::debug!(
+            target: "common::ai::provider",
+            "Gemini response from {}: {}",
+            url_for_log,
+            response_body
+        );
+
+        let api_response: GeminiResponse = serde_json::from_str(&response_body)
             .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
         //

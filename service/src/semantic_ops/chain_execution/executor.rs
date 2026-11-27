@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lapin::Channel;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{RwLock as TokioRwLock, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -29,7 +29,7 @@ use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
 //
 // Loop element output ports, as drawn in the TUI chain builder: `r` is
-// the retry path back into earlier elements, `x` is the exit taken once
+// the repeat path back into earlier elements, `x` is the exit taken once
 // iterations are exhausted.
 //
 
@@ -46,11 +46,11 @@ type ResolvedElement = (String, Option<bool>, Option<u32>);
 
 //
 // Pick the output port a Loop element activates for a given visit.
-// `iteration` is 1-based: the first visit is iteration 1.
+// `iteration` counts completed body passes, including the initial pass.
 //
 
 fn loop_active_port(iteration: u32, max_iterations: u32) -> u32 {
-    if iteration <= max_iterations {
+    if iteration < max_iterations {
         LOOP_PORT_RETRY
     } else {
         LOOP_PORT_EXIT
@@ -494,13 +494,10 @@ impl ChainExecutor {
         active_session_snapshot: Arc<std::sync::Mutex<Option<(String, String)>>>,
         toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Result<()> {
-        use std::collections::VecDeque;
-
         let mut work_queue: VecDeque<String> = VecDeque::new();
         let mut resolved: HashMap<String, ResolvedElement> = HashMap::new();
         let mut loop_counters: HashMap<String, u32> = HashMap::new();
         let mut hit_counts: HashMap<String, u32> = HashMap::new();
-        let mut initial_inputs: HashMap<String, String> = HashMap::new();
 
         let mut active_session: Option<String> = None;
         let mut current_session_group_id: Option<String> = None;
@@ -634,30 +631,7 @@ impl ChainExecutor {
                 false
             };
 
-            let merged_input = if let Some(initial) = initial_inputs.get(&element_id) {
-                initial.clone()
-            } else {
-                let inputs: Vec<String> = graph
-                    .incoming_connections(&element_id)
-                    .iter()
-                    .filter_map(|conn| {
-                        if let Some((output, success, active_port)) =
-                            resolved.get(&conn.from_element)
-                        {
-                            if connection_fires(conn, success, *active_port) {
-                                Some(output.clone())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let input = inputs.join("\n\n---\n\n");
-                initial_inputs.insert(element_id.clone(), input.clone());
-                input
-            };
+            let merged_input = collect_merged_input(&element_id, &graph, &resolved);
 
             let block_yolo = node.element.block_config().and_then(|bc| bc.yolo_mode);
             let yolo_mode = block_yolo.unwrap_or(current_session_yolo_mode);
@@ -1012,20 +986,13 @@ impl ChainExecutor {
                 }
             }
 
-            for conn in graph.outgoing_connections(&element_id) {
-                //
-                // Port-gated elements (currently just Loop) fan out only
-                // along the port they activated. A Loop with no edge on
-                // that port simply ends the path, which is what happens
-                // when a chain is authored without an exit branch.
-                //
-                if !connection_fires(conn, &edge_success, active_port) {
-                    continue;
-                }
-                if is_target_ready(&conn.to_element, &graph, &resolved) {
-                    work_queue.push_back(conn.to_element.clone());
-                }
-            }
+            schedule_dependents(
+                &element_id,
+                &graph,
+                &mut resolved,
+                &mut loop_counters,
+                &mut work_queue,
+            );
 
             if work_queue.is_empty() {
                 for (id, node) in &graph.nodes {
@@ -1336,6 +1303,116 @@ impl ChainExecutor {
     }
 }
 
+fn schedule_dependents(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &mut HashMap<String, ResolvedElement>,
+    loop_counters: &mut HashMap<String, u32>,
+    work_queue: &mut VecDeque<String>,
+) {
+    let (_, success, active_port) = resolved[element_id].clone();
+    let outgoing = graph.outgoing_connections(&element_id.to_string());
+    let fired: Vec<_> = outgoing
+        .into_iter()
+        .filter(|conn| connection_fires(conn, &success, active_port))
+        .collect();
+
+    if active_port == Some(LOOP_PORT_RETRY) {
+        //
+        // A new pass must wait for its own branches, without seeing stale
+        // results from the previous pass. Stop at this Loop so its fresh
+        // feedback and the exit branch remain outside the invalidation.
+        //
+        let mut body = HashSet::new();
+        let mut pending: Vec<_> = fired.iter().map(|conn| conn.to_element.clone()).collect();
+        while let Some(id) = pending.pop() {
+            if id == element_id || !body.insert(id.clone()) {
+                continue;
+            }
+            pending.extend(
+                graph
+                    .outgoing_connections(&id)
+                    .iter()
+                    .map(|conn| conn.to_element.clone()),
+            );
+        }
+        for id in &body {
+            resolved.remove(id);
+            loop_counters.remove(id);
+        }
+        work_queue.retain(|id| !body.contains(id));
+    }
+
+    for conn in fired {
+        if is_target_ready(&conn.to_element, graph, resolved)
+            && !work_queue.contains(&conn.to_element)
+        {
+            work_queue.push_back(conn.to_element.clone());
+        }
+    }
+}
+
+fn is_loop_back_edge(conn: &crate::database::ChainConnection, graph: &ExecutionGraph) -> bool {
+    conn.from_port == LOOP_PORT_RETRY
+        && graph
+            .nodes
+            .get(&conn.from_element)
+            .is_some_and(|node| matches!(node.element, ChainElement::Loop { .. }))
+        && graph.is_reachable(&conn.to_element, &conn.from_element)
+}
+
+//
+// An unresolved branch is inactive only when all its inputs are inactive.
+// Pending work and cycles are not considered inactive, so a join still waits
+// for every branch that can produce a result during the current pass.
+//
+
+fn is_inactive_branch(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, ResolvedElement>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    if element_id == graph.trigger_id || !visiting.insert(element_id.to_string()) {
+        return false;
+    }
+    let incoming = graph.incoming_connections(&element_id.to_string());
+    let inactive = !incoming.is_empty()
+        && incoming.iter().all(|conn| {
+            if let Some((_, success, active_port)) = resolved.get(&conn.from_element) {
+                !connection_fires(conn, success, *active_port)
+            } else if is_loop_back_edge(conn, graph) {
+                true
+            } else {
+                is_inactive_branch(&conn.from_element, graph, resolved, visiting)
+            }
+        });
+    visiting.remove(element_id);
+    inactive
+}
+
+//
+// Rebuild inputs on every visit so a repeated body consumes the previous
+// pass's output and the Loop exit carries the final pass's output. Other
+// incoming edges retain their latest values as context, as with any merge.
+//
+
+fn collect_merged_input(
+    element_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, ResolvedElement>,
+) -> String {
+    graph
+        .incoming_connections(&element_id.to_string())
+        .iter()
+        .filter_map(|conn| {
+            let (output, success, active_port) = resolved.get(&conn.from_element)?;
+            connection_fires(conn, success, *active_port).then_some(output.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 //
 // Check whether a connection fires based on its condition, source element's
 // success, and (when the source is port-gated) the selected output port.
@@ -1357,11 +1434,9 @@ fn connection_fires(
 
 //
 // Check if a target element is ready to execute (all forward-edge sources
-// resolved, at least one fires). On first execution of a target (not yet
-// resolved), back-edge sources are skipped. A back-edge is a connection
-// from a source that the target can reach via forward traversal (i.e. they
-// form a cycle). This prevents deadlock in loop structures like
-// Op → Loop → (port 0) → Op.
+// resolved or inactive, at least one fires). Unresolved Loop repeat edges
+// are skipped so the body can run its first pass before reaching the Loop.
+// Other edges in the same cycle still need their current pass's result.
 //
 
 fn is_target_ready(
@@ -1369,7 +1444,6 @@ fn is_target_ready(
     graph: &ExecutionGraph,
     resolved: &HashMap<String, ResolvedElement>,
 ) -> bool {
-    let first_execution = !resolved.contains_key(target_id);
     let incoming = graph.incoming_connections(&target_id.to_string());
     let mut all_required_resolved = true;
     let mut any_fires = false;
@@ -1380,7 +1454,9 @@ fn is_target_ready(
                 any_fires = true;
             }
         } else {
-            if first_execution && graph.is_reachable(target_id, &conn.from_element) {
+            if is_loop_back_edge(conn, graph)
+                || is_inactive_branch(&conn.from_element, graph, resolved, &mut HashSet::new())
+            {
                 continue;
             }
             all_required_resolved = false;
@@ -1440,8 +1516,8 @@ mod tests {
     }
 
     #[test]
-    fn loop_retries_until_max_iterations() {
-        for iteration in 1..=3 {
+    fn loop_repeats_before_max_iterations() {
+        for iteration in 1..3 {
             assert_eq!(
                 loop_active_port(iteration, 3),
                 LOOP_PORT_RETRY,
@@ -1452,19 +1528,19 @@ mod tests {
 
     #[test]
     fn loop_exits_once_iterations_are_exhausted() {
-        assert_eq!(loop_active_port(4, 3), LOOP_PORT_EXIT);
+        assert_eq!(loop_active_port(3, 3), LOOP_PORT_EXIT);
         assert_eq!(loop_active_port(100, 3), LOOP_PORT_EXIT);
     }
 
     //
     // max_iterations = 1 is the smallest value the graph validator accepts
     // (0 is rejected with "max_iterations must be >= 1"), so this is the
-    // real boundary: retry once, then exit.
+    // real boundary: the initial body pass is the only pass.
     //
 
     #[test]
-    fn loop_with_single_iteration_retries_once_then_exits() {
-        assert_eq!(loop_active_port(1, 1), LOOP_PORT_RETRY);
+    fn loop_with_single_iteration_exits_after_initial_pass() {
+        assert_eq!(loop_active_port(1, 1), LOOP_PORT_EXIT);
         assert_eq!(loop_active_port(2, 1), LOOP_PORT_EXIT);
     }
 
@@ -1483,6 +1559,269 @@ mod tests {
                 "iteration {iteration} activated undrawable port {port}"
             );
         }
+    }
+
+    fn loop_graph(connections: Vec<crate::database::ChainConnection>) -> ExecutionGraph {
+        let mut nodes = HashMap::new();
+        for id in connections
+            .iter()
+            .flat_map(|conn| [&conn.from_element, &conn.to_element])
+        {
+            let element = if id.ends_with("loop") {
+                ChainElement::Loop {
+                    id: id.clone(),
+                    max_iterations: 3,
+                }
+            } else {
+                ChainElement::Memory {
+                    id: id.clone(),
+                    key: id.clone(),
+                    mode: crate::database::MemoryMode::Store,
+                }
+            };
+            nodes.insert(
+                id.clone(),
+                super::super::graph::ExecutionNode {
+                    element,
+                    dependencies: Vec::new(),
+                    dependents: Vec::new(),
+                },
+            );
+        }
+        ExecutionGraph {
+            nodes,
+            trigger_id: "trigger".to_string(),
+            connections,
+            session_groups: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn scheduler_waits_for_both_diamond_branches_on_every_pass() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            port_connection("head", "left", 0),
+            port_connection("head", "right", 0),
+            port_connection("right", "slow", 0),
+            port_connection("left", "join", 0),
+            port_connection("slow", "join", 0),
+            port_connection("join", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::new();
+        let mut counters = HashMap::new();
+        let mut queue = VecDeque::from(["trigger".to_string()]);
+        let mut visits: HashMap<String, u32> = HashMap::new();
+        while let Some(id) = queue.pop_front() {
+            let visit = visits.entry(id.clone()).or_default();
+            *visit += 1;
+            assert!(*visit <= 3, "unexpected extra visit to {id}");
+            let input = collect_merged_input(&id, &graph, &resolved);
+            if id == "head" {
+                let expected = if *visit == 1 {
+                    "trigger-1".to_string()
+                } else {
+                    format!("trigger-1\n\n---\n\njoin-{}", *visit - 1)
+                };
+                assert_eq!(input, expected);
+            }
+            if id == "join" {
+                assert_eq!(input, format!("left-{visit}\n\n---\n\nslow-{visit}"));
+            }
+            let (output, port) = if id == "loop" {
+                let counter = counters.entry(id.clone()).or_default();
+                *counter += 1;
+                (input, Some(loop_active_port(*counter, 3)))
+            } else if id == "exit" {
+                assert_eq!(input, "join-3");
+                (input, None)
+            } else {
+                (format!("{id}-{visit}"), None)
+            };
+            resolved.insert(id.clone(), (output, Some(true), port));
+            schedule_dependents(&id, &graph, &mut resolved, &mut counters, &mut queue);
+        }
+        for id in ["head", "left", "right", "slow", "join", "loop"] {
+            assert_eq!(visits[id], 3, "wrong pass count for {id}");
+        }
+        assert_eq!(visits["exit"], 1);
+    }
+
+    #[test]
+    fn scheduler_restarts_nested_loop_count_for_each_outer_pass() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "outer_head", 0),
+            port_connection("outer_head", "inner_head", 0),
+            port_connection("inner_head", "inner_loop", 0),
+            port_connection("inner_loop", "inner_head", LOOP_PORT_RETRY),
+            port_connection("inner_loop", "outer_loop", LOOP_PORT_EXIT),
+            port_connection("outer_loop", "outer_head", LOOP_PORT_RETRY),
+            port_connection("outer_loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::new();
+        let mut counters = HashMap::new();
+        let mut queue = VecDeque::from(["trigger".to_string()]);
+        let mut visits: HashMap<String, u32> = HashMap::new();
+        while let Some(id) = queue.pop_front() {
+            let visit = visits.entry(id.clone()).or_default();
+            *visit += 1;
+            assert!(*visit <= 6, "unexpected extra visit to {id}");
+            let input = collect_merged_input(&id, &graph, &resolved);
+            let (output, port) = if id.ends_with("loop") {
+                let counter = counters.entry(id.clone()).or_default();
+                *counter += 1;
+                let limit = if id == "inner_loop" { 3 } else { 2 };
+                (input, Some(loop_active_port(*counter, limit)))
+            } else if id == "exit" {
+                (input, None)
+            } else {
+                (format!("{id}-{visit}"), None)
+            };
+            resolved.insert(id.clone(), (output, Some(true), port));
+            schedule_dependents(&id, &graph, &mut resolved, &mut counters, &mut queue);
+        }
+        assert_eq!(visits["outer_head"], 2);
+        assert_eq!(visits["outer_loop"], 2);
+        assert_eq!(visits["inner_head"], 6);
+        assert_eq!(visits["inner_loop"], 6);
+        assert_eq!(visits["exit"], 1);
+        assert_eq!(resolved["exit"].0, "inner_head-6");
+    }
+
+    #[test]
+    fn scheduler_drops_previous_pass_results_when_branch_changes() {
+        let mut left = port_connection("head", "left", 0);
+        left.condition = Some(crate::database::ConnectionCondition::OnSuccess);
+        let mut right = port_connection("head", "right", 0);
+        right.condition = Some(crate::database::ConnectionCondition::OnFailure);
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            left,
+            right,
+            port_connection("left", "join", 0),
+            port_connection("right", "join", 0),
+            port_connection("join", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::new();
+        let mut counters = HashMap::new();
+        let mut queue = VecDeque::from(["trigger".to_string()]);
+        let mut pass = 0;
+        let mut joined = Vec::new();
+        while let Some(id) = queue.pop_front() {
+            let input = collect_merged_input(&id, &graph, &resolved);
+            if id == "head" {
+                pass += 1;
+                assert!(pass <= 2);
+            }
+            if id == "join" {
+                joined.push(input.clone());
+            }
+            let (output, port) = if id == "loop" {
+                let counter = counters.entry(id.clone()).or_default();
+                *counter += 1;
+                (input, Some(loop_active_port(*counter, 2)))
+            } else if id == "join" || id == "exit" {
+                (input, None)
+            } else {
+                (format!("{id}-{pass}"), None)
+            };
+            let success = Some(id != "head" || pass == 1);
+            resolved.insert(id.clone(), (output, success, port));
+            schedule_dependents(&id, &graph, &mut resolved, &mut counters, &mut queue);
+        }
+        assert_eq!(joined, ["left-1", "right-2"]);
+        assert_eq!(resolved["exit"].0, "right-2");
+        assert!(!resolved.contains_key("left"));
+    }
+
+    #[test]
+    fn loop_body_feeds_forward_and_exit_receives_final_pass() {
+        let graph = loop_graph(vec![
+            port_connection("trigger", "head", 0),
+            port_connection("head", "tail", 0),
+            port_connection("tail", "loop", 0),
+            port_connection("loop", "head", LOOP_PORT_RETRY),
+            port_connection("loop", "exit", LOOP_PORT_EXIT),
+        ]);
+        let mut resolved = HashMap::from([(
+            "trigger".to_string(),
+            ("seed".to_string(), Some(true), None),
+        )]);
+        let mut previous_output = String::new();
+        let mut body_passes = 0;
+
+        loop {
+            assert!(is_target_ready("head", &graph, &resolved));
+            let head_input = collect_merged_input("head", &graph, &resolved);
+            let expected = if body_passes == 0 {
+                "seed".to_string()
+            } else {
+                format!("seed\n\n---\n\n{previous_output}")
+            };
+            assert_eq!(head_input, expected);
+            let head_output = format!("head({head_input})");
+            resolved.insert("head".to_string(), (head_output.clone(), Some(true), None));
+
+            assert_eq!(collect_merged_input("tail", &graph, &resolved), head_output);
+            previous_output = format!("tail({head_output})");
+            resolved.insert(
+                "tail".to_string(),
+                (previous_output.clone(), Some(true), None),
+            );
+            body_passes += 1;
+            assert!(body_passes <= 3, "Loop exceeded its configured pass count");
+
+            let loop_input = collect_merged_input("loop", &graph, &resolved);
+            assert_eq!(loop_input, previous_output);
+            let port = loop_active_port(body_passes, 3);
+            resolved.insert("loop".to_string(), (loop_input, Some(true), Some(port)));
+            if port == LOOP_PORT_EXIT {
+                break;
+            }
+            assert!(!is_target_ready("exit", &graph, &resolved));
+            assert_eq!(collect_merged_input("exit", &graph, &resolved), "");
+        }
+
+        assert_eq!(body_passes, 3);
+        assert!(is_target_ready("exit", &graph, &resolved));
+        assert_eq!(
+            collect_merged_input("exit", &graph, &resolved),
+            previous_output
+        );
+        assert_eq!(collect_merged_input("head", &graph, &resolved), "seed");
+    }
+
+    #[test]
+    fn merged_input_uses_latest_condition_and_output() {
+        let mut connection = port_connection("body", "next", 0);
+        connection.condition = Some(crate::database::ConnectionCondition::OnSuccess);
+        let graph = graph_with_connection(connection);
+        let mut resolved = HashMap::from([(
+            "body".to_string(),
+            ("first pass".to_string(), Some(true), None),
+        )]);
+        assert_eq!(
+            collect_merged_input("next", &graph, &resolved),
+            "first pass"
+        );
+
+        resolved.insert(
+            "body".to_string(),
+            ("failed pass".to_string(), Some(false), None),
+        );
+        assert_eq!(collect_merged_input("next", &graph, &resolved), "");
+
+        resolved.insert(
+            "body".to_string(),
+            ("final pass".to_string(), Some(true), None),
+        );
+        assert_eq!(
+            collect_merged_input("next", &graph, &resolved),
+            "final pass"
+        );
     }
 
     #[test]

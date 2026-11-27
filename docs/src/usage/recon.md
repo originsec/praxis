@@ -110,7 +110,8 @@ shows:
 Some configurations can be edited directly (like Claude's config.json or MCP
 server definitions). Select the config leaf and press `Ctrl+E` to open it in
 `$VISUAL` or `$EDITOR`; save and exit the editor to write changes to the
-target. See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
+target. On Windows, save to the opened file, close the editor, and press
+Enter in the terminal to apply the changes. See [Terminal UI](./tui.md#nodes-ctrll) for the complete recon
 controls.
 
 This is useful for exploring the offensive impact of configuration changes - adding MCP servers, modifying permissions, changing model settings, or injecting tool configurations.

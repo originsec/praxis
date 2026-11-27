@@ -293,6 +293,7 @@ The `connect` config table:
 | `process_path` | string | Path to the executable |
 | `debug_port_env_var` | string | Environment variable for the debug port argument |
 | `debug_port_format` | string | Format string, e.g. `"--remote-debugging-port={}"` |
+| `debug_port_cli_arg` | string | Alternative CLI argument format, e.g. `"--remote-debugging-port={}"` for Electron or `"--edge-webview-switches=--remote-debugging-port={}"` for M365 Copilot |
 | `base_port` | number | Base port number (random offset added) |
 | `port_range` | number | Range for random port selection (default 778) |
 | `kill_existing` | bool | Kill existing processes first (default true) |
@@ -433,8 +434,7 @@ local function run_create_session(ctx)
 
   local cdp_handle, desktop_handle = devtools.connect({
     process_path = ctx.process_path,
-    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    debug_port_format = "--remote-debugging-port={}",
+    debug_port_cli_arg = "--edge-webview-switches=--remote-debugging-port={}",
     base_port = 9222,
     port_range = 778,
   })

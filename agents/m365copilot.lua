@@ -11,6 +11,15 @@ local TOGGLE_WEB_SELECTOR = 'button[data-testid="toggle-web"]'
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
 
+local function connect(process_path)
+  return devtools.connect({
+    process_path = process_path,
+    debug_port_cli_arg = "--edge-webview-switches=--remote-debugging-port={}",
+    base_port = 9250,
+    port_range = 100,
+  })
+end
+
 local INPUT_SELECTOR = '#m365-chat-editor-target-element'
 local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
 local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
@@ -115,13 +124,7 @@ local function run_create_session(ctx)
   praxis.kill_processes_by_name(PROCESS_NAME)
   praxis.sleep_ms(500)
 
-  local cdp_handle, desktop_handle = devtools.connect({
-    process_path = ctx.process_path,
-    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    debug_port_format = "--remote-debugging-port={}",
-    base_port = 9250,
-    port_range = 100,
-  })
+  local cdp_handle, desktop_handle = connect(ctx.process_path)
   post_initialize(cdp_handle, ctx.working_dir)
 
   return {
@@ -177,13 +180,7 @@ local function do_recon(ctx)
   local discovery_handle = nil
   local discovery_desktop = nil
   local ok, err = pcall(function()
-    discovery_handle, discovery_desktop = devtools.connect({
-      process_path = process_path,
-      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-      debug_port_format = "--remote-debugging-port={}",
-      base_port = 9250,
-      port_range = 100,
-    })
+    discovery_handle, discovery_desktop = connect(process_path)
 
     local toggles = praxis.cdp_evaluate(discovery_handle,
       "(function() {"

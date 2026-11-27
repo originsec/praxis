@@ -23,7 +23,7 @@ pub struct SessionCreateParams {
     pub node: String,
 
     #[schemars(
-        description = "Agent short name (e.g. 'claude-code', 'codex'). ACP sessions are per-agent; each session is bound to the agent it was created with."
+        description = "Agent short name (e.g. 'claudecode', 'codex'). ACP sessions are per-agent; each session is bound to the agent it was created with."
     )]
     pub agent: String,
 

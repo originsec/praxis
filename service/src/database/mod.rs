@@ -473,6 +473,8 @@ impl Database {
         //
         self.migrate_intercept_targets_to_toml().await;
 
+        self.migrate_claude_bridge_targets().await?;
+
         //
         // Migration: drop the recon-result columns that used to back the
         // auto-discovered keys/secrets metadata and the standalone project
@@ -501,6 +503,52 @@ impl Database {
             }
         }
 
+        Ok(())
+    }
+
+    async fn migrate_claude_bridge_targets(&self) -> Result<()> {
+        use self::exec::db_args;
+
+        //
+        // Only rename connector selectors, preserving unknown fields and
+        // unrelated strings such as node IDs and OS filters. ACP bridge
+        // sessions are in memory; historical audit records keep their names.
+        //
+
+        let rows = self
+            .db_fetch_all("SELECT id, target_spec FROM chain_triggers", vec![])
+            .await?;
+        for row in rows {
+            let id: String = row.get("id");
+            let raw: String = row.get("target_spec");
+            let mut target: serde_json::Value = match serde_json::from_str(&raw) {
+                Ok(target) => target,
+                Err(error) => {
+                    common::log_warn!("Cannot migrate bridge target for trigger {}: {}", id, error);
+                    continue;
+                }
+            };
+            let Some(agents) = target
+                .get_mut("agent_short_names")
+                .and_then(serde_json::Value::as_array_mut)
+            else {
+                continue;
+            };
+            let mut changed = false;
+            for agent in agents {
+                if agent.as_str() == Some("claude-code") {
+                    *agent = serde_json::Value::String("claude-bridge".into());
+                    changed = true;
+                }
+            }
+            if changed {
+                self.db_execute(
+                    "UPDATE chain_triggers SET target_spec = $1 WHERE id = $2",
+                    db_args![serde_json::to_string(&target)?, id],
+                )
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -709,11 +757,8 @@ mod foreign_key_tests {
 
     async fn temp_db() -> TempDb {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "praxis_fk_test_{}_{}.db",
-            std::process::id(),
-            n
-        ));
+        let path =
+            std::env::temp_dir().join(format!("praxis_fk_test_{}_{}.db", std::process::id(), n));
         let _ = std::fs::remove_file(&path);
         let db = Database::new(&DatabaseConfig::Sqlite { path: path.clone() })
             .await
@@ -874,5 +919,89 @@ mod foreign_key_tests {
         let n = db.backfill_matches_for_rule(&disabled, 500).await.unwrap();
         assert_eq!(n, 0);
         assert_eq!(match_row_count(db).await, 0);
+    }
+}
+
+#[cfg(test)]
+mod bridge_migration_tests {
+    use super::exec::db_args;
+    use super::{Database, DatabaseConfig, DatabasePool};
+    use serde_json::{Value, json};
+
+    async fn check_bridge_target_migration(db: &Database) {
+        let id = uuid::Uuid::new_v4().to_string();
+        let legacy = json!({
+            "agent_short_names": ["claude-code", "claudecode", "codex", "CLAUDE-CODE"],
+            "node_ids": ["claude-code"],
+            "os_filter": "claude-code",
+            "include_triggering_node": true,
+            "future_field": {"connector": "claude-code"}
+        });
+        let untouched = r#"{ "agent_short_names": ["claudecode", "claude-bridge"] }"#;
+        let fixtures = [
+            ("legacy", legacy.to_string(), 1i32),
+            ("disabled", legacy.to_string(), 0),
+            ("unchanged", untouched.to_string(), 1),
+            ("malformed", "{broken".to_string(), 1),
+        ];
+        for (suffix, target, enabled) in &fixtures {
+            db.db_execute(
+                "INSERT INTO chain_triggers (id, chain_id, trigger_config, target_spec, enabled, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                db_args![format!("{id}-{suffix}"), &id, r#"{"type":"new_node"}"#, target, *enabled, "before", "before"],
+            ).await.unwrap();
+        }
+
+        let mut expected = legacy.clone();
+        expected["agent_short_names"][0] = json!("claude-bridge");
+        for _ in 0..2 {
+            db.run_migrations().await.unwrap();
+            for (suffix, original, enabled) in &fixtures {
+                let row = db
+                    .db_fetch_one(
+                        "SELECT target_spec, enabled, updated_at FROM chain_triggers WHERE id = $1",
+                        db_args![format!("{id}-{suffix}")],
+                    )
+                    .await
+                    .unwrap();
+                let raw: String = row.get("target_spec");
+                if matches!(*suffix, "legacy" | "disabled") {
+                    assert_eq!(serde_json::from_str::<Value>(&raw).unwrap(), expected);
+                } else {
+                    assert_eq!(&raw, original);
+                }
+                assert_eq!(row.get_bool("enabled"), *enabled == 1);
+                assert_eq!(row.get::<String, _>("updated_at"), "before");
+            }
+        }
+        db.db_execute(
+            "DELETE FROM chain_triggers WHERE chain_id = $1",
+            db_args![id],
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn bridge_target_migration_sqlite() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let db = Database {
+            pool: DatabasePool::Sqlite(pool),
+        };
+        db.init_schema().await.unwrap();
+        check_bridge_target_migration(&db).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PRAXIS_TEST_POSTGRES_URL pointing to a disposable test database"]
+    async fn bridge_target_migration_postgres() {
+        let url = std::env::var("PRAXIS_TEST_POSTGRES_URL").unwrap();
+        let db = Database::new(&DatabaseConfig::Postgres { url })
+            .await
+            .unwrap();
+        check_bridge_target_migration(&db).await;
     }
 }

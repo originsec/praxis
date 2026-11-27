@@ -94,6 +94,20 @@ mod tests {
     }
 
     #[test]
+    fn codex_target_covers_api_login_and_websocket_paths() {
+        let targets = parse(default_text()).unwrap();
+        let codex = targets
+            .iter()
+            .find(|t| t.agent_short_name == "codex")
+            .unwrap();
+        assert_eq!(
+            codex.domains,
+            ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+        );
+        assert!(codex.url_pattern.is_none());
+    }
+
+    #[test]
     fn comment_disables_section() {
         let text = "# [claudecode]\n# domains = [\"y\"]\n";
         let targets = parse(text).unwrap();

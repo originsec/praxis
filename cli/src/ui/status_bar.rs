@@ -1,4 +1,4 @@
-use crate::app::{App, Window};
+use crate::app::{App, KeyCapture, Window};
 use crate::keymap::global;
 use crate::ui::chrome;
 use crate::ui::hits::MouseAction;
@@ -77,6 +77,7 @@ fn left_segments(
     node_count: usize,
     session_count: usize,
     active_window: Window,
+    capture: KeyCapture,
 ) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
 
@@ -103,7 +104,11 @@ fn left_segments(
 
     segments.push(Segment::text(vec![Span::raw("    ")]));
 
-    for (i, (key, label, window)) in NAV_PAIRS.iter().enumerate() {
+    for (i, (key, label, window)) in NAV_PAIRS
+        .iter()
+        .enumerate()
+        .filter(|_| capture.allows_navigation())
+    {
         if i > 0 {
             segments.push(Segment::text(vec![chrome::mid_dot()]));
         }
@@ -113,16 +118,22 @@ fn left_segments(
         ));
     }
 
-    segments.push(Segment::text(vec![chrome::mid_dot()]));
-    segments.push(Segment::button(
-        chrome::dim_hint(global::HELP, "help"),
-        MouseAction::OpenHelp,
-    ));
-    segments.push(Segment::text(vec![chrome::mid_dot()]));
-    segments.push(Segment::button(
-        chrome::dim_hint(global::QUIT, "quit"),
-        MouseAction::Quit,
-    ));
+    if capture.allows_help() {
+        if capture.allows_navigation() {
+            segments.push(Segment::text(vec![chrome::mid_dot()]));
+        }
+        segments.push(Segment::button(
+            chrome::dim_hint(global::HELP, "help"),
+            MouseAction::OpenHelp,
+        ));
+    }
+    if capture.allows_quit() {
+        segments.push(Segment::text(vec![chrome::mid_dot()]));
+        segments.push(Segment::button(
+            chrome::dim_hint(global::QUIT, "quit"),
+            MouseAction::Quit,
+        ));
+    }
 
     segments
 }
@@ -153,6 +164,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         app.nodes.nodes.len(),
         app.nodes.sessions.len(),
         app.active_window,
+        app.key_capture(),
     );
 
     //
@@ -215,7 +227,13 @@ mod tests {
     }
 
     fn assert_layout(connected: bool, node_count: usize, session_count: usize, active: Window) {
-        let segments = left_segments(connected, node_count, session_count, active);
+        let segments = left_segments(
+            connected,
+            node_count,
+            session_count,
+            active,
+            KeyCapture::Global,
+        );
         let clickable = clickable_text(&segments);
 
         let expected = [
@@ -250,5 +268,36 @@ mod tests {
         assert_layout(true, 1, 0, Window::Orchestrator);
         assert_layout(false, 0, 0, Window::Settings);
         assert_layout(true, 128, 4096, Window::LogQuery);
+    }
+    #[test]
+    fn captured_keys_have_no_navigation_hints_or_click_targets() {
+        for capture in [
+            KeyCapture::Recon,
+            KeyCapture::Confirm,
+            KeyCapture::RunOptions,
+            KeyCapture::NewOp,
+            KeyCapture::Chain,
+            KeyCapture::Trigger,
+            KeyCapture::Model,
+            KeyCapture::AddRemoteNode,
+            KeyCapture::Rule,
+            KeyCapture::SettingsDropdown,
+            KeyCapture::Popup,
+        ] {
+            let segments = left_segments(true, 1, 0, Window::Nodes, capture);
+            let clickable = clickable_text(&segments);
+            let labels: Vec<_> = clickable.iter().map(|(text, _)| text.as_str()).collect();
+            assert_eq!(labels, ["^h help"], "{capture:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_keeps_quit_and_help_but_help_captures_both() {
+        let segments = left_segments(true, 1, 0, Window::Nodes, KeyCapture::Terminal);
+        let clickable = clickable_text(&segments);
+        let labels: Vec<_> = clickable.iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(labels, ["^h help", "^q quit"]);
+        let segments = left_segments(true, 1, 0, Window::Nodes, KeyCapture::Help);
+        assert!(clickable_text(&segments).is_empty());
     }
 }

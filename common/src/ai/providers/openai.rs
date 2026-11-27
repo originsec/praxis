@@ -84,6 +84,8 @@ impl OpenAIClient {
             top_p: request.top_p,
         };
 
+        log_provider_request("OpenAI", &self.base_url, &body);
+
         //
         // Send request.
         //
@@ -100,12 +102,23 @@ impl OpenAIClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            tracing::debug!(
+                target: "common::ai::provider",
+                "OpenAI response error {} from {}: {}",
+                status,
+                self.base_url,
+                body
+            );
             return Err(anyhow!("OpenAI API error {}: {}", status, body));
         }
 
-        let api_response: OpenAIResponse = response
-            .json()
+        let response_body = response
+            .text()
             .await
+            .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+        log_provider_response("OpenAI", &self.base_url, &response_body);
+
+        let api_response: OpenAIResponse = serde_json::from_str(&response_body)
             .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
         //
@@ -169,6 +182,9 @@ impl OpenAIClient {
             stream: true,
         };
 
+        let base_url = self.base_url.clone();
+        log_provider_request("OpenAI", &base_url, &body);
+
         Box::pin(try_stream! {
             let response = self
                 .http_client
@@ -182,17 +198,75 @@ impl OpenAIClient {
 
             let response = check_response_status(response).await?;
 
+            tracing::debug!(
+                target: "common::ai::provider",
+                "OpenAI stream response start from {} (status {})",
+                base_url,
+                response.status()
+            );
+
             for await delta in parse_sse_stream(response) {
                 yield delta?;
             }
+
+            tracing::debug!(
+                target: "common::ai::provider",
+                "OpenAI stream response end from {}",
+                base_url
+            );
         })
     }
+}
+
+//
+// Wire-level debug dumps for provider traffic. Uses tracing::debug (not the
+// event-log macros) so multi-KB request/response bodies do not flood the
+// centralized application event log when RUST_LOG includes this target.
+//
+
+fn log_provider_request<T: Serialize>(provider: &str, url: &str, body: &T) {
+    match serde_json::to_string(body) {
+        Ok(json) => {
+            tracing::debug!(
+                target: "common::ai::provider",
+                "{} request to {}: {}",
+                provider,
+                url,
+                json
+            );
+        }
+        Err(e) => {
+            tracing::debug!(
+                target: "common::ai::provider",
+                "{} request to {}: <failed to serialize body: {}>",
+                provider,
+                url,
+                e
+            );
+        }
+    }
+}
+
+fn log_provider_response(provider: &str, url: &str, body: &str) {
+    tracing::debug!(
+        target: "common::ai::provider",
+        "{} response from {}: {}",
+        provider,
+        url,
+        body
+    );
 }
 
 async fn check_response_status(response: Response) -> Result<Response> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        tracing::debug!(
+            target: "common::ai::provider",
+            "OpenAI stream response error {}: {}",
+            status,
+            body
+        );
         return Err(anyhow!("OpenAI API error {}: {}", status, body));
     }
     Ok(response)
@@ -229,6 +303,16 @@ fn parse_sse_stream(
             } else {
                 continue;
             };
+
+            //
+            // Raw SSE payload as received from the provider — includes
+            // every delta chunk and the terminal [DONE] marker.
+            //
+            tracing::debug!(
+                target: "common::ai::provider",
+                "OpenAI stream SSE data: {}",
+                data
+            );
 
             if data == "[DONE]" {
                 break;
