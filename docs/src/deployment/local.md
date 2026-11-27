@@ -130,6 +130,14 @@ RUST_LOG=debug cargo run --bin praxis_service
 RUST_LOG=praxis_node::intercept=trace cargo run --bin praxis_node
 ```
 
+To dump full AI provider request and response bodies (Anthropic, Gemini, OpenAI),
+set the provider target. These logs are emitted with `tracing` rather than the
+application event log, so multi-KB payloads stay out of the event log:
+
+```bash
+RUST_LOG=common::ai::provider=debug cargo run --bin praxis_service
+```
+
 ## Common Issues
 
 ### RabbitMQ connection failed
